@@ -232,40 +232,44 @@ int main() {
 
     MultibodySystem& system = dude.m_system;
 
-    Visualizer viz(system);
+    // Add visualization.
+    // Visualizer viz(system);
+    // system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
+
+    // Visualizer viz(system);
    
-    printf("\n\n***************************************************************\n");
-    printf(    "use arrow keys and page up/down to control green gravity vector\n");
-    printf(    "***************************************************************\n\n");
+    // printf("\n\n***************************************************************\n");
+    // printf(    "use arrow keys and page up/down to control green gravity vector\n");
+    // printf(    "***************************************************************\n\n");
 
-    // This menu does nothing.
-    Array_< std::pair<std::string,int> > items;
-    items.push_back(std::make_pair("One", 1));
-    items.push_back(std::make_pair("Top/SubA/first", 2));
-    items.push_back(std::make_pair("Top/SubA/second", 3));
-    items.push_back(std::make_pair("Top/SubB/only", 4));
-    items.push_back(std::make_pair("Two", 5));
-    viz.addMenu("Test Menu", 1, items);
+    // // This menu does nothing.
+    // Array_< std::pair<std::string,int> > items;
+    // items.push_back(std::make_pair("One", 1));
+    // items.push_back(std::make_pair("Top/SubA/first", 2));
+    // items.push_back(std::make_pair("Top/SubA/second", 3));
+    // items.push_back(std::make_pair("Top/SubB/only", 4));
+    // items.push_back(std::make_pair("Two", 5));
+    // viz.addMenu("Test Menu", 1, items);
 
 
-    // This is for per-frame camera control and single-frame geometry.
-    viz.addFrameController(new MyFrameController(dude.m_matter, 
-        MobilizedBodyIndex(1), dude.m_gravity));
+    // // This is for per-frame camera control and single-frame geometry.
+    // viz.addFrameController(new MyFrameController(dude.m_matter, 
+    //     MobilizedBodyIndex(1), dude.m_gravity));
 
-    viz.setRealTimeScale(TimeScale);
-    //viz.setDesiredBufferLengthInSec(.15);
-    viz.setDesiredFrameRate(FrameRate);
-    //viz.setMode(Visualizer::Sampling);
-    viz.setMode(Visualizer::RealTime);
+    // viz.setRealTimeScale(TimeScale);
+    // //viz.setDesiredBufferLengthInSec(.15);
+    // viz.setDesiredFrameRate(FrameRate);
+    // //viz.setMode(Visualizer::Sampling);
+    // viz.setMode(Visualizer::RealTime);
 
-    // Use this for communication of user input from the GUI to the simulation.
-    // Both the Visualizer and the simulation must know about it.
-    Visualizer::InputSilo* silo = new Visualizer::InputSilo();
-    viz.addInputListener(silo);
+    // // Use this for communication of user input from the GUI to the simulation.
+    // // Both the Visualizer and the simulation must know about it.
+    // Visualizer::InputSilo* silo = new Visualizer::InputSilo();
+    // viz.addInputListener(silo);
 
-    system.addEventHandler(
-        new UserInputHandler(*silo, dude.m_gravity, 0.1)); // 100ms
-    system.addEventReporter(new Visualizer::Reporter(viz, TimeScale/FrameRate));
+    // system.addEventHandler(
+    //     new UserInputHandler(*silo, dude.m_gravity, 0.1)); // 100ms
+    // system.addEventReporter(new Visualizer::Reporter(viz, TimeScale/FrameRate));
      
     // Initialize the system and state.
 
@@ -289,11 +293,13 @@ int main() {
 
     double cpuStart = cpuTime();
     double realStart = realTime();
-    ts.stepTo(Infinity);
+    double finalTime = 20.0;
+    ts.stepTo(finalTime);
     std::cout << "cpu time:  "<<cpuTime()-cpuStart<< std::endl;
     std::cout << "real time: "<<realTime()-realStart<< std::endl;
+    std::cout << "real time factor: "<<(finalTime/(realTime()-realStart))<< std::endl;
     std::cout << "steps:     "<<integ.getNumStepsTaken()<< std::endl;
-    viz.dumpStats(std::cout);
+    // viz.dumpStats(std::cout);
 
     std::cout << "Type something to quit: ";
     char ch; std::cin >> ch;
