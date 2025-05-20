@@ -6,7 +6,7 @@
  * Biological Structures at Stanford, funded under the NIH Roadmap for        *
  * Medical Research, grant U54 GM072970. See https://simtk.org/home/simbody.  *
  *                                                                            *
- * Portions copyright (c) 2011-12 Stanford University and the Authors.        *
+ * Portions copyright (c) 2011-25 Stanford University and the Authors.        *
  * Authors: Nicholas Bianco                                                   *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -33,7 +33,11 @@ using namespace SimTK;
 
 class PointPathMuscle : public Force::Custom::Implementation {
 public:
-    PointPathMuscle(const SimbodyMatterSubsystem& matter);
+    PointPathMuscle(const SimbodyMatterSubsystem& matter,
+                    const Real& maxIsometricForce,
+                    const Real& optimalFiberLength,
+                    const Real& tendonSlackLength,
+                    const Real& pennationAngle);
 
     void addPoint(MobilizedBodyIndex body, const Vec3& station);
 
@@ -56,15 +60,64 @@ public:
         return m_matter.getMobilizedBody(body);
     }
 
+    Real calcTendonForce(const Real& tendonLength) const;
+    Real calcActiveForceLengthMultiplier(const Real& normalizedFiberLength) const;
+    Real calcActiveForceVelocityMultiplier(const Real& normalizedFiberVelocity) const;
+    Real calcPassiveForceLengthMultiplier(const Real& normalizedFiberLength) const;
+    Real calcFiberForce(const Real& activation,
+                        const Real& normalizedFiberLength,
+                        const Real& normalizedFiberVelocity) const;
+
+    void realizeTopology(State& state) const override {
+        m_actIx = m_matter.allocateZ(state, Vector(1, Real(0)));
+    }
+
+    void realizeAcceleration(const State& state) const override {
+        const Real excitation = 0.1;
+        const Real activation = getActivation(state);
+
+        m_matter.updZDot(state)[m_actIx] = 
+            (excitation - activation) * (c1*excitation + c2);
+    }
+
+    Real getActivation(const State& state) const {
+        return m_matter.getZ(state)[m_actIx];
+    }
+
 private:
     Array_<MobilizedBodyIndex> m_bodies;
     Array_<Vec3> m_stations;
 
     const SimbodyMatterSubsystem& m_matter;
 
-    Real m_k = 5000;
-    Real m_d = 100;
-    Real m_x0 = 0.1;
+    Real m_maxIsometricForce;
+    Real m_optimalFiberLength;
+    Real m_tendonSlackLength;
+    Real m_cosPennationAngle;
+    Real m_vmax = 10.0;
+    Real m_fiberDamping = 0.1;
+
+    // Tendon force-length curve.
+    constexpr static Real cT1 = 260.972;
+    constexpr static Real cT2 = 7.9706;
+    // Fiber active force-length curve.
+    constexpr static Real cL1 = 1.5;
+    constexpr static Real cL2 = -2.75;
+    constexpr static Real r1 = 0.46899;
+    constexpr static Real r2 = 1.80528;
+    // Fiber active force-velocity curve.
+    constexpr static Real cV1 = 0.227;
+    constexpr static Real cV2 = 0.5;
+    constexpr static Real Fvmax = 1.6;
+    // Fiber passive force-length curve.
+    constexpr static Real cP1 = 1.08027;
+    constexpr static Real cP2 = 1.27368;
+    // Activation dynamics.
+    constexpr static Real c1 = 75;
+    constexpr static Real c2 = 25;
+
+    // Topology cache; written only once by realizeTopology().
+    mutable ZIndex m_actIx;
 };
 
 
@@ -82,8 +135,9 @@ public:
                    Gastroc_L, Soleus_L, TibAnt_L};
 
     static const int NBodyType = Torso-LeftFoot+1;
+    static const int NContacts = 3;
 
-    Gait3D();
+    Gait3D(bool useExponentialSpringContact);
 
     void loadDefaultState(State& state);
 
@@ -105,13 +159,15 @@ public:
 private:
     static Real massData[NBodyType];
     static Vec3 inertiaData[NBodyType];
+    static Vec3 leftContactPoints[NContacts], rightContactPoints[NContacts];
 };
 
 
 //////////////////////////////////////////////////////////////////////////
 int main() {
   try {
-    Gait3D model;
+    bool useExponentialSpringContact = true;
+    Gait3D model(useExponentialSpringContact);
 
     MultibodySystem& system = model.m_system; 
     
@@ -128,8 +184,9 @@ int main() {
     // viz.report(state);
 
     // Simulate it.
+    CPodesIntegrator integ(system);
     // RungeKuttaMersonIntegrator integ(system);
-    SemiExplicitEuler2Integrator integ(system);
+    // SemiExplicitEuler2Integrator integ(system);
     integ.setAccuracy(.01);
     TimeStepper ts(system, integ);
     ts.initialize(state);
@@ -155,21 +212,34 @@ Real Gait3D::massData[] = {1.25, 1.25, 3.7075, 3.7075, 9.3014, 9.3014,
                            11.777, 34.2366};
 
 Vec3 Gait3D::inertiaData[] = {Vec3(0.0014, 0.0039, 0.0041),
-                             Vec3(0.0014, 0.0039, 0.0041),
-                             Vec3(0.0504, 0.0051, 0.0511),
-                             Vec3(0.0504, 0.0051, 0.0511),
-                             Vec3(0.1339, 0.0351, 0.1412),
-                             Vec3(0.1339, 0.0351, 0.1412),
-                             Vec3(0.1028, 0.0871, 0.0579),
-                             Vec3(1.4745, 0.7555, 1.4314)};
+                              Vec3(0.0014, 0.0039, 0.0041),
+                              Vec3(0.0504, 0.0051, 0.0511),
+                              Vec3(0.0504, 0.0051, 0.0511),
+                              Vec3(0.1339, 0.0351, 0.1412),
+                              Vec3(0.1339, 0.0351, 0.1412),
+                              Vec3(0.1028, 0.0871, 0.0579),
+                              Vec3(1.4745, 0.7555, 1.4314)};
 
+Vec3 Gait3D::leftContactPoints[] = {Vec3(-0.085, -0.015, 0.005), // heel
+                                    Vec3(0.0425, -0.03, -0.041), // lateral toe
+                                    Vec3(0.085, -0.03, 0.0275)}; // medial toe
+                                  
+Vec3 Gait3D::rightContactPoints[] = {Vec3(-0.085, -0.015, -0.005),
+                                     Vec3(0.0425, -0.03, 0.041),
+                                     Vec3(0.085, -0.03, -0.0275)};
 
-Gait3D::Gait3D()
+Gait3D::Gait3D(bool useExponentialSpringContact)
 :   m_matter(m_system), m_forces(m_system), m_tracker(m_system), 
     m_contactForces(m_system, m_tracker), m_viz(m_system),
     m_gravity(m_forces, m_matter, -YAxis, 9.81),
     m_mass(NBodyType, massData), m_inertia(NBodyType, inertiaData)
 {
+    // Contact parameters.
+    const Real stiffness = 5e6;
+    const Real dissipation = 1.0;
+    const Real mu_static = 0.9;
+    const Real mu_dynamic = 0.6;
+    const Real mu_viscous = 0.0;
     const Real transitionVelocity = .1;
     m_contactForces.setTransitionVelocity(transitionVelocity);
 
@@ -191,68 +261,68 @@ Gait3D::Gait3D()
     m_body[RightFoot] = Body::Rigid(MassProperties(m_mass[RightFoot],  Vec3(0),
         Inertia(m_inertia[RightFoot])));
 
+    if (!useExponentialSpringContact) {
+        // Add ContactSurfaces to the feet.
+        ContactCliqueId clique1 = ContactSurface::createNewContactClique();
+        ContactMaterial material(stiffness, dissipation, mu_static, 
+                                mu_dynamic, mu_viscous);
 
-    // Add ContactSurfaces to the feet.
-    ContactCliqueId clique1 = ContactSurface::createNewContactClique();
-    ContactMaterial material(5e6,  // stiffness
-                             1.0,  // dissipation
-                             0.9,  // mu_static
-                             0.6,  // mu_dynamic
-                             0.0); // mu_viscous
+        // Left foot
+        // ---------
+        // Heel sphere
+        m_body[LeftFoot].addContactSurface(leftContactPoints[0],
+            ContactSurface(ContactGeometry::Sphere(0.03), material)
+            .joinClique(clique1));
+        m_body[LeftFoot].addDecoration(leftContactPoints[0],
+            DecorativeSphere(0.03).setColor(Green));
 
-    // Left foot
-    // ---------
-    // Heel sphere
-    m_body[LeftFoot].addContactSurface(Vec3(-0.085, -0.015, 0.005),
-        ContactSurface(ContactGeometry::Sphere(0.03), material)
-        .joinClique(clique1));
-    m_body[LeftFoot].addDecoration(Vec3(-0.085, -0.015, 0.005),
-        DecorativeSphere(0.03).setColor(Green));
+        // Lateral toe sphere
+        m_body[LeftFoot].addContactSurface(leftContactPoints[1],
+            ContactSurface(ContactGeometry::Sphere(0.02), material)
+            .joinClique(clique1));
+        m_body[LeftFoot].addDecoration(leftContactPoints[1],
+            DecorativeSphere(0.02).setColor(Green));
 
-    // Lateral toe sphere
-    m_body[LeftFoot].addContactSurface(Vec3(0.0425, -0.03, -0.041),
-        ContactSurface(ContactGeometry::Sphere(0.02), material)
-        .joinClique(clique1));
-    m_body[LeftFoot].addDecoration(Vec3(0.0425, -0.03, -0.041),
-        DecorativeSphere(0.02).setColor(Green));
+        // Medial toe sphere
+        m_body[LeftFoot].addContactSurface(leftContactPoints[2],
+            ContactSurface(ContactGeometry::Sphere(0.02), material)
+            .joinClique(clique1));
+        m_body[LeftFoot].addDecoration(leftContactPoints[2],
+            DecorativeSphere(0.02).setColor(Green));
 
-    // Medial toe sphere
-    m_body[LeftFoot].addContactSurface(Vec3(0.085, -0.03, 0.0275),
-        ContactSurface(ContactGeometry::Sphere(0.02), material)
-        .joinClique(clique1));
-    m_body[LeftFoot].addDecoration(Vec3(0.085, -0.03, 0.0275),
-        DecorativeSphere(0.02).setColor(Green));
+        // Right foot
+        // ----------
+        // Heel sphere
+        m_body[RightFoot].addContactSurface(rightContactPoints[0],
+            ContactSurface(ContactGeometry::Sphere(0.03), material)
+            .joinClique(clique1));
+        m_body[RightFoot].addDecoration(rightContactPoints[0],
+            DecorativeSphere(0.03).setColor(Green));
 
-    // Right foot
-    // ----------
-    // Heel sphere
-    m_body[RightFoot].addContactSurface(Vec3(-0.085, -0.015, -0.005),
-        ContactSurface(ContactGeometry::Sphere(0.03), material)
-        .joinClique(clique1));
-    m_body[RightFoot].addDecoration(Vec3(-0.085, -0.015, -0.005),
-        DecorativeSphere(0.03).setColor(Green));
+        // Lateral toe sphere
+        m_body[RightFoot].addContactSurface(rightContactPoints[1],
+            ContactSurface(ContactGeometry::Sphere(0.02), material)
+            .joinClique(clique1));
+        m_body[RightFoot].addDecoration(rightContactPoints[1],
+            DecorativeSphere(0.02).setColor(Green));
 
-    // Lateral toe sphere
-    m_body[RightFoot].addContactSurface(Vec3(0.0425, -0.03, 0.041),
-        ContactSurface(ContactGeometry::Sphere(0.02), material)
-        .joinClique(clique1));
-    m_body[RightFoot].addDecoration(Vec3(0.0425, -0.03, 0.041),
-        DecorativeSphere(0.02).setColor(Green));
+        // Medial toe sphere
+        m_body[RightFoot].addContactSurface(rightContactPoints[2],
+            ContactSurface(ContactGeometry::Sphere(0.02), material)
+            .joinClique(clique1));
+        m_body[RightFoot].addDecoration(rightContactPoints[2],
+            DecorativeSphere(0.02).setColor(Green));
 
-    // Medial toe sphere
-    m_body[RightFoot].addContactSurface(Vec3(0.085, -0.03, -0.0275),
-        ContactSurface(ContactGeometry::Sphere(0.02), material)
-        .joinClique(clique1));
-    m_body[RightFoot].addDecoration(Vec3(0.085, -0.03, -0.0275),
-        DecorativeSphere(0.02).setColor(Green));
+        // Half space
+        // ----------
+        // Half space normal is -x; must rotate to make it +y.
+        m_matter.Ground().updBody().addContactSurface(Rotation(-Pi/2,ZAxis),
+        ContactSurface(ContactGeometry::HalfSpace(), material));
+    }
 
-    // Half space
-    // ----------
-    // Half space normal is -x; must rotate to make it +y.
-    m_matter.Ground().updBody().addContactSurface(Rotation(-Pi/2,ZAxis),
-       ContactSurface(ContactGeometry::HalfSpace(), material));
-
-    // Now create the MobilizedBodies (bodies + joints).
+    // Mobilized bodies
+    // ----------------
+    // Add pelvis.
     m_mobod[Pelvis] = MobilizedBody::Free(m_matter.Ground(), m_body[Pelvis]);
 
     // Add torso.
@@ -282,15 +352,40 @@ Gait3D::Gait3D()
             m_mobod[RightShank], Transform(Vec3(0, -0.2433, 0)),
             m_body[RightFoot], Transform(Vec3(-0.05123, 0.01195, -0.00792)));
 
-    DecorativeLine baseLine;
-    baseLine.setColor(Red).setLineThickness(4).setOpacity(.2);
+    // We need the mobilized bodies to add exponential spring forces.
+    if (useExponentialSpringContact) {
+        Transform groundFrame(Rotation(-0.5*Pi, XAxis), Vec3(0));
+
+        ExponentialSpringParameters params;
+        params.setNormalViscosity(dissipation);
+        // params.setFrictionViscosity(dissipation);
+        params.setInitialMuStatic(mu_static);
+        params.setInitialMuKinetic(mu_dynamic);
+        // params.setSettleVelocity(transitionVelocity);
+
+        ExponentialSpringForce leftHeel(m_forces, groundFrame, 
+                m_mobod[LeftFoot], leftContactPoints[0], params);
+        ExponentialSpringForce leftLateralToe(m_forces, groundFrame, 
+                m_mobod[LeftFoot], leftContactPoints[1], params);
+        ExponentialSpringForce leftMedialToe(m_forces, groundFrame, 
+                m_mobod[LeftFoot], leftContactPoints[2], params);
+
+        ExponentialSpringForce rightHeel(m_forces, groundFrame, 
+                m_mobod[RightFoot], rightContactPoints[0], params);
+        ExponentialSpringForce rightLateralToe(m_forces, groundFrame,
+                m_mobod[RightFoot], rightContactPoints[1], params);
+        ExponentialSpringForce rightMedialToe(m_forces, groundFrame,
+                m_mobod[RightFoot], rightContactPoints[2], params);
+    }
 
     // Muscles
     // -------
+    DecorativeLine baseLine;
+    baseLine.setColor(Red).setLineThickness(4).setOpacity(.2);
     PointPathMuscle* muscle;
 
     // glut_med_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2045, 0.0733, 0.066, 0.3578);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(-0.0148, 0.0445, 0.0766));
     muscle->addPoint(m_mobod[RightThigh], Vec3(-0.0258, 0.1642, 0.0527));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -298,7 +393,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // add_mag_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2268, 0.087, 0.06, 0.0872665);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(-0.0025, -0.1174, 0.0255));
     muscle->addPoint(m_mobod[RightThigh], Vec3(-0.0045, 0.0489, 0.0339));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -306,7 +401,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // hamstrings_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2594, 0.0976, 0.319, 0.2025);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(-0.05526, -0.10257, 0.06944));
     muscle->addPoint(m_mobod[RightShank], Vec3(-0.028, 0.1667, 0.02943));
     muscle->addPoint(m_mobod[RightShank], Vec3(-0.021, 0.1467, 0.0343));
@@ -315,7 +410,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // bifemsh_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 804, 0.1103, 0.095, 0.2147);
     muscle->addPoint(m_mobod[RightThigh], Vec3(0.005, -0.0411, 0.0234));
     muscle->addPoint(m_mobod[RightShank], Vec3(-0.028, 0.1667, 0.02943));
     muscle->addPoint(m_mobod[RightShank], Vec3(-0.021, 0.1467, 0.0343));
@@ -324,7 +419,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // glut_max_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1944, 0.1569, 0.111, 0.3822);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(-0.0642, 0.0176, 0.0563));
     muscle->addPoint(m_mobod[Pelvis],     Vec3(-0.0669, -0.052, 0.0914));
     muscle->addPoint(m_mobod[RightThigh], Vec3(-0.0426, 0.117, 0.0293));
@@ -334,7 +429,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // iliopsoas_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2186, 0.1066, 0.152, 0.2496);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(0.006, 0.0887, 0.0289));
     muscle->addPoint(m_mobod[Pelvis],     Vec3(0.0407, -0.01, 0.076));
     muscle->addPoint(m_mobod[RightThigh], Vec3(0.033, 0.135, 0.0038));
@@ -344,7 +439,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // rect_fem_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1169, 0.0759, 0.3449, 0.2426);
     muscle->addPoint(m_mobod[Pelvis],     Vec3(0.0412, -0.0311, 0.0968));
     muscle->addPoint(m_mobod[RightThigh], Vec3(0.038, -0.17, 0.004));
     muscle->addPoint(m_mobod[RightShank], Vec3(0.038, 0.2117, 0.0018));
@@ -353,7 +448,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // vasti_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 4530, 0.0993, 0.1231, 0.0785);
     muscle->addPoint(m_mobod[RightThigh], Vec3(0.029, -0.0224, 0.031));
     muscle->addPoint(m_mobod[RightThigh], Vec3(0.038, -0.17, 0.007));
     muscle->addPoint(m_mobod[RightShank], Vec3(0.038, 0.2117, 0.0018));
@@ -362,7 +457,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // gastroc_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2241, 0.051, 0.384, 0.1728);
     muscle->addPoint(m_mobod[RightThigh], Vec3(-0.02, -0.218, -0.024));
     muscle->addPoint(m_mobod[RightFoot],  Vec3(-0.095, 0.001, -0.0053));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -370,7 +465,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // soleus_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 3549, 0.044, 0.248, 0.4939);
     muscle->addPoint(m_mobod[RightShank], Vec3(-0.0024, 0.0334, 0.0071));
     muscle->addPoint(m_mobod[RightFoot],  Vec3(-0.095, 0.001, -0.0053));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -378,7 +473,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // tib_ant_r
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1579, 0.0683, 0.243, 0.1676);
     muscle->addPoint(m_mobod[RightShank], Vec3(0.0179, 0.0243, 0.0115));
     muscle->addPoint(m_mobod[RightShank], Vec3(0.0329, -0.2084, -0.0177));
     muscle->addPoint(m_mobod[RightFoot],  Vec3(0.0166, -0.0122, -0.0305));
@@ -387,7 +482,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // glut_med_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2045, 0.0733, 0.066, 0.3578);
     muscle->addPoint(m_mobod[Pelvis],    Vec3(-0.0148, 0.0445, -0.0766));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(-0.0258, 0.1642, -0.0527));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -395,7 +490,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // add_mag_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2268, 0.087, 0.06, 0.0872665);
     muscle->addPoint(m_mobod[Pelvis],    Vec3(-0.0025, -0.1174, -0.0255));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(-0.0045, 0.0489, -0.0339));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -403,7 +498,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // hamstrings_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2594, 0.0976, 0.319, 0.2025);
     muscle->addPoint(m_mobod[Pelvis],   Vec3(-0.05526, -0.10257, -0.06944));
     muscle->addPoint(m_mobod[LeftShank], Vec3(-0.028, 0.1667, -0.02943));
     muscle->addPoint(m_mobod[LeftShank], Vec3(-0.021, 0.1467, -0.0343));
@@ -412,7 +507,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // bifemsh_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 804, 0.1103, 0.095, 0.2147);
     muscle->addPoint(m_mobod[LeftThigh], Vec3(0.005, -0.0411, -0.0234));
     muscle->addPoint(m_mobod[LeftShank], Vec3(-0.028, 0.1667, -0.02943));
     muscle->addPoint(m_mobod[LeftShank], Vec3(-0.021, 0.1467, -0.0343));
@@ -421,7 +516,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // glut_max_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1944, 0.1569, 0.111, 0.3822);
     muscle->addPoint(m_mobod[Pelvis],    Vec3(-0.0642, 0.0176, -0.0563));
     muscle->addPoint(m_mobod[Pelvis],    Vec3(-0.0669, -0.052, -0.0914));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(-0.0426, 0.117, -0.0293));
@@ -431,7 +526,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // iliopsoas_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2186, 0.1066, 0.152, 0.2496);
     muscle->addPoint(m_mobod[Pelvis],    Vec3(0.006, 0.0887, -0.0289));
     muscle->addPoint(m_mobod[Pelvis],    Vec3(0.0407, -0.01, -0.076));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(0.033, 0.135, -0.0038));
@@ -441,7 +536,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // rect_fem_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1169, 0.0759, 0.3449, 0.2426);
     muscle->addPoint(m_mobod[Pelvis],    Vec3(0.0412, -0.0311, -0.0968));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(0.038, -0.17, -0.004));
     muscle->addPoint(m_mobod[LeftShank], Vec3(0.038, 0.2117, -0.0018));
@@ -450,7 +545,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // vasti_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 4530, 0.0993, 0.1231, 0.0785);
     muscle->addPoint(m_mobod[LeftThigh], Vec3(0.029, -0.0224, -0.031));
     muscle->addPoint(m_mobod[LeftThigh], Vec3(0.038, -0.17, -0.007));
     muscle->addPoint(m_mobod[LeftShank], Vec3(0.038, 0.2117, -0.0018));
@@ -459,7 +554,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // gastroc_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 2241, 0.051, 0.384, 0.1728);
     muscle->addPoint(m_mobod[LeftThigh], Vec3(-0.02, -0.218, 0.024));
     muscle->addPoint(m_mobod[LeftFoot],  Vec3(-0.095, 0.001, 0.0053));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -467,7 +562,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // soleus_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 3549, 0.044, 0.248, 0.4939);
     muscle->addPoint(m_mobod[LeftShank], Vec3(-0.0024, 0.0334, -0.0071));
     muscle->addPoint(m_mobod[LeftFoot],  Vec3(-0.095, 0.001, 0.0053));
     muscle->addDecorativeLines(m_viz, baseLine);
@@ -475,7 +570,7 @@ Gait3D::Gait3D()
     Force::Custom(m_forces, muscle);
 
     // tib_ant_l
-    muscle = new PointPathMuscle(m_matter);
+    muscle = new PointPathMuscle(m_matter, 1579, 0.0683, 0.243, 0.1676);
     muscle->addPoint(m_mobod[LeftShank], Vec3(0.0179, 0.0243, -0.0115));
     muscle->addPoint(m_mobod[LeftShank], Vec3(0.0329, -0.2084, 0.0177));
     muscle->addPoint(m_mobod[LeftFoot],  Vec3(0.0166, -0.0122, 0.0305));
@@ -510,8 +605,15 @@ void Gait3D::loadDefaultState(State& state) {
 
 //////////////////////////////////////////////////////////////////////////
 
-PointPathMuscle::PointPathMuscle(const SimbodyMatterSubsystem& matter) : 
-        m_matter(matter) {
+PointPathMuscle::PointPathMuscle(const SimbodyMatterSubsystem& matter,
+                                 const Real& maxIsometricForce,
+                                 const Real& optimalFiberLength,
+                                 const Real& tendonSlackLength,
+                                 const Real& pennationAngle) : 
+        m_matter(matter), m_maxIsometricForce(maxIsometricForce),
+        m_optimalFiberLength(optimalFiberLength), 
+        m_tendonSlackLength(tendonSlackLength),
+        m_cosPennationAngle(std::cos(pennationAngle)) {
     m_bodies.resize(0);
     m_stations.resize(0);
 }
@@ -519,6 +621,61 @@ PointPathMuscle::PointPathMuscle(const SimbodyMatterSubsystem& matter) :
 void PointPathMuscle::addPoint(MobilizedBodyIndex body, const Vec3& station) {
     m_bodies.push_back(body);
     m_stations.push_back(station);
+}
+
+Real PointPathMuscle::calcTendonForce(const Real& tendonLength) const {
+    const Real tendonStrain = tendonLength > m_tendonSlackLength ? 
+            (tendonLength - m_tendonSlackLength) / m_tendonSlackLength : 0;    
+    return m_maxIsometricForce * tendonStrain * (cT1*tendonStrain + cT2);
+}
+
+Real PointPathMuscle::calcActiveForceLengthMultiplier(
+        const Real& normalizedFiberLength) const {
+    if (r1 < normalizedFiberLength && normalizedFiberLength < r2) {
+        Real fiberStrain = normalizedFiberLength - 1.0;
+        Real fiberStrainSquared = fiberStrain*fiberStrain;
+        Real fiberStrainCubed = fiberStrainSquared*fiberStrain;
+        return cL1*fiberStrainCubed + cL2*fiberStrainSquared + 1.0;
+    } else {
+        return 0;       
+    }
+}
+
+Real PointPathMuscle::calcActiveForceVelocityMultiplier(
+        const Real& normalizedFiberVelocity) const {
+    if (normalizedFiberVelocity >= 0) {
+        return Fvmax*normalizedFiberVelocity + cV2 / 
+                   (cV2 + normalizedFiberVelocity);
+    } else if (-1.0 < normalizedFiberVelocity && normalizedFiberVelocity < 0.0) {
+        return cV1*(normalizedFiberVelocity + 1.0) / 
+                   (cV1 - normalizedFiberVelocity);
+    } else {
+        return 0;
+    }
+}
+
+Real PointPathMuscle::calcPassiveForceLengthMultiplier(
+        const Real& normalizedFiberLength) const {
+    if (normalizedFiberLength > 1.0) {
+        Real fiberStrain = normalizedFiberLength - 1.0;
+        Real fiberStrainSquared = fiberStrain*fiberStrain;
+        Real fiberStrainCubed = fiberStrainSquared*fiberStrain;
+        return cP1*fiberStrainCubed + cP2*fiberStrainSquared;
+    } else {
+        return 0;       
+    }
+}
+
+Real PointPathMuscle::calcFiberForce(const Real& activation,
+                                     const Real& normalizedFiberLength,
+                                     const Real& normalizedFiberVelocity) const {
+    const Real fl = calcActiveForceLengthMultiplier(normalizedFiberLength);
+    const Real fv = calcActiveForceVelocityMultiplier(normalizedFiberVelocity);
+    const Real fp = calcPassiveForceLengthMultiplier(normalizedFiberLength);
+    const Real fd = m_fiberDamping * normalizedFiberVelocity;
+
+    return m_maxIsometricForce * (activation*fl*fv + fp + fd) 
+                               * m_cosPennationAngle;
 }
 
 void PointPathMuscle::calcForce(const State& state,
@@ -557,41 +714,26 @@ void PointPathMuscle::calcForce(const State& state,
         v1_G = v2_G;
     }
 
-    const Real stretch   = length - m_x0;  // + -> tension, - -> compression
-    const Real frcStretch = m_k*stretch;  // k(x-x0)
-    const Real frcDamp = m_d*lengthDot; // c*v
+    // Rigid tendon.
+    const Real fiberLength = length - m_tendonSlackLength;
+    const Real normalizedFiberLength = fiberLength / m_optimalFiberLength;
+    const Real normalizedFiberVelocity = 
+        lengthDot / (m_vmax * m_optimalFiberLength);
+
+    const Real activation = getActivation(state);
+    const Real fiberForce = calcFiberForce(activation, 
+        normalizedFiberLength, normalizedFiberVelocity);
 
     for (int i = 1; i < m_bodies.size(); ++i) {
-        const Vec3 f_G = (frcStretch + frcDamp) * dirs[i-1];
-
+        const Vec3 f_G = fiberForce * dirs[i-1];
         bodyForces[m_bodies[i-1]] +=  SpatialVec(s_G[i-1] % f_G, f_G);
         bodyForces[m_bodies[i]]   -=  SpatialVec(s_G[i] % f_G, f_G);
     }
 }
 
 Real PointPathMuscle::calcPotentialEnergy(const State& state) const {
-
-    Real length = 0;
-    const MobilizedBody& body1 = getMobilizedBody(m_bodies[0]);
-    const Transform& X_GB1 = body1.getBodyTransform(state);
-    Vec3 s1_G = X_GB1.R() * m_stations[0];
-    Vec3 p1_G = X_GB1.p() + s1_G;
-    for (int i = 1; i < m_bodies.size(); ++i) {
-        const MobilizedBody& body2 = getMobilizedBody(m_bodies[i]);
-        const Transform& X_GB2 = body2.getBodyTransform(state);
-        const Vec3 s2_G = X_GB2.R() * m_stations[i];
-        const Vec3 p2_G = X_GB2.p() + s2_G;
-        const Vec3 r_G = p2_G - p1_G; // vector from point1 to point2
-
-        const Real dist = r_G.norm(); 
-        length += dist; 
-
-        s1_G = s2_G;
-        p1_G = p2_G;
-    }
-
-    const Real stretch = length - m_x0;  // + -> tension, - -> compression
-    return 0.5*m_k*stretch*stretch;      // 1/2 k (x-x0)^2
+    // TODO
+    return 1.0;
 }
 
 
