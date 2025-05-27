@@ -184,8 +184,10 @@ int main() {
     model.m_matter.setShowDefaultGeometry(false);
     
     // Add visualization.
-    Visualizer viz(system);
-    system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
+    // Visualizer viz(system);
+    // viz.setMode(Visualizer::Mode::RealTime);
+    // viz.setRealTimeScale(0.1);
+    // system.addEventReporter(new Visualizer::Reporter(viz, 0.001));
      
     // Initialize the system and state.
     system.realizeTopology();
@@ -196,9 +198,10 @@ int main() {
     // viz.report(state);
 
     // Simulate it.
-    CPodesIntegrator integ(system);
+    // SemiExplicitEulerIntegrator integ(system, 0.001);
     // RungeKuttaMersonIntegrator integ(system);
-    // SemiExplicitEuler2Integrator integ(system);
+    SemiExplicitEuler2Integrator integ(system);
+    // CPodesIntegrator integ(system);
     integ.setAccuracy(.01);
     TimeStepper ts(system, integ);
     ts.initialize(state);
@@ -738,24 +741,24 @@ Gait3D::Gait3D(ContactType contactType)
 }
 
 void Gait3D::loadDefaultState(State& state) {
-    // const static Real hipAbductionAngle = 5*Pi/180;
-    // const static Real hipFlexionAngle = 25*Pi/180;
-    // const static Real kneeAngle = -50*Pi/180;
-    // const static Real ankleAngle = 20*Pi/180;
+    const static Real hipAbductionAngle = 5*Pi/180;
+    const static Real hipFlexionAngle = 15*Pi/180;
+    const static Real kneeAngle = -60*Pi/180;
+    const static Real ankleAngle = 20*Pi/180;
 
     m_mobod[Pelvis].setQToFitTranslation(state, Vec3(0,1.05,0));
 
-    m_mobod[Torso].setQToFitRotation(state, Rotation(-Pi/12, ZAxis));
+    m_mobod[Torso].setQToFitRotation(state, Rotation(-Pi/6, ZAxis));
 
-    // m_mobod[LeftThigh].setOneQ(state, 1, hipAbductionAngle);
-    // m_mobod[LeftThigh].setOneQ(state, 3, hipFlexionAngle);
-    // m_mobod[LeftShank].setOneQ(state, 0, kneeAngle);
-    // m_mobod[LeftFoot].setOneQ(state, 0, ankleAngle);
+    m_mobod[LeftThigh].setOneQ(state, 1, hipAbductionAngle);
+    m_mobod[LeftThigh].setOneQ(state, 3, hipFlexionAngle);
+    m_mobod[LeftShank].setOneQ(state, 0, kneeAngle);
+    m_mobod[LeftFoot].setOneQ(state, 0, ankleAngle);
 
-    // m_mobod[RightThigh].setOneQ(state, 1, -hipAbductionAngle);
-    // m_mobod[RightThigh].setOneQ(state, 3, hipFlexionAngle);
-    // m_mobod[RightShank].setOneQ(state, 0, kneeAngle);
-    // m_mobod[RightFoot].setOneQ(state, 0, ankleAngle);
+    m_mobod[RightThigh].setOneQ(state, 1, -hipAbductionAngle);
+    m_mobod[RightThigh].setOneQ(state, 3, hipFlexionAngle);
+    m_mobod[RightShank].setOneQ(state, 0, kneeAngle);
+    m_mobod[RightFoot].setOneQ(state, 0, ankleAngle);
 
 }
 
