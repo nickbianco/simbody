@@ -1689,7 +1689,7 @@ public:
     {
         return m_curveSegments.size();
     }
-
+    
     void applyBodyForces(
         const State& state,
         Real tension,
@@ -3819,6 +3819,11 @@ ObstacleIndex CableSpan::addObstacle(
 int CableSpan::getNumObstacles() const
 {
     return getImpl().getNumObstacles();
+}
+
+CableSpanIndex CableSpan::getIndex() const
+{
+    return getImpl().getIndex();
 }
 
 const MobilizedBodyIndex& CableSpan::getObstacleMobilizedBodyIndex(

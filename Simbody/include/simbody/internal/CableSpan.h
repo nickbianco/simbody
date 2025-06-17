@@ -232,6 +232,9 @@ public:
     /** Get the number of obstacles added to the path. **/
     int getNumObstacles() const;
 
+    /** Get the cable's index in the CableSubsystem. **/
+    CableSpanIndex getIndex() const;
+
     ///@}
 
     /** @name End points configuration */
