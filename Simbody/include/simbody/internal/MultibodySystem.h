@@ -35,6 +35,7 @@ class SimbodyMatterSubsystem;
 class ForceSubsystem;
 class DecorationSubsystem;
 class GeneralContactSubsystem;
+class CableSubsystem;
 
 
 /** The job of the MultibodySystem class is to coordinate the activities of 

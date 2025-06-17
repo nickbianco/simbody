@@ -36,6 +36,7 @@
 #include "simbody/internal/ForceSubsystem.h"
 #include "simbody/internal/DecorationSubsystem.h"
 #include "simbody/internal/GeneralContactSubsystem.h"
+#include "simbody/internal/CableSpan.h"
 
 #include "simbody/internal/ForceSubsystemGuts.h"
 #include "SimbodyMatterSubsystemRep.h"

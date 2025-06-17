@@ -3678,6 +3678,7 @@ CableSubsystem::CableSubsystem(MultibodySystem& mbs)
 {
     adoptSubsystemGuts(new Impl());
     mbs.adoptSubsystem(*this);
+    mbs.setCableSubsystem(*this);
 }
 
 const MultibodySystem& CableSubsystem::getMultibodySystem() const
