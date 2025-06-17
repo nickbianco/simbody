@@ -68,6 +68,10 @@ public:
     GeneralContactSubsystem&       updContactSubsystem();
     bool hasContactSubsystem() const;
 
+    int setCableSubsystem(CableSubsystem&);
+    const CableSubsystem& getCableSubsystem() const;
+    CableSubsystem&       updCableSubsystem();
+    bool hasCableSubsystem() const;
 
     /// Calculate the total potential energy of the system.  The state must
     /// be at Dynamics stage or later.
