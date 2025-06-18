@@ -434,6 +434,29 @@ public:
 
     ///@}
 
+    /** @name End point computations */
+    ///@{
+
+    /** Calculate the unit force exerted by the cable at the cable origin (in
+    ground frame). The force can be obtained by multiplying the result by the
+    cable tension. State must be realized to Stage::Position.
+    @param state State of the system.
+    @param[out] unitForce_G The resulting unit spatial force in ground frame. **/
+    void calcOriginUnitForce(
+        const State& state,
+        SpatialVec& unitForce_G) const;
+
+    /** Calculate the unit force exerted by the cable at the cable termination
+    (in ground frame). The force can be obtained by multiplying the result by
+    the cable tension. State must be realized to Stage::Position.
+    @param state State of the system.
+    @param[out] unitForce_G The resulting unit spatial force in ground frame. **/
+    void calcTerminationUnitForce(
+        const State& state,
+        SpatialVec& unitForce_G) const;
+
+    ///@}
+
     /** @name Curve segment computations */
     ///@{
 
@@ -506,6 +529,17 @@ public:
         CableSpanObstacleIndex ix,
         int numSamples,
         const std::function<void(Vec3 point_G)>& sink) const;
+
+    /** Calculate the unit force exerted by the cable at the specified obstacle
+    (in ground frame). The force can be obtained by multiplying the result by
+    the cable tension. State must be realized to Stage::Position.
+    @param state State of the system.
+    @param ix The index of the obstacle in this CableSpan.
+    @param[out] unitForce_G The resulting unit spatial force in ground frame. **/
+    void calcCurveSegmentUnitForce(
+        const State& state,
+        CableSpanObstacleIndex ix,
+        SpatialVec& unitForce_G) const;
 
     ///@}
 

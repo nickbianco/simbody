@@ -3990,3 +3990,26 @@ void CableSpan::calcCurveSegmentResampledPoints(
 {
     m_impl->calcCurveSegmentResampledPoints(state, ix, numSamples, sink);
 }
+
+void CableSpan::calcOriginUnitForce(
+    const State& state,
+    SpatialVec& unitForce_G) const
+{
+    calcUnitForceAtCableOrigin(getImpl(), state, unitForce_G);
+}
+
+void CableSpan::calcTerminationUnitForce(
+    const State& state,
+    SpatialVec& unitForce_G) const
+{
+    calcUnitForceAtCableTermination(getImpl(), state, unitForce_G);
+}
+
+void CableSpan::calcCurveSegmentUnitForce(
+    const State& state,
+    CableSpanObstacleIndex ix,
+    SpatialVec& unitForce_G) const
+{
+    const auto& curve = getImpl().getObstacleCurveSegment(ix);
+    calcUnitForceExertedByCurve(curve, state, unitForce_G);
+}
