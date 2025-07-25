@@ -1439,7 +1439,35 @@ public:
         int numSamples,
         const std::function<void(Vec3 point_G)>& sink) const;
 
-private:
+
+    //--------------------------------------------------------------------------
+    // Cache Access.
+    //--------------------------------------------------------------------------
+
+    CurveSegmentData::Instance& updDataInst(const State& state) const
+    {
+        return Value<CurveSegmentData::Instance>::updDowncast(
+            getSubsystem().updDiscreteVarUpdateValue(state, m_indexDataInst));
+    }
+
+    const CurveSegmentData::Instance& getPrevDataInst(const State& state) const
+    {
+        return Value<CurveSegmentData::Instance>::downcast(
+            getSubsystem().getDiscreteVariable(state, m_indexDataInst));
+    }
+
+    CurveSegmentData::Instance& updPrevDataInst(State& state) const
+    {
+        return Value<CurveSegmentData::Instance>::updDowncast(
+            getSubsystem().updDiscreteVariable(state, m_indexDataInst));
+    }
+
+    CurveSegmentData::Position& updDataPos(const State& state) const
+    {
+        return Value<CurveSegmentData::Position>::updDowncast(
+            getSubsystem().updCacheEntry(state, m_indexDataPos));
+    }
+
     //--------------------------------------------------------------------------
     // Data
     //--------------------------------------------------------------------------
@@ -2906,6 +2934,7 @@ void calcLineSegments(
 {
     lines.clear();
     const CableSpan::Impl& cable = cableSegment.getCable();
+    std::cout << "calcLineSegments" << std::endl;
     Vec3 prevPathPoint(
         cable.calcInitialCableSegmentPointInGround(s, cableSegment));
 
@@ -3005,6 +3034,8 @@ void calcPathErrorJacobian(
     std::array<CoordinateAxis, N> axes,
     Matrix& J)
 {
+    std::cout << "Computing path error Jacobian " << std::endl;
+
     // Number of free coordinates for a generic geodesic.
     constexpr int NQ = c_GeodesicDOF;
 
@@ -3056,6 +3087,8 @@ void calcPathErrorJacobian(
                 constexpr int colShift = -NQ; // the off-diagonal block.
 
                 const Vec3 dc_dv_Q = -dc_dv_P;
+                // const Mat34& v_Q =
+                //     cable.getObstacleCurveSegment(prevObsIx).getDataPos(s).v_Q;
                 const Mat34& v_Q =
                     cable.getObstacleCurveSegment(prevObsIx).updDataPos(s).v_Q;
 
@@ -3089,6 +3122,8 @@ void calcPathErrorJacobian(
                 constexpr int colShift = NQ; // the off-diagonal block.
 
                 const Vec3 dc_dv_P = -dc_dv_Q;
+                // const Mat34& v_P =
+                //     cable.getObstacleCurveSegment(nextObsIx).getDataPos(s).v_P;
                 const Mat34& v_P =
                     cable.getObstacleCurveSegment(nextObsIx).updDataPos(s).v_P;
                 AddBlock(~v_P * dc_dv_P, colShift);
@@ -3124,6 +3159,8 @@ void calcLengthGradient(
     const std::vector<LineSegment>& lines,
     Vector& gradient)
 {
+    std::cout << "Calc length gradient" << std::endl;
+
     // Reset path error vector to zero.
     gradient.setToZero();
 
@@ -3166,6 +3203,8 @@ void calcLengthHessian(
     const std::vector<LineSegment>& lines,
     Matrix& hessian)
 {
+    std::cout << "Calc length Hessian" << std::endl;
+
     // Number of free coordinates for a generic geodesic.
     constexpr int NQ = c_GeodesicDOF;
 
@@ -3207,7 +3246,7 @@ void calcLengthHessian(
         if (!curve.isInContactWithSurface(state)) {
             continue;
         }
-        CurveSegmentData::Position& dataPos  = curve.updDataPos(state);
+        CurveSegmentData::Position& dataPos = curve.updDataPos(state);
         const CurveSegmentData::Instance& dataInst = curve.getDataInst(state);
 
         // This block computes the Hessian of the straight line segment
@@ -3243,6 +3282,7 @@ void calcLengthHessian(
                 const Mat34& v_Q = cable.getObstacleCurveSegment(prevObsIx)
                                        .updDataPos(state)
                                        .v_Q;
+
                 AddBlock(-~v_P * E * v_Q, colShift);
             }
         }
@@ -3310,6 +3350,7 @@ void calcLengthHessian(
                 const Mat34& v_P = cable.getObstacleCurveSegment(nextObsIx)
                                        .updDataPos(state)
                                        .v_P;
+
                 AddBlock(-~v_Q * E * v_P, colShift);
             }
         }
@@ -3473,6 +3514,9 @@ void CableSpan::Impl::calcSolverStep(
 
     // If the path error is small we have converged to the optimal solution,
     // and there is no need to compute the geodesic corrections.
+    std::cout << "data.maxPathError: " << data.maxPathError
+              << ", smoothnessTolerance: "
+              << getParameters().smoothnessTolerance << std::endl;
     data.converged = data.maxPathError <= getParameters().smoothnessTolerance;
     if (data.converged) {
         return;
@@ -3713,6 +3757,8 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
             // Check if we should stop iterating on this sub-problem.
             const bool maxIterationsReached =
             loopIter >= getParameters().solverMaxIterations;
+            std::cout << "maxIterationsReached: "
+                      << maxIterationsReached << std::endl;
             if (workspace.converged || maxIterationsReached) {
                 updDataPosFromSolverResult(s, cableSegment, workspace, loopIter);
                 break;
@@ -4438,6 +4484,25 @@ int CableSubsystem::Impl::realizeSubsystemReportImpl(const State& state) const
 
     return 0;
 }
+
+int CableSubsystem::Impl::realizeSubsystemPositionImpl(const State& state) const
+{
+    for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
+        getCable(ix).getImpl().realizePosition(state);
+    }
+
+    return 0;
+}
+
+int CableSubsystem::Impl::realizeSubsystemVelocityImpl(const State& state) const
+{
+    for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
+        getCable(ix).getImpl().realizeVelocity(state);
+    }
+
+    return 0;
+}
+
 
 const CableSpan& CableSubsystem::Impl::getCable(CableSpanIndex index) const
 {
