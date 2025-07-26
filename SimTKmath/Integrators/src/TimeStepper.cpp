@@ -143,7 +143,6 @@ Integrator::SuccessfulStepStatus TimeStepperRep::stepTo(Real time) {
             }
             case Integrator::ReachedReportTime: {
                 if (integ->getTime() >= nextScheduledReport) {
-                    std::cout << "TimeStepper reporting events" << std::endl;
                     system.reportEvents(integ->getState(),
                         Event::Cause::Scheduled,
                         scheduledReportIds);

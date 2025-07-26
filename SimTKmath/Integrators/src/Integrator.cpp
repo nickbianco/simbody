@@ -435,7 +435,6 @@ void IntegratorRep::initialize(const State& initState) {
 }
 
 void IntegratorRep::reinitialize(Stage stage, bool shouldTerminate) {
-    std::cout << "!!! DEBUG INTEGRATOR REINITIALIZE !!!" << std::endl;
     if (stage < Stage::Report) {
         startOfContinuousInterval = true;
         setUseInterpolatedState(false);

@@ -130,16 +130,16 @@ public:
             }
 
             // Draw a fixed number of sphere points per curve segment.
-            // const int numDecorativePoints = 4;
-            // m_cable.calcCurveSegmentResampledPoints(
-            //     state,
-            //     ix,
-            //     numDecorativePoints,
-            //     [&](Vec3 x_G)
-            //     {
-            //         decorations.push_back(
-            //             DecorativeSphere(0.1).setTransform(x_G).setColor(Blue));
-            //     });
+            const int numDecorativePoints = 4;
+            m_cable.calcCurveSegmentResampledPoints(
+                state,
+                ix,
+                numDecorativePoints,
+                [&](Vec3 x_G)
+                {
+                    decorations.push_back(
+                        DecorativeSphere(0.1).setTransform(x_G).setColor(Blue));
+                });
 
             // Draw the Frenet frames at the geodesic boundary points.
             decorations.push_back(DecorativeFrame(0.2).setTransform(
@@ -169,323 +169,232 @@ public:
     Array_<Transform, CableSpanObstacleIndex> m_obstacleDecorationsOffsets;
 };
 
-// int main()
-// {
-//     // Create the system.
+int main()
+{
+    // Create the system.
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    CableSubsystem cables(system);
+
+    // A dummy body.
+    Body::Rigid aBody(MassProperties(1.0, Vec3(0), Inertia(1)));
+
+    // Mobilizer for path origin.
+    MobilizedBody::Translation cableOriginBody(
+        matter.Ground(),
+        Vec3(-8., 0.1, 0.),
+        aBody,
+        Transform());
+
+    // Mobilizer for path termination.
+    MobilizedBody::Translation cableTerminationBody(
+        matter.Ground(),
+        Transform(Vec3(20., 1.0, -1.)),
+        aBody,
+        Transform());
+
+    // Mobilizers for path via points.
+    MobilizedBody::Translation cableViaPointBody1(
+        matter.Ground(),
+        Transform(Vec3(0., 0.9, 0.5)),
+        aBody,
+        Transform());
+    MobilizedBody::Translation cableViaPointBody2(
+        matter.Ground(),
+        Transform(Vec3(15., 0.1, 0.)),
+        aBody,
+        Transform());
+
+    // Construct a new cable.
+    CableSpan cable(
+        cables,
+        cableOriginBody,
+        Vec3{0.},
+        cableTerminationBody,
+        Vec3{0.});
+
+    // Add some obstacles and via points to the cable.
+
+    // Add torus obstacle.
+    cable.addObstacle(
+        matter.Ground(), // Obstacle mobilizer body.
+        Transform(
+            Rotation(0.5 * Pi, YAxis),
+            Vec3{-4., 0., 0.}), // Surface to body transform.
+        std::shared_ptr<ContactGeometry>(
+            new ContactGeometry::Torus(1., 0.2)), // Obstacle geometry.
+        {0.1, 0.2, 0.}                            // Initial contact point hint.
+    );
+
+    // Add ellipsoid obstacle.
+    cable.addObstacle(
+        matter.Ground(),
+        Transform(Vec3{-2., 0., 0.}),
+        std::shared_ptr<ContactGeometry>(
+            new ContactGeometry::Ellipsoid({1.5, 2.6, 1.})),
+        {0.0, 0., 1.1});
+
+    // Add the first via point.
+    cable.addViaPoint(cableViaPointBody1, Vec3{0.});
+
+    // Add sphere obstacle.
+    cable.addObstacle(
+        matter.Ground(),
+        Transform(Vec3{2., 0., 0.}),
+        std::shared_ptr<ContactGeometry>(new ContactGeometry::Sphere(1.)),
+        {0.1, 1.1, 0.});
+
+    // Add cylinder obstacle.
+    cable.addObstacle(
+        matter.Ground(),
+        Transform(Rotation(0.5 * Pi, XAxis), Vec3{5., 0., 0.}),
+        std::shared_ptr<ContactGeometry>(new ContactGeometry::Cylinder(1.)),
+        Vec3{0., -1., 0.});
+
+    // Add bicubic surface obstacle.
+    {
+        Real patchScaleX = 2.0;
+        Real patchScaleY = 2.0;
+        Real patchScaleF = 0.75;
+
+        const int Nx = 4, Ny = 4;
+
+        const Real xData[Nx] = {-2, -1, 1, 2};
+        const Real yData[Ny] = {-2, -1, 1, 2};
+
+        const Real fData[Nx*Ny] = {
+            2,    3,      3,      1,
+            0,    1.5,    1.5,    0,
+            0,    1.5,    1.5,    0,
+            2,    3,      3,      1};
+
+        const Vector x_(Nx, xData);
+        const Vector y_(Ny, yData);
+        const Matrix f_(Nx, Ny, fData);
+
+        Vector x = patchScaleX * x_;
+        Vector y = patchScaleY * y_;
+        Matrix f = patchScaleF * f_;
+
+        BicubicSurface patch(x, y, f, 0);
+        Transform patchTransform(
+            Rotation(0.5 * Pi, Vec3(0., 0., 1.)),
+            Vec3(10., 0., -1.));
+
+        // Draw wire frame on surface patch.
+        /* PolygonalMesh patchMesh = patch.createPolygonalMesh(10); */
+        /* matter.Ground().addBodyDecoration( */
+        /*     patchTransform, */
+        /*     DecorativeMesh(patchMesh) */
+        /*         .setColor(Cyan) */
+        /*         .setOpacity(.75) */
+        /*         .setRepresentation(DecorativeGeometry::DrawWireframe)); */
+
+        cable.addObstacle(
+            matter.Ground(),
+            patchTransform,
+            std::shared_ptr<const ContactGeometry>(
+                new ContactGeometry::SmoothHeightMap(patch)),
+            Vec3{0., 0., 1.});
+    }
+
+    // Add the second via point.
+    cable.addViaPoint(cableViaPointBody2, Vec3{0.});
+
+    // Visaulize the system.
+    system.setUseUniformBackground(true); // no ground plane in display
+    Visualizer viz(system);
+    viz.addDecorationGenerator(new CableDecorator(system, cable));
+    ShowStuff showStuff(cables, 1e-3);
+
+    // Initialize the system and s.
+    system.realizeTopology();
+    State s = system.getDefaultState();
+    system.realize(s, Stage::Position);
+
+    system.realize(s, Stage::Report);
+    viz.report(s);
+    showStuff.handleEvent(s);
+
+    std::cout << "Hit ENTER ..., or q\n";
+    const char ch = getchar();
+    if (ch == 'Q' || ch == 'q') {
+        return 0;
+    }
+
+    Real angle = 0.;
+    while (true) {
+        system.realize(s, Stage::Position);
+        cable.calcLength(s);
+        viz.report(s);
+
+        // Move the cable origin.
+        angle += 0.01;
+        cableOriginBody.setQ(
+            s,
+            Vec3(sin(angle), 5. * sin(angle * 1.5), 5. * sin(angle * 2.)));
+
+        // Move the first via point.
+        cableViaPointBody1.setQ(
+            s,
+            Vec3(0., 0.5 * cos(angle), 0.));
+
+        // Move the second via point.
+        cableViaPointBody2.setQ(
+            s,
+            Vec3(0., 0., 2. * sin(angle)));
+    }
+}
+
+// int main() {
+//     // Define the system.
 //     MultibodySystem system;
 //     SimbodyMatterSubsystem matter(system);
+//     GeneralForceSubsystem forces(system);
 //     CableSubsystem cables(system);
+//     Force::Gravity gravity(forces, matter, -YAxis, 9.8);
 
-//     // A dummy body.
-//     Body::Rigid aBody(MassProperties(1.0, Vec3(0), Inertia(1)));
+//     // Describe mass and visualization properties for a generic body.
+//     Body::Rigid bodyInfo(MassProperties(1.0, Vec3(0), UnitInertia(1)));
+//     bodyInfo.addDecoration(Transform(), DecorativeSphere(0.1));
 
-//     // Mobilizer for path origin.
-//     MobilizedBody::Translation cableOriginBody(
-//         matter.Ground(),
-//         Vec3(-8., 0.1, 0.),
-//         aBody,
-//         Transform());
+//     // Create the moving (mobilized) bodies of the pendulum.
+//     MobilizedBody::Pin pendulum1(matter.Ground(), Transform(Vec3(0)),
+//             bodyInfo, Transform(Vec3(0, 1, 0)));
+//     MobilizedBody::Pin pendulum2(pendulum1, Transform(Vec3(0)),
+//             bodyInfo, Transform(Vec3(0, 1, 0)));
 
-//     // Mobilizer for path termination.
-//     MobilizedBody::Translation cableTerminationBody(
-//         matter.Ground(),
-//         Transform(Vec3(20., 1.0, -1.)),
-//         aBody,
-//         Transform());
-
-//     // Mobilizers for path via points.
-//     MobilizedBody::Translation cableViaPointBody1(
-//         matter.Ground(),
-//         Transform(Vec3(0., 0.9, 0.5)),
-//         aBody,
-//         Transform());
-//     MobilizedBody::Translation cableViaPointBody2(
-//         matter.Ground(),
-//         Transform(Vec3(15., 0.1, 0.)),
-//         aBody,
-//         Transform());
-
-//     // Construct a new cable.
+//     // Add a cable.
 //     CableSpan cable(
 //         cables,
-//         cableOriginBody,
-//         Vec3{0.},
-//         cableTerminationBody,
-//         Vec3{0.});
-
-//     // Add some obstacles and via points to the cable.
-
-//     // Add torus obstacle.
+//         matter.Ground(),
+//         Vec3{0.25, 0.0, 0.0},
+//         pendulum2,
+//         Vec3{0.0, 0.5, 0.0});
 //     cable.addObstacle(
-//         matter.Ground(), // Obstacle mobilizer body.
-//         Transform(
-//             Rotation(0.5 * Pi, YAxis),
-//             Vec3{-4., 0., 0.}), // Surface to body transform.
+//         pendulum1,
+//         Transform(Vec3(0.2, 0.0, 0.0)),
 //         std::shared_ptr<ContactGeometry>(
-//             new ContactGeometry::Torus(1., 0.2)), // Obstacle geometry.
-//         {0.1, 0.2, 0.}                            // Initial contact point hint.
-//     );
+//             new ContactGeometry::Cylinder(0.1)),
+//         Vec3{0.1, 0.0, 0.0});
+//     cable.setAlgorithm(CableSpanAlgorithm::Scholz2015);
 
-//     // Add ellipsoid obstacle.
-//     cable.addObstacle(
-//         matter.Ground(),
-//         Transform(Vec3{-2., 0., 0.}),
-//         std::shared_ptr<ContactGeometry>(
-//             new ContactGeometry::Ellipsoid({1.5, 2.6, 1.})),
-//         {0.0, 0., 1.1});
-
-//     // Add the first via point.
-//     cable.addViaPoint(cableViaPointBody1, Vec3{0.});
-
-//     // Add sphere obstacle.
-//     cable.addObstacle(
-//         matter.Ground(),
-//         Transform(Vec3{2., 0., 0.}),
-//         std::shared_ptr<ContactGeometry>(new ContactGeometry::Sphere(1.)),
-//         {0.1, 1.1, 0.});
-
-//     // Add cylinder obstacle.
-//     cable.addObstacle(
-//         matter.Ground(),
-//         Transform(Rotation(0.5 * Pi, XAxis), Vec3{5., 0., 0.}),
-//         std::shared_ptr<ContactGeometry>(new ContactGeometry::Cylinder(1.)),
-//         Vec3{0., -1., 0.});
-
-//     // Add bicubic surface obstacle.
-//     {
-//         Real patchScaleX = 2.0;
-//         Real patchScaleY = 2.0;
-//         Real patchScaleF = 0.75;
-
-//         const int Nx = 4, Ny = 4;
-
-//         const Real xData[Nx] = {-2, -1, 1, 2};
-//         const Real yData[Ny] = {-2, -1, 1, 2};
-
-//         const Real fData[Nx*Ny] = {
-//             2,    3,      3,      1,
-//             0,    1.5,    1.5,    0,
-//             0,    1.5,    1.5,    0,
-//             2,    3,      3,      1};
-
-//         const Vector x_(Nx, xData);
-//         const Vector y_(Ny, yData);
-//         const Matrix f_(Nx, Ny, fData);
-
-//         Vector x = patchScaleX * x_;
-//         Vector y = patchScaleY * y_;
-//         Matrix f = patchScaleF * f_;
-
-//         BicubicSurface patch(x, y, f, 0);
-//         Transform patchTransform(
-//             Rotation(0.5 * Pi, Vec3(0., 0., 1.)),
-//             Vec3(10., 0., -1.));
-
-//         // Draw wire frame on surface patch.
-//         /* PolygonalMesh patchMesh = patch.createPolygonalMesh(10); */
-//         /* matter.Ground().addBodyDecoration( */
-//         /*     patchTransform, */
-//         /*     DecorativeMesh(patchMesh) */
-//         /*         .setColor(Cyan) */
-//         /*         .setOpacity(.75) */
-//         /*         .setRepresentation(DecorativeGeometry::DrawWireframe)); */
-
-//         cable.addObstacle(
-//             matter.Ground(),
-//             patchTransform,
-//             std::shared_ptr<const ContactGeometry>(
-//                 new ContactGeometry::SmoothHeightMap(patch)),
-//             Vec3{0., 0., 1.});
-//     }
-
-//     // Add the second via point.
-//     cable.addViaPoint(cableViaPointBody2, Vec3{0.});
-
-//     // Visaulize the system.
-//     system.setUseUniformBackground(true); // no ground plane in display
+//     // Visualize the system.
+//     system.setUseUniformBackground(true);
 //     Visualizer viz(system);
 //     viz.addDecorationGenerator(new CableDecorator(system, cable));
-//     ShowStuff showStuff(cables, 1e-3);
+//     system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
 
 //     // Initialize the system and s.
 //     system.realizeTopology();
-//     State s = system.getDefaultState();
-//     system.realize(s, Stage::Position);
+//     State state = system.getDefaultState();
 
-//     system.realize(s, Stage::Report);
-//     viz.report(s);
-//     showStuff.handleEvent(s);
+//     // Initialize the system and state.
+//     pendulum2.setRate(state, 5.0);
 
-//     std::cout << "Hit ENTER ..., or q\n";
-//     const char ch = getchar();
-//     if (ch == 'Q' || ch == 'q') {
-//         return 0;
-//     }
-
-//     Real angle = 0.;
-//     while (true) {
-//         system.realize(s, Stage::Position);
-//         cable.calcLength(s);
-//         viz.report(s);
-
-//         // Move the cable origin.
-//         angle += 0.01;
-//         cableOriginBody.setQ(
-//             s,
-//             Vec3(sin(angle), 5. * sin(angle * 1.5), 5. * sin(angle * 2.)));
-
-//         // Move the first via point.
-//         cableViaPointBody1.setQ(
-//             s,
-//             Vec3(0., 0.5 * cos(angle), 0.));
-
-//         // Move the second via point.
-//         cableViaPointBody2.setQ(
-//             s,
-//             Vec3(0., 0., 2. * sin(angle)));
-//     }
+//     // Simulate for 20 seconds.
+//     ExplicitEulerIntegrator integ(system);
+//     TimeStepper ts(system, integ);
+//     ts.initialize(state);
+//     ts.stepTo(20.0);
 // }
-
-int main() {
-    // Define the system.
-    MultibodySystem system;
-    SimbodyMatterSubsystem matter(system);
-    GeneralForceSubsystem forces(system);
-    CableSubsystem cables(system);
-    Force::Gravity gravity(forces, matter, -YAxis, 9.8);
-
-    // Describe mass and visualization properties for a generic body.
-    Body::Rigid bodyInfo(MassProperties(1.0, Vec3(0), UnitInertia(1)));
-    bodyInfo.addDecoration(Transform(), DecorativeSphere(0.1));
-
-    // Create the moving (mobilized) bodies of the pendulum.
-    MobilizedBody::Pin pendulum1(matter.Ground(), Transform(Vec3(0)),
-            bodyInfo, Transform(Vec3(0, 1, 0)));
-    MobilizedBody::Pin pendulum2(pendulum1, Transform(Vec3(0)),
-            bodyInfo, Transform(Vec3(0, 1, 0)));
-
-    // Add a cable.
-    CableSpan cable(
-        cables,
-        matter.Ground(),
-        Vec3{0.25, 0.0, 0.0},
-        pendulum2,
-        Vec3{0.0, 0.5, 0.0});
-    cable.addObstacle(
-        pendulum1,
-        Transform(Vec3(0.2, 0.0, 0.0)),
-        std::shared_ptr<ContactGeometry>(
-            new ContactGeometry::Cylinder(0.1)),
-        Vec3{0.1, 0.0, 0.0});
-    cable.setAlgorithm(CableSpanAlgorithm::Scholz2015);
-
-    // Visualize the system.
-    system.setUseUniformBackground(true ); // no ground plane in display
-    Visualizer viz(system);
-    viz.addDecorationGenerator(new CableDecorator(system, cable));
-    system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
-
-    // Initialize the system and s.
-    system.realizeTopology();
-    State state = system.getDefaultState();
-
-    // Initialize the system and state.
-    pendulum2.setRate(state, 5.0);
-
-    // Simulate for 20 seconds.
-    SemiExplicitEuler2Integrator integ(system);
-    TimeStepper ts(system, integ);
-    ts.initialize(state);
-    ts.stepTo(20.0);
-
-    // Initialize the system and s.
-    // system.realizeTopology();
-    // State s = system.getDefaultState();
-    // system.realize(s, Stage::Position);
-
-    // system.realize(s, Stage::Report);
-    // viz.report(s);
-
-    // Real angle = 0.;
-    // Array_<EventId> scheduledEventIds, scheduledReportIds;
-    // while (true) {
-    //     // system.realize(s, Stage::Time);
-    //     // system.prescribeQ(s);
-    //     // system.realize(s, Stage::Position);
-
-    //     // Vector dummy; // no error estimate to project
-    //     // ProjectResults results;
-    //     // ProjectOptions options;
-    //     // system.projectQ(s, dummy, options, results);
-
-    //     // system.prescribeU(s);
-    //     // system.realize(s, Stage::Velocity);
-
-    //     // results.clear();
-    //     // system.projectU(s, dummy, options, results);
-
-    //     // system.realize(s, Stage::Acceleration);
-
-    //     system.realize(s, Stage::Position);
-    //     cable.calcLength(s);
-    //     viz.report(s);
-
-    //     // Move the cable origin.
-    //     angle += 0.01;
-    //     pendulum1.setOneQ(s, 0, angle);
-    //     pendulum2.setOneQ(s, 0, 2.0 * angle);
-    // }
-}
-
-
-int main() {
-    // Define the system.
-    MultibodySystem system;
-    SimbodyMatterSubsystem matter(system);
-    GeneralForceSubsystem forces(system);
-    CableSubsystem cables(system);
-    Force::Gravity gravity(forces, matter, -YAxis, 9.8);
-
-    // Describe mass and visualization properties for a generic body.
-    Body::Rigid bodyInfo(MassProperties(1.0, Vec3(0), UnitInertia(1)));
-    bodyInfo.addDecoration(Transform(), DecorativeSphere(0.1));
-
-    // Create the moving (mobilized) bodies of the pendulum.
-    MobilizedBody::Pin pendulum1(matter.Ground(), Transform(Vec3(0)),
-            bodyInfo, Transform(Vec3(0, 1, 0)));
-    MobilizedBody::Pin pendulum2(pendulum1, Transform(Vec3(0)),
-            bodyInfo, Transform(Vec3(0, 1, 0)));
-
-    // Add a cable.
-    CableSpan cable(
-        cables,
-        matter.Ground(),
-        Vec3{0.25, 0.0, 0.0},
-        pendulum2,
-        Vec3{0.0, 0.5, 0.0});
-    cable.addObstacle(
-        pendulum1,
-        Transform(Vec3(0.2, 0.0, 0.0)),
-        std::shared_ptr<ContactGeometry>(
-            new ContactGeometry::Cylinder(0.1)),
-        Vec3{0.1, 0.0, 0.0});
-    cable.setAlgorithm(CableSpanAlgorithm::Scholz2015);
-
-    // Visualize the system.
-    system.setUseUniformBackground(true);
-    viz.addDecorationGenerator(new CableDecorator(system, cable));
-    system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
-
-    // Initialize the system and s.
-    system.realizeTopology();
-    State state = system.getDefaultState();
-
-    // Initialize the system and state.
-    pendulum2.setRate(state, 5.0);
-
-    // Simulate for 20 seconds.
-    SemiExplicitEuler2Integrator integ(system);
-    TimeStepper ts(system, integ);
-    ts.initialize(state);
-    ts.stepTo(20.0);
-}
