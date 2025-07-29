@@ -1534,6 +1534,12 @@ public:
             getSubsystem().getCacheEntry(state, m_indexStation_G));
     }
 
+    Vec3& updStation_G(const State& state) const
+    {
+        return Value<Vec3>::updDowncast(
+            getSubsystem().updCacheEntry(state, m_indexStation_G));
+    }
+
     const UnitVec3& getIncomingDirection(const State& state) const
     {
         return Value<UnitVec3>::downcast(
@@ -1652,12 +1658,6 @@ private:
     //--------------------------------------------------------------------------
     // Private Cache Access.
     //--------------------------------------------------------------------------
-    Vec3& updStation_G(const State& state) const
-    {
-        return Value<Vec3>::updDowncast(
-            getSubsystem().updCacheEntry(state, m_indexStation_G));
-    }
-
     UnitVec3& updIncomingDirection(const State& state) const
     {
         return Value<UnitVec3>::updDowncast(
@@ -2007,7 +2007,7 @@ public:
     {
         if (cableSegment.getInitialViaPointIndex().isValid()) {
             return getViaPoint(cableSegment.getInitialViaPointIndex())
-                                .getStation_G(s);
+                                .updStation_G(s);
         }
         return calcOriginPointInGround(s);
     }
@@ -2017,7 +2017,7 @@ public:
     {
         if (cableSegment.getFinalViaPointIndex().isValid()) {
             return getViaPoint(cableSegment.getFinalViaPointIndex())
-                                .getStation_G(s);
+                                .updStation_G(s);
         }
         return calcTerminationPointInGround(s);
     }
@@ -2617,7 +2617,7 @@ Vec3 CurveSegment::findPrevPathPoint_G(const State& state) const
     if (cableSegment.getInitialViaPointIndex().isValid()) {
         const ViaPoint& viaPoint = cable.getViaPoint(
             cableSegment.getInitialViaPointIndex());
-        return viaPoint.getStation_G(state);
+        return viaPoint.updStation_G(state);
     }
 
     // There is no via point at the start of this cable segment: the previous
@@ -2652,7 +2652,7 @@ Vec3 CurveSegment::findNextPathPoint_G(const State& state) const
     if (cableSegment.getFinalViaPointIndex().isValid()) {
         const ViaPoint& viaPoint = cable.getViaPoint(
             cableSegment.getFinalViaPointIndex());
-        return viaPoint.getStation_G(state);
+        return viaPoint.updStation_G(state);
     }
 
     // There is no via point at the end of this cable segment: the next point
