@@ -309,6 +309,10 @@ struct CableSpanData {
         // Tangent vector to the cable at the termination point, in the ground
         // frame.
         UnitVec3 terminationTangent_G{NaN, NaN, NaN};
+        // Tangent vectors incoming to the via points, in the ground frame.
+        Array_<UnitVec3, ViaPointIndex> viaPointInTangents_G;
+        // Tangent vectors outgoing from the via points, in the ground frame.
+        Array_<UnitVec3, ViaPointIndex> viaPointOutTangents_G;
         // The total cable length.
         Real cableLength = NaN;
         // The path smoothness, computed as the maximum angular misalignment at
@@ -1543,24 +1547,6 @@ public:
             Stage::Position,
             Stage::Infinity,
             new Value<Vec3>(initVec3));
-        m_indexIncomingDirection = updSubsystem().allocateCacheEntry(
-            state,
-            Stage::Position,
-            Stage::Infinity,
-            new Value<UnitVec3>(initUnitVec3));
-        m_indexOutgoingDirection = updSubsystem().allocateCacheEntry(
-            state,
-            Stage::Position,
-            Stage::Infinity,
-            new Value<UnitVec3>(initUnitVec3));
-    }
-
-    void invalidateDirectionCacheEntries(const State& state) const
-    {
-        getSubsystem().markCacheValueNotRealized(
-            state, m_indexIncomingDirection);
-        getSubsystem().markCacheValueNotRealized(
-            state, m_indexOutgoingDirection);
     }
 
     const Vec3& getStation_G(const State& state) const
@@ -1575,37 +1561,14 @@ public:
             getSubsystem().updCacheEntry(state, m_indexStation_G));
     }
 
-    const UnitVec3& getIncomingDirection(const State& state) const
-    {
-        return Value<UnitVec3>::downcast(
-            getSubsystem().getCacheEntry(state, m_indexIncomingDirection));
-    }
-
-    void setIncomingDirection(
-        const State& state,
-        const UnitVec3& direction_G) const
-    {
-        updIncomingDirection(state) = direction_G;
-        getSubsystem().markCacheValueRealized(state, m_indexIncomingDirection);
-    }
-
-    const UnitVec3& getOutgoingDirection(const State& state) const
-    {
-        return Value<UnitVec3>::downcast(
-            getSubsystem().getCacheEntry(state, m_indexOutgoingDirection));
-    }
-
-    void setOutgoingDirection(
-        const State& state,
-        const UnitVec3& direction_G) const
-    {
-        updOutgoingDirection(state) = direction_G;
-        getSubsystem().markCacheValueRealized(state, m_indexOutgoingDirection);
-    }
-
     //--------------------------------------------------------------------------
     // Model configuration accessors.
     //--------------------------------------------------------------------------
+
+    ViaPointIndex getIndex() const
+    {
+        return m_viaPointIndex;
+    }
 
     const MobilizedBody& getMobilizedBody() const
     {
@@ -1693,17 +1656,17 @@ private:
     //--------------------------------------------------------------------------
     // Private Cache Access.
     //--------------------------------------------------------------------------
-    UnitVec3& updIncomingDirection(const State& state) const
-    {
-        return Value<UnitVec3>::updDowncast(
-            getSubsystem().updCacheEntry(state, m_indexIncomingDirection));
-    }
+    // UnitVec3& updIncomingDirection(const State& state) const
+    // {
+    //     return Value<UnitVec3>::updDowncast(
+    //         getSubsystem().updCacheEntry(state, m_indexIncomingDirection));
+    // }
 
-    UnitVec3& updOutgoingDirection(const State& state) const
-    {
-        return Value<UnitVec3>::updDowncast(
-            getSubsystem().updCacheEntry(state, m_indexOutgoingDirection));
-    }
+    // UnitVec3& updOutgoingDirection(const State& state) const
+    // {
+    //     return Value<UnitVec3>::updDowncast(
+    //         getSubsystem().updCacheEntry(state, m_indexOutgoingDirection));
+    // }
 
     //--------------------------------------------------------------------------
     // Data
@@ -1722,8 +1685,6 @@ private:
 
     // Topology cache.
     CacheEntryIndex m_indexStation_G = CacheEntryIndex::Invalid();
-    CacheEntryIndex m_indexIncomingDirection = CacheEntryIndex::Invalid();
-    CacheEntryIndex m_indexOutgoingDirection = CacheEntryIndex::Invalid();
 };
 
 //==============================================================================
@@ -2085,23 +2046,6 @@ public:
                                 .updStation_G(s);
         }
         return calcTerminationPointInGround(s);
-    }
-
-    //--------------------------------------------------------------------------
-    // Helper functions: ViaPoint direction cache entries.
-    //--------------------------------------------------------------------------
-
-    void invalidateViaPointDirectionCacheEntries(const State& s,
-        const CableSegment& cableSegment) const
-    {
-        if (cableSegment.getInitialViaPointIndex().isValid()) {
-            getViaPoint(cableSegment.getInitialViaPointIndex())
-                        .invalidateDirectionCacheEntries(s);
-        }
-        if (cableSegment.getFinalViaPointIndex().isValid()) {
-            getViaPoint(cableSegment.getFinalViaPointIndex())
-                        .invalidateDirectionCacheEntries(s);
-        }
     }
 
     //--------------------------------------------------------------------------
@@ -2765,17 +2709,20 @@ void calcUnitForceExertedByViaPoint(
     const State& s,
     SpatialVec& unitForce_G)
 {
+    const CableSpanData::Position& dataPos = viaPoint.getCable().getDataPos(s);
+    ViaPointIndex ix = viaPoint.getIndex();
+
     const Vec3& x_GB = viaPoint.getMobilizedBody().getBodyOriginLocation(s);
-    const UnitVec3& incomingDirection_G = viaPoint.getIncomingDirection(s);
-    const UnitVec3& outgoingDirection_G = viaPoint.getOutgoingDirection(s);
+    const UnitVec3& inTangent_G = dataPos.viaPointInTangents_G[ix];
+    const UnitVec3& outTangent_G = dataPos.viaPointOutTangents_G[ix];
 
     // The via point moment arm in ground.
     const Vec3 r_G = viaPoint.getStation_G(s) - x_GB;
 
     // The incoming direction is along the negative force direction, while the
     // outgoing direction is along the force direction:
-    unitForce_G[0] = r_G % outgoingDirection_G - r_G % incomingDirection_G;
-    unitForce_G[1] = outgoingDirection_G - incomingDirection_G;
+    unitForce_G[0] = r_G % outTangent_G - r_G % inTangent_G;
+    unitForce_G[1] = outTangent_G - inTangent_G;
 }
 
 /* Computes the unit force exerted by the cable at the cable origin, on the
@@ -3662,6 +3609,9 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
     dataPos.loopIter = 0;
     dataPos.originPoint_G = calcOriginPointInGround(s);
     dataPos.terminationPoint_G = calcTerminationPointInGround(s);
+    const int nViaPoints = getNumViaPoints();
+    dataPos.viaPointInTangents_G.resize(nViaPoints);
+    dataPos.viaPointOutTangents_G.resize(nViaPoints);
 
     // This helper function will extract the useful information from the path
     // solver output, and write to the cached CableSpanData.
@@ -3682,9 +3632,8 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
         ViaPointIndex initialViaPointIndex =
             cableSegment.getInitialViaPointIndex();
         if (initialViaPointIndex.isValid()) {
-            const ViaPoint& viaPoint = getViaPoint(initialViaPointIndex);
-            viaPoint.setOutgoingDirection(s,
-                workspace.lineSegments.front().direction);
+            dataPos.viaPointOutTangents_G[initialViaPointIndex] =
+                workspace.lineSegments.front().direction;
         } else {
             dataPos.originTangent_G =
                 workspace.lineSegments.front().direction;
@@ -3694,9 +3643,8 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
         // with the cable termination point.
         ViaPointIndex finalViaPointIndex = cableSegment.getFinalViaPointIndex();
         if (finalViaPointIndex.isValid()) {
-            const ViaPoint& viaPoint = getViaPoint(finalViaPointIndex);
-            viaPoint.setIncomingDirection(s,
-                workspace.lineSegments.back().direction);
+            dataPos.viaPointInTangents_G[finalViaPointIndex] =
+                workspace.lineSegments.back().direction;
         } else {
             dataPos.terminationTangent_G =
                 workspace.lineSegments.back().direction;
@@ -3705,7 +3653,6 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
 
     // Compute the station positions of all via points. The via point stations
     // do not change during the solver loop, so we can compute them once here.
-    const int nViaPoints = getNumViaPoints();
     for (ViaPointIndex ix(0); ix < nViaPoints; ++ix) {
         getViaPoint(ix).calcStation_G(s);
     }
@@ -3771,9 +3718,6 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
                 // again.
                 getObstacleCurveSegment(ix).invalidatePosEntry(s);
             }
-            // The path corrections only invalidate the direction cache entries,
-            // not the station cache entry.
-            invalidateViaPointDirectionCacheEntries(s, cableSegment);
         }
     }
 
@@ -3995,8 +3939,6 @@ void CableSubsystemTestHelper::Impl::runPerturbationTest(
                         cable.getObstacleCurveSegment(ix);
                     curve.invalidatePosEntry(sCopy);
                 }
-                cable.invalidateViaPointDirectionCacheEntries(sCopy,
-                    cableSegment);
 
                 for (ObstacleIndex ix : cableSegment.getObstacleIndexes()) {
                     const CurveSegment& curve =
@@ -4486,7 +4428,6 @@ int CableSubsystem::Impl::realizeSubsystemVelocityImpl(const State& state) const
 
     return 0;
 }
-
 
 const CableSpan& CableSubsystem::Impl::getCable(CableSpanIndex index) const
 {
