@@ -139,17 +139,17 @@ bool MultibodySystem::hasContactSubsystem() const {
     return getRep().hasContactSubsystem();
 }
 
-// const CableSubsystem&
-// MultibodySystem::getCableSubsystem() const {
-//     return getRep().getCableSubsystem();
-// }
-// CableSubsystem&
-// MultibodySystem::updCableSubsystem() {
-//     return updRep().updCableSubsystem();
-// }
-// bool MultibodySystem::hasCableSubsystem() const {
-//     return getRep().hasCableSubsystem();
-// }
+const CableSubsystem&
+MultibodySystem::getCableSubsystem() const {
+    return getRep().getCableSubsystem();
+}
+CableSubsystem&
+MultibodySystem::updCableSubsystem() {
+    return updRep().updCableSubsystem();
+}
+bool MultibodySystem::hasCableSubsystem() const {
+    return getRep().hasCableSubsystem();
+}
 
 const Real
 MultibodySystem::calcPotentialEnergy(const State& s) const {
