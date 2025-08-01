@@ -331,13 +331,13 @@ int main()
     State s = system.getDefaultState();
     system.realize(s, Stage::Position);
 
-    // Simulate for 20 seconds.
+    // Simulate the system.
     RungeKuttaMersonIntegrator integ(system);
     // We need an upper limit on the step size, otherwise the large step sizes
-    // used by the integrator will cause the cable to pass through the wrapping
+    // taken by the integrator will cause the cable to pass through the wrapping
     // obstacles.
-    integ.setMaximumStepSize(1e-1);
+    integ.setMaximumStepSize(1e-2);
     TimeStepper ts(system, integ);
     ts.initialize(s);
-    ts.stepTo(20.0);
+    ts.stepTo(5.0);
 }
