@@ -301,100 +301,43 @@ int main()
     // Add the second via point.
     cable.addViaPoint(cableViaPointBody2, Vec3{0.});
 
-    // Visaulize the system.
+    // Add prescribed motion constraints.
+    Constraint::PrescribedMotion(matter, 
+                                 new Function::Sinusoid(1.0, Pi, 0.0),
+                                 cableOriginBody, MobilizerQIndex(0));
+    Constraint::PrescribedMotion(matter, 
+                                 new Function::Sinusoid(5.0, 1.5 * Pi, 0.0),
+                                 cableOriginBody, MobilizerQIndex(1));
+    Constraint::PrescribedMotion(matter, 
+                                 new Function::Sinusoid(5.0, 2.0 * Pi, 0.0),
+                                 cableOriginBody, MobilizerQIndex(2));
+    Constraint::PrescribedMotion(matter, 
+                                 new Function::Sinusoid(0.5, 1.5 * Pi, 0.5*Pi),
+                                 cableViaPointBody1, MobilizerQIndex(1));
+    Constraint::PrescribedMotion(matter, 
+                                 new Function::Sinusoid(2.0, Pi, 0.0),
+                                 cableViaPointBody2, MobilizerQIndex(2));
+
+    // Visualize the system.
     system.setUseUniformBackground(true); // no ground plane in display
     Visualizer viz(system);
+    viz.setShowFrameNumber(true);
     viz.addDecorationGenerator(new CableDecorator(system, cable));
+    system.addEventReporter(new Visualizer::Reporter(viz, 0.1*1./30));
     ShowStuff showStuff(cables, 1e-3);
 
-    // Initialize the system and s.
+    // Initialize the system and state.
     system.realizeTopology();
     State s = system.getDefaultState();
     system.realize(s, Stage::Position);
 
-    system.realize(s, Stage::Report);
-    viz.report(s);
-    showStuff.handleEvent(s);
-
-    std::cout << "Hit ENTER ..., or q\n";
-    const char ch = getchar();
-    if (ch == 'Q' || ch == 'q') {
-        return 0;
-    }
-
-    Real angle = 0.;
-    while (true) {
-        system.realize(s, Stage::Position);
-        cable.calcLength(s);
-        viz.report(s);
-
-        // Move the cable origin.
-        angle += 0.01;
-        cableOriginBody.setQ(
-            s,
-            Vec3(sin(angle), 5. * sin(angle * 1.5), 5. * sin(angle * 2.)));
-
-        // Move the first via point.
-        cableViaPointBody1.setQ(
-            s,
-            Vec3(0., 0.5 * cos(angle), 0.));
-
-        // Move the second via point.
-        cableViaPointBody2.setQ(
-            s,
-            Vec3(0., 0., 2. * sin(angle)));
-    }
+    // Simulate for 20 seconds.
+    RungeKuttaMersonIntegrator integ(system);
+    // We need an upper limit on the step size, otherwise the large step sizes
+    // used by the integrator will cause the cable to pass through the wrapping
+    // obstacles.
+    integ.setMaximumStepSize(1e-1);
+    TimeStepper ts(system, integ);
+    ts.initialize(s);
+    ts.stepTo(20.0);
 }
-
-// int main() {
-//     // Define the system.
-//     MultibodySystem system;
-//     SimbodyMatterSubsystem matter(system);
-//     GeneralForceSubsystem forces(system);
-//     CableSubsystem cables(system);
-//     Force::Gravity gravity(forces, matter, -YAxis, 9.8);
-
-//     // Describe mass and visualization properties for a generic body.
-//     Body::Rigid bodyInfo(MassProperties(1.0, Vec3(0), UnitInertia(1)));
-//     bodyInfo.addDecoration(Transform(), DecorativeSphere(0.1));
-
-//     // Create the moving (mobilized) bodies of the pendulum.
-//     MobilizedBody::Pin pendulum1(matter.Ground(), Transform(Vec3(0)),
-//             bodyInfo, Transform(Vec3(0, 1, 0)));
-//     MobilizedBody::Pin pendulum2(pendulum1, Transform(Vec3(0)),
-//             bodyInfo, Transform(Vec3(0, 1, 0)));
-
-//     // Add a cable.
-//     CableSpan cable(
-//         cables,
-//         matter.Ground(),
-//         Vec3{0.25, 0.0, 0.0},
-//         pendulum2,
-//         Vec3{0.0, 0.5, 0.0});
-//     cable.addObstacle(
-//         pendulum1,
-//         Transform(Vec3(0.2, 0.0, 0.0)),
-//         std::shared_ptr<ContactGeometry>(
-//             new ContactGeometry::Cylinder(0.1)),
-//         Vec3{0.1, 0.0, 0.0});
-//     cable.setAlgorithm(CableSpanAlgorithm::Scholz2015);
-
-//     // Visualize the system.
-//     system.setUseUniformBackground(true);
-//     Visualizer viz(system);
-//     viz.addDecorationGenerator(new CableDecorator(system, cable));
-//     system.addEventReporter(new Visualizer::Reporter(viz, 0.01));
-
-//     // Initialize the system and s.
-//     system.realizeTopology();
-//     State state = system.getDefaultState();
-
-//     // Initialize the system and state.
-//     pendulum2.setRate(state, 5.0);
-
-//     // Simulate for 20 seconds.
-//     ExplicitEulerIntegrator integ(system);
-//     TimeStepper ts(system, integ);
-//     ts.initialize(state);
-//     ts.stepTo(20.0);
-// }
