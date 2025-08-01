@@ -1619,21 +1619,6 @@ public:
 
 private:
     //--------------------------------------------------------------------------
-    // Private Cache Access.
-    //--------------------------------------------------------------------------
-    // UnitVec3& updIncomingDirection(const State& state) const
-    // {
-    //     return Value<UnitVec3>::updDowncast(
-    //         getSubsystem().updCacheEntry(state, m_indexIncomingDirection));
-    // }
-
-    // UnitVec3& updOutgoingDirection(const State& state) const
-    // {
-    //     return Value<UnitVec3>::updDowncast(
-    //         getSubsystem().updCacheEntry(state, m_indexOutgoingDirection));
-    // }
-
-    //--------------------------------------------------------------------------
     // Data
     //--------------------------------------------------------------------------
     // Subsystem info.
@@ -1806,11 +1791,17 @@ public:
     {
         m_indexDataInst = indexOfDataInstEntry;
 
+        // Initialize the length of the via point tangent vectors to the number 
+        // of via points in the cable.
+        CableSpanData::Position dataPos;
+        const int nViaPoints = getNumViaPoints();
+        dataPos.viaPointInTangents_G.resize(nViaPoints);
+        dataPos.viaPointOutTangents_G.resize(nViaPoints);
         m_indexDataPos = updSubsystem().allocateCacheEntry(
             state,
             Stage::Position,
             Stage::Infinity,
-            new Value<CableSpanData::Position>());
+            new Value<CableSpanData::Position>(dataPos));
 
         m_indexDataVel = updSubsystem().allocateCacheEntry(
             state,
@@ -3250,7 +3241,6 @@ void calcCurveCorrectionStepSize(
     Real allowedAngularDisplacement,
     Real& maxAllowedStepSize)
 {
-    // const CurveSegmentData::Position& dataPos = curve.getDataPos(s);
     CurveSegmentData::Position& dataPos = curve.updDataPos(s);
 
     // Helper for computing the maximum angular displacement estimate given the
@@ -3542,9 +3532,6 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
     dataPos.loopIter = 0;
     dataPos.originPoint_G = calcOriginPointInGround(s);
     dataPos.terminationPoint_G = calcTerminationPointInGround(s);
-    const int nViaPoints = getNumViaPoints();
-    dataPos.viaPointInTangents_G.resize(nViaPoints);
-    dataPos.viaPointOutTangents_G.resize(nViaPoints);
 
     // This helper function will extract the useful information from the path
     // solver output, and write to the cached CableSpanData.
@@ -3586,8 +3573,8 @@ const CableSpanData::Position& CableSpan::Impl::calcDataPos(
 
     // Compute the station positions of all via points. The via point stations
     // do not change during the solver loop, so we can compute them once here.
-    for (ViaPointIndex ix(0); ix < nViaPoints; ++ix) {
-        getViaPoint(ix).calcStation_G(s);
+    for (const ViaPoint& viaPoint : m_viaPoints) {
+        viaPoint.calcStation_G(s);
     }
 
     // Iterate over all cable segments and solve the sub-problem associated
