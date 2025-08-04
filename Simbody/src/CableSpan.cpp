@@ -1443,35 +1443,6 @@ public:
         int numSamples,
         const std::function<void(Vec3 point_G)>& sink) const;
 
-
-    //--------------------------------------------------------------------------
-    // Cache Access.
-    //--------------------------------------------------------------------------
-
-    CurveSegmentData::Instance& updDataInst(const State& state) const
-    {
-        return Value<CurveSegmentData::Instance>::updDowncast(
-            getSubsystem().updDiscreteVarUpdateValue(state, m_indexDataInst));
-    }
-
-    const CurveSegmentData::Instance& getPrevDataInst(const State& state) const
-    {
-        return Value<CurveSegmentData::Instance>::downcast(
-            getSubsystem().getDiscreteVariable(state, m_indexDataInst));
-    }
-
-    CurveSegmentData::Instance& updPrevDataInst(State& state) const
-    {
-        return Value<CurveSegmentData::Instance>::updDowncast(
-            getSubsystem().updDiscreteVariable(state, m_indexDataInst));
-    }
-
-    CurveSegmentData::Position& updDataPos(const State& state) const
-    {
-        return Value<CurveSegmentData::Position>::updDowncast(
-            getSubsystem().updCacheEntry(state, m_indexDataPos));
-    }
-
     //--------------------------------------------------------------------------
     // Data
     //--------------------------------------------------------------------------
@@ -4394,24 +4365,6 @@ int CableSubsystem::Impl::realizeSubsystemReportImpl(const State& state) const
 {
     for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
         getCable(ix).getImpl().realizeReport(state);
-    }
-
-    return 0;
-}
-
-int CableSubsystem::Impl::realizeSubsystemPositionImpl(const State& state) const
-{
-    for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
-        getCable(ix).getImpl().realizePosition(state);
-    }
-
-    return 0;
-}
-
-int CableSubsystem::Impl::realizeSubsystemVelocityImpl(const State& state) const
-{
-    for (CableSpanIndex ix(0); ix < cables.size(); ++ix) {
-        getCable(ix).getImpl().realizeVelocity(state);
     }
 
     return 0;

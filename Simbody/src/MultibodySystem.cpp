@@ -98,7 +98,6 @@ int MultibodySystem::setDecorationSubsystem(DecorationSubsystem& m) {
 int MultibodySystem::setContactSubsystem(GeneralContactSubsystem& m) {
     return updRep().setContactSubsystem(m);
 }
-
 int MultibodySystem::setCableSubsystem(CableSubsystem& m) {
     return updRep().setCableSubsystem(m);
 }
@@ -139,11 +138,11 @@ bool MultibodySystem::hasContactSubsystem() const {
     return getRep().hasContactSubsystem();
 }
 
-const CableSubsystem&
+const CableSubsystem&       
 MultibodySystem::getCableSubsystem() const {
     return getRep().getCableSubsystem();
 }
-CableSubsystem&
+CableSubsystem&       
 MultibodySystem::updCableSubsystem() {
     return updRep().updCableSubsystem();
 }
@@ -292,7 +291,7 @@ int MultibodySystemRep::realizeVelocityImpl(const State& s) const {
     return 0;
 }
 int MultibodySystemRep::realizeDynamicsImpl(const State& s) const {
-    getGlobalSubsystem().getRep().realizeSubsystemDynamics(s);  
+    getGlobalSubsystem().getRep().realizeSubsystemDynamics(s);
     if (hasContactSubsystem())
         getContactSubsystem().getSubsystemGuts().realizeSubsystemDynamics(s);
 
