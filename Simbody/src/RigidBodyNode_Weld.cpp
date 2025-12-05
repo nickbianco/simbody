@@ -325,9 +325,55 @@ public:
     void multiplyBySystemJacobian(
         const SBTreePositionCache&  pc,
         const Real*                 v,
-        SpatialVec*                 Jv) const override    
+        SpatialVec*                 Jv) const override
     {
         Jv[0] = SpatialVec(Vec3(0));
+    }
+
+    void multiplyByScaledSystemJacobian(
+        const SBStateDigest&        sbs,
+        const Vector_<Vec3>&        scales,
+        const Real*                 v,
+        SpatialVec*                 Jv) const override
+    {
+        Jv[0] = SpatialVec(Vec3(0));
+    }
+
+    void multiplyByPositionJacobianWrtBodyScales(
+        const SBTreePositionCache& /*pc*/,
+        const Vector_<Vec3>&       /*ds*/,
+        Vec3*                      dp) const override
+    {
+        dp[0] = Vec3(0);
+    }
+
+    void multiplyByScaledSystemJacobianTranspose(
+        const SBStateDigest& /*sbs*/,
+        const Vector_<Vec3>& /*scales*/,
+        PhiMatrix*           phiTmp,
+        SpatialVec*          zTmp,
+        const SpatialVec*    F,
+        Real*                /*JtF*/) const override
+    {
+        zTmp[0] = F[0];
+        for (unsigned i = 0; i < children.size(); ++i) {
+            const int childNum = children[i]->getNodeNum();
+            zTmp[0] += phiTmp[childNum] * zTmp[childNum];
+        }
+        // Ground has no generalized speeds so no contribution to JtF.
+    }
+
+    void multiplyByPositionJacobianWrtBodyScalesTranspose(
+        const SBTreePositionCache& /*pc*/,
+        Vec3*                      pTmp,
+        const Vec3*                p,
+        Vec3*                      /*s*/) const override
+    {
+        pTmp[0] = p[0];
+        for (unsigned i = 0; i < children.size(); ++i) {
+            pTmp[0] += pTmp[children[i]->getNodeNum()];
+        }
+        // Ground has no parent or mobilizer so no s contribution.
     }
 
     void multiplyBySystemJacobianTranspose(
@@ -648,7 +694,45 @@ public:
         // Shift parent's result outward (ground result is 0).
         const SpatialVec outP = ~getPhi(pc) * Jv[parent->getNodeNum()];
 
-        out = outP;  
+        out = outP;
+    }
+
+    void multiplyByScaledSystemJacobian(
+        const SBStateDigest&        sbs,
+        const Vector_<Vec3>&        scales,
+        const Real*                 v,
+        SpatialVec*                 Jv) const override
+    {
+        SpatialVec& out = Jv[nodeNum];
+        const SBTreePositionCache& pc = sbs.getTreePositionCache();
+
+        PhiMatrix phiScaled;
+        calcScaledPhi(pc, scales, getX_FM(pc), phiScaled);
+
+        out = ~phiScaled * Jv[parent->getNodeNum()];
+    }
+
+    void multiplyByScaledSystemJacobianTranspose(
+        const SBStateDigest& sbs,
+        const Vector_<Vec3>& scales,
+        PhiMatrix*           phiTmp,
+        SpatialVec*          zTmp,
+        const SpatialVec*    F,
+        Real*                /*JtF*/) const override
+    {
+        const SBTreePositionCache& pc = sbs.getTreePositionCache();
+
+        PhiMatrix phiScaled;
+        calcScaledPhi(pc, scales, getX_FM(pc), phiScaled);
+        phiTmp[nodeNum] = phiScaled;
+
+        SpatialVec& z = zTmp[nodeNum];
+        z = F[nodeNum];
+        for (unsigned i = 0; i < children.size(); ++i) {
+            const int childNum = children[i]->getNodeNum();
+            z += phiTmp[childNum] * zTmp[childNum];
+        }
+        // No generalized speeds so no contribution to JtF.
     }
 
     void multiplyBySystemJacobianTranspose(

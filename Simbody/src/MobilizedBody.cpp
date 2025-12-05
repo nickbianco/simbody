@@ -3175,6 +3175,30 @@ setUToFitVelocity(const State& state, const SpatialVec& V_FM,
         u[i] = uvec[i];
 }
 
+Vec3 MobilizedBody::Custom::Implementation::
+calcScaledMobilizerTranslation(const State& s, const Vec3& s_F) const {
+    return getMobilizerTransform(s).p().elementwiseMultiply(s_F);
+}
+
+SpatialVec MobilizedBody::Custom::Implementation::
+multiplyByScaledHMatrix(const State& s, int nu, const Real* u,
+                        const Vec3& s_F) const {
+    const SpatialVec Hu = multiplyByHMatrix(s, nu, u);
+    return SpatialVec(Hu[0], Hu[1].elementwiseMultiply(s_F));
+}
+
+Vec3 MobilizedBody::Custom::Implementation::
+multiplyByScaledTranslationJacobian(const Vec3& p_FM, const Mat33& Js_FP,
+                                    const Vec3& ds_P) const {
+    return p_FM.elementwiseMultiply(Js_FP * ds_P);
+}
+
+Vec3 MobilizedBody::Custom::Implementation::
+multiplyByScaledTranslationJacobianTranspose(
+        const Vec3& p_FM, const Mat33& Js_FP, const Vec3& dp_F) const {
+    return ~Js_FP * p_FM.elementwiseMultiply(dp_F);
+}
+
 // Constructors without user-specified axes for function-based mobilized body
 MobilizedBody::FunctionBased::FunctionBased
    (MobilizedBody& parent, const Body& body, 

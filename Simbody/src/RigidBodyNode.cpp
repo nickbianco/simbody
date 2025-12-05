@@ -41,7 +41,155 @@ void RigidBodyNode::addChild(RigidBodyNode* child) {
     children.push_back( child );
 }
 
+//==============================================================================
+//                             CALC SCALED X_FM
+//==============================================================================
+void RigidBodyNode::calcScaledX_FM(
+        const SBStateDigest& sbs,
+        const Real* q,      int nq,
+        const Real* qCache, int nQCache,
+        const Vec3& s_P,
+        Transform&  X_F0M0_scaled) const
+{
+    // Default behavior: no scaling associated with the mobilizer.
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    X_F0M0_scaled = getX_FM(pc);
+}
 
+//==============================================================================
+//                              CALC SCALED PHI
+//==============================================================================
+void RigidBodyNode::calcScaledPhi(
+        const SBTreePositionCache&  pc,
+        const Vector_<Vec3>&        s,
+        const Transform&            X_FM_scaled,
+        PhiMatrix&                  phi_scaled) const
+{
+    const Vec3& s_B = s[nodeNum];
+    const Vec3& s_P = s[parent->getNodeNum()];
+
+    // Recalculate the position vector from the parent body P to the parent's
+    // mobilizer frame F, accounting for the parent body scaling.
+    const Vec3& r_PF       = getX_PF().p();
+    const Rotation& R_PF   = getX_PF().R();
+    const Vec3 r_PF_scaled = r_PF.elementwiseMultiply(s_P);
+
+    // Recalculate the position vector from the child body B to the child's
+    // mobilizer frame M, accounting for the child body scaling.
+    const Vec3& r_BM     = getX_BM().p();
+    const Rotation& R_MB = getX_MB().R();
+    // We apply the scaling in B and then re-express in M, because we will
+    // multiply by R_FM below to calculate r_PB_scaled. Flip the sign because
+    // we are going from M to B.
+    const Vec3 r_MB_scaled = -R_MB * r_BM.elementwiseMultiply(s_B);
+
+    // Finally, recalculate the position vector from the parent frame P to the
+    // child body origin B so we can generate a new Phi matrix.
+    const Vec3&     r_FM_scaled = X_FM_scaled.p();
+    const Rotation& R_FM        = X_FM_scaled.R(); // unaffected by scaling
+    const Vec3 r_PB_scaled      = r_PF_scaled +
+                                  R_PF * (r_FM_scaled + R_FM * r_MB_scaled);
+    const Vec3 p_PB_G_scaled = getX_GP(pc).R() * r_PB_scaled;
+    phi_scaled = PhiMatrix(p_PB_G_scaled);
+}
+
+//==============================================================================
+//              MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES
+//==============================================================================
+// Calculate the product JP*ds where JP = dp_GB/ds and a body scale-like vector
+// ds. This will map perturbations ds_B and ds_P of the body and parent scale
+// factors, respectively, to the resulting perturbation dp_GB of the position of
+// this body's origin in Ground. Requires that the position cache is available
+// (Stage::Position or higher).
+//
+// Call base to tip.
+void RigidBodyNode::multiplyByPositionJacobianWrtBodyScales(
+        const SBTreePositionCache& pc,
+        const Vector_<Vec3>&       ds,
+        Vec3*                      dp) const
+{
+    const MobilizedBodyIndex parentNum = parent->getNodeNum();
+    const Vec3& ds_B = ds[nodeNum];
+    const Vec3& ds_P = ds[parentNum];
+
+    const Rotation& R_PF = getX_PF().R();
+    const Rotation& R_GP = getX_GP(pc).R();
+    const Rotation& R_FM = getX_FM(pc).R();
+
+    // Compute the contributions of the parent scale factor changes to the
+    // displacements of the mobilizer frame F and to any relevant mobilizer
+    // translations.
+    const Vec3 dp_PF = getX_PF().p().elementwiseMultiply(ds_P);
+
+    // Compute the contribution of the parent scale factor changes to the
+    // change in the translational component of the mobilizer, p_FM. The
+    // mobilizer-specific Jacobian J_FP maps parent scale factor changes in P
+    // to the changes in F, accounting for the fact that the axes of F with
+    // stretch differently than the axes of P based on the (fixed) relative
+    // orientation of F in P.
+    const Vec3 dp_FM = multiplyByScaledTranslationJacobian(pc, ds_P);
+
+    // Compute the contribution of this body's scale factor changes to the
+    // displacement of the body's mobilizer frame M.
+    const Rotation& R_MB = getX_MB().R();
+    // Minus sign since we are going from M to B, and the scaling is applied in
+    // B.
+    const Vec3 dp_MB = -R_MB * ds_B.elementwiseMultiply(getX_BM().p());
+
+    // Sum all contributions and express in ground.
+    const Vec3 dp_local = R_GP * (dp_PF + R_PF * (dp_FM + R_FM * dp_MB));
+    dp[nodeNum] = dp[parentNum] + dp_local;
+}
+
+//==============================================================================
+//          MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES TRANSPOSE
+//==============================================================================
+// Compute ~JP*dp where JP = dp_GB/ds and a position-like vector dp. This
+// operation will map position perturbations dp_GB of this body B's origin in
+// Ground to the resulting perturbations ds_B and ds_P of the body and parent
+// scale factors, respectively. Requires that the position cache is available
+// (Stage::Position or higher).
+//
+// Call tip to base.
+void RigidBodyNode::multiplyByPositionJacobianWrtBodyScalesTranspose(
+        const SBTreePositionCache& pc,
+        Vec3*                      dpTmp,
+        const Vec3*                dp,
+        Vec3*                      ds) const
+{
+    // Sum the translational displacements dp from this body and all children.
+    // Expressed in Ground.
+    Vec3& dp_G = dpTmp[nodeNum];
+    dp_G = dp[nodeNum];
+    for (unsigned i = 0; i < children.size(); ++i) {
+        dp_G += dpTmp[children[i]->getNodeNum()];
+    }
+
+    const Rotation& R_GP = getX_GP(pc).R();
+    const Rotation& R_PF = getX_PF().R();
+    const Rotation& R_FM = getX_FM(pc).R();
+
+    // Re-express dp_G in the parent frame P and in mobilizer frames F and M.
+    const Vec3 dp_P = ~R_GP * dp_G;
+    const Vec3 dp_F = ~R_PF * dp_P;
+    const Vec3 dp_M = ~R_FM * dp_F;
+
+    // Contribute to this node's entry into ds based on the shift in the
+    // mobilizer frame M. This is the transpose of dp_MB = r_MB ⊙ ds_B.
+    const Rotation& R_BM = getX_BM().R();
+    const Vec3& r_MB = getX_MB().p();
+    const Vec3& r_MB_in_B = R_BM * r_MB;
+    ds[nodeNum] += r_MB_in_B.elementwiseMultiply(R_BM * dp_M);
+
+    // Contribute to the parent node's entry into ds based on the mobilizer
+    // translations. This is the transpose of dp_FM = J_FP * ds_P.
+    ds[parent->getNodeNum()] +=
+        multiplyByScaledTranslationJacobianTranspose(pc, dp_F);
+
+    // Contribute to the parent node's entry into ds based on the shift in the
+    // mobilizer frame F. This is the transpose of dp_PF = r_PF ⊙ ds_P.
+    ds[parent->getNodeNum()] += dp_P.elementwiseMultiply(getX_PF().p());
+}
 
 //==============================================================================
 //                    CALC JOINT INDEPENDENT KINEMATICS POS

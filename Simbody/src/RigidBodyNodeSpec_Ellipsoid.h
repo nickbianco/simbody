@@ -95,7 +95,7 @@ RBNodeEllipsoid(const MassProperties& mProps_B,
 }
 
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
-                       Vector& q) const 
+                       Vector& q) const
 {
     if (this->getUseEulerAngles(sbs.getModelVars()))
         this->toQ(q)    = R_FM.convertRotationToBodyFixedXYZ();
@@ -242,6 +242,32 @@ void calcX_FM(const SBStateDigest& sbs,
     X_F0M0.updP() = Vec3(semi[0]*n[0], semi[1]*n[1], semi[2]*n[2]);
 }
 
+void calcScaledX_FM(const SBStateDigest& sbs,
+                    const Real* q,      int nq,
+                    const Real* qCache, int nQCache,
+                    const Vec3& s_P,
+                    Transform&  X_F0M0_scaled) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    X_F0M0_scaled = this->findX_F0M0(pc);
+    const Vec3 s_F = this->calcParentScalesInF(s_P);
+    X_F0M0_scaled.updP() = X_F0M0_scaled.p().elementwiseMultiply(s_F);
+}
+
+Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
+        const Vec3& ds_P) const override {
+    const Vec3 p_FM = this->findX_F0M0(pc).p();
+    const Mat33& Js_FP = this->getJs_FP();
+    return p_FM.elementwiseMultiply(Js_FP * ds_P);
+}
+
+Vec3 multiplyByScaledTranslationJacobianTranspose(const SBTreePositionCache& pc,
+        const Vec3& dp_F) const override {
+    const Vec3 p_FM = this->findX_F0M0(pc).p();
+    const Mat33& Js_FP = this->getJs_FP();
+    return ~Js_FP * p_FM.elementwiseMultiply(dp_F);
+}
+
 // Generalized speeds are the angular velocity expressed in F, so they
 // cause rotations around F x,y,z axes respectively. (9 flops)
 void calcAcrossJointVelocityJacobian(
@@ -258,6 +284,26 @@ void calcAcrossJointVelocityJacobian(
     H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
     H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
     H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*semi[0], n[0]*semi[1],       0     ) );
+}
+
+void calcScaledAcrossJointVelocityJacobian(
+    const SBStateDigest& sbs,
+    const Vec3& s_P,
+    HType&      H_F0M0_scaled) const
+{
+    // Unlike calcAcrossJointVelocityJacobian(), use "get" here since we should
+    // already be realized to the position stage.
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+
+    const Vec3 s_F = this->calcParentScalesInF(s_P);
+    const Vec3 s = semi.elementwiseMultiply(s_F);
+    const Vec3& n = this->findX_F0M0(pc).z();
+    H_F0M0_scaled(0) = SpatialVec(Vec3(1,0,0),
+                                  Vec3(         0, -n[2]*s[1],  n[1]*s[2]));
+    H_F0M0_scaled(1) = SpatialVec(Vec3(0,1,0),
+                                  Vec3( n[2]*s[0],          0, -n[0]*s[2]));
+    H_F0M0_scaled(2) = SpatialVec(Vec3(0,0,1),
+                                  Vec3(-n[1]*s[0],  n[0]*s[1],          0));
 }
 
 // Calculate time derivative of H_FM, which is *not* constant. (18 flops)

@@ -41,7 +41,28 @@ this mobilizer are also the same as for a Ball mobilizer, that is
 the three measure numbers of the angular velocity vector w_FM, the
 relative angular velocity of the outboard M frame in the inboard F frame,
 expressed in the F frame. That is unchanged by setting the "use Euler
-angles" modeling option. Note that qdot != u for this mobilizer. **/
+angles" modeling option. Note that qdot != u for this mobilizer.
+
+<h3>Mobilizer Scaling</h3>
+
+The ellipsoid surface is embedded in the inboard (parent) mobilizer frame F.
+When the parent body is scaled by XYZ scale factors \c s_P, the ellipsoid
+semi-axes scale accordingly. The effective scale factor for each F-frame axis
+\e i is
+
+  s_F[i] = ||s_P .* R_PF.col(i)||
+
+where R_PF is the (fixed) orientation of F in P.
+
+The contact point p_FM (the position of the M-frame origin relative to the
+F-frame origin, expressed in F) scales element-wise by s_F:
+
+  p_FM_scaled = p_FM .* s_F
+
+The translational components of the velocity Jacobian H_FM are also scaled by
+s_F, since they are a function of the ellipsoid semi-axis dimensions.
+
+**/
 class SimTK_SIMBODY_EXPORT MobilizedBody::Ellipsoid : public MobilizedBody {
 public:
     /** Default constructor provides an empty handle that can be assigned to

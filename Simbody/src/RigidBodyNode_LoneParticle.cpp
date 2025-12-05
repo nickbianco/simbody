@@ -239,6 +239,41 @@ void multiplyBySystemJacobian(
     out[1] += in;
 }
 
+void multiplyByScaledSystemJacobian(
+        const SBStateDigest&        sbs,
+        const Vector_<Vec3>&        scales,
+        const Real*                 v,
+        SpatialVec*                 Jv) const override {
+    const Vec3& in = Vec3::getAs(&v[uIndex]);
+    SpatialVec& out = Jv[nodeNum];
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+
+    PhiMatrix phiScaled;
+    calcScaledPhi(pc, scales, getX_FM(pc), phiScaled);
+    out = ~phiScaled * Jv[parent->getNodeNum()];
+    out[1] += in;
+}
+
+void multiplyByScaledSystemJacobianTranspose(
+        const SBStateDigest& sbs,
+        const Vector_<Vec3>& scales,
+        PhiMatrix*           phiTmp,
+        SpatialVec*          zTmp,
+        const SpatialVec*    F,
+        Real*                JtF) const override {
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+
+    PhiMatrix phiScaled;
+    calcScaledPhi(pc, scales, getX_FM(pc), phiScaled);
+    phiTmp[nodeNum] = phiScaled;
+
+    Vec3& out = Vec3::updAs(&JtF[getUIndex()]);
+    SpatialVec& z = zTmp[nodeNum];
+    z = F[nodeNum];
+    // LoneParticle is always a leaf so no children to accumulate.
+    out = z[1];
+}
+
 void multiplyBySystemJacobianTranspose(
         const SBTreePositionCache&  pc, 
         SpatialVec*                 zTmp,

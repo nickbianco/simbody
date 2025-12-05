@@ -1227,6 +1227,505 @@ SpatialVec calcBiasForFrameJacobian(const State&         state,
 /**@}**/
 
 //==============================================================================
+/** @name               Scaled System Jacobian Operators
+ */
+
+/**@{**/
+
+/** Calculate the product of the scaled %System kinematic Jacobian J(q,s) and a
+mobility-space vector u in O(n) time, where s is a vector of scale factors for
+each mobilized body in the system. If the vector u is a set of generalized
+speeds, then this produces the body spatial velocities that result from those
+generalized speeds. That is, the result is V_GB = J(q,s)*u where V_GB[i] is the
+spatial velocity of the i'th body's body frame origin (in Ground) that results
+from the given set of generalized speeds.
+
+@param[in]      state
+    A State compatible with this System that has already been realized to
+    Stage::Position.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      u
+    A mobility-space Vector, such as a set of generalized speeds. The length
+    and order must match the mobilities of this system (that is n, the number
+    of generalized speeds u, \e not nq, the number of generalized
+    coordinates q).
+@param[out]     Ju
+    This is the product V=J(q,s)*u as described above. Each element is a spatial
+    vector, one per mobilized body, to be indexed by MobilizedBodyIndex.
+    If the input vector is a set of generalized speeds u, then the results
+    are nb spatial velocities V_GBi (that is, a pair of vectors w_GBi and v_GBi
+    giving angular and linear velocity). Note that Ground is body 0 so the 0th
+    element V_GB0=V_GG=Ju[0] is always zero on return.
+
+<h3>Performance discussion</h3>
+This operator costs about 162*nb + 57*nu flops, where nb is the number of bodies
+and nu the number of mobilities. This is roughly 10X more expensive than the
+unscaled version of this operator, multiplyBySystemJacobian(), because the
+introduction of the scale factors require recalculating position-level
+between parent and child bodies for each mobilizer in the system. If the system
+includes mobilizers with translations that scale with body scale factors (e.g.,
+MobilizedBody::Ellipsoid), then the cost will be slightly higher.
+
+@see multiplyByScaledSystemJacobianTranspose(), multiplyBySystemJacobian() **/
+void multiplyByScaledSystemJacobian(const State&         state,
+                                    const Vector_<Vec3>& s,
+                                    const Vector&        u,
+                                    Vector_<SpatialVec>& Ju) const;
+
+/** Calculate the product of the transposed, scaled kinematic Jacobian ~J(q,s)
+(==J(q,s)^T) and a vector F_G of spatial force-like elements, one per body, in
+O(n) time to produce a generalized force-like result f=~J(q,s)*F, where s is a
+vector of scale factors for each mobilized body in the system. If F_G is
+actually a set of spatial forces applied at the body frame origin of each body,
+and expressed in the Ground frame, then the result is the equivalent set of
+generalized forces f that would produce the same accelerations as F_G.
+
+@param[in]      state
+    A State compatible with this System that has already been realized to
+    Stage::Position.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      F_G
+    This is a vector of SpatialVec elements, one per mobilized body and in
+    order of MobilizedBodyIndex (with the 0th entry a force on Ground; hence
+    ignored). Each SpatialVec is a spatial force-like pair of 3-vectors
+    (torque,force) with the force applied at the body origin and the vectors
+    expressed in Ground.
+@param[out]     f
+    This is the product f=~J(q,s)*F_G as described above. This result is in the
+    generalized force space, that is, it has one scalar entry for each of the
+    n system mobilities (velocity degrees of freedom). Resized if necessary.
+
+<h3>Performance discussion</h3>
+This operator costs about 180*nb + 57*nu flops, where nb is the number of bodies
+and nu the number of mobilities. This is roughly 10X more expensive than the
+unscaled version of this operator, multiplyBySystemJacobianTranspose(), because
+the introduction of the scale factors require recalculating position-level
+between parent and child bodies for each mobilizer in the system. If the system
+includes mobilizers with translations that scale with body scale factors (e.g.,
+MobilizedBody::Ellipsoid), then the cost will be slightly higher.
+
+@see multiplyByScaledSystemJacobian(), multiplyBySystemJacobianTranspose() **/
+void multiplyByScaledSystemJacobianTranspose(
+    const State&               state,
+    const Vector_<Vec3>&       s,
+    const Vector_<SpatialVec>& F_G,
+    Vector&                    f) const;
+
+/** Calculate the Cartesian ground-frame velocities of a set of task stations
+(points fixed on bodies) for a scaled system that results from a particular set
+of generalized speeds u. The result is the station velocities measured and
+expressed in Ground. Cost is about 30*nt + 162*nb + 57*nu flops, where nt is the
+number of station tasks, nb is the number of bodies, and nu is the number of
+mobilities.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the stations of
+    interest are fixed.
+@param[in]      p_BS
+    The array of nt station points P of interest (one per task), each
+    corresponding to one of the bodies B from \a onBodyB, given as vectors
+    from each body B's origin Bo to its station P, expressed in frame B.
+@param[in]      u
+    A mobility-space Vector, such as a set of generalized speeds. The length
+    and order must match the mobilities of this system (that is n, the number
+    of generalized speeds u, \e not nq, the number of generalized
+    coordinates q).
+@param[out]     JSu
+    The resulting product JS(q,s)*u, where JS(q,s) is the scaled station task
+    Jacobian. Resized to nt if needed.
+
+@see multiplyByScaledStationJacobianTranspose(), multiplyByStationJacobian() **/
+void multiplyByScaledStationJacobian(
+    const State&                      state,
+    const Vector_<Vec3>&              s,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BS,
+    const Vector&                     u,
+    Vector_<Vec3>&                    JSu) const;
+
+/** Alternate signature for when you just have a single station task.
+@returns JS(q,s)*u, where JS(q,s) is the scaled station task Jacobian. **/
+Vec3 multiplyByScaledStationJacobian(
+    const State&         state,
+    const Vector_<Vec3>& s,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BS,
+    const Vector&        u) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BS, &p_BS+1);
+    Vector_<Vec3>                       JSu(1);
+    multiplyByScaledStationJacobian(state, s, bodies, stations, u, JSu);
+    return JSu[0];
+}
+
+/** Calculate the generalized forces resulting from a single force applied
+to a set of nt station tasks (points fixed to bodies) P for a scaled system. The
+applied forces f_GS (or force-like quantities) should be 3-vectors expressed in
+Ground. Cost is about 33*nt + 180*nb + 57*nu flops, where nt is the
+number of station tasks, nb is the number of bodies, and nu is the number of
+mobilities.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system. Each
+    element is a Vec3 of values representing the body's XYZ scale factors, i.e.,
+    along each axis of the body frame.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the stations of
+    interest are fixed.
+@param[in]      p_BS
+    The array of nt station points P of interest (one per task), each
+    corresponding to one of the bodies B from \a onBodyB, given as vectors
+    from each body B's origin Bo to its station P, expressed in frame B.
+@param[in]      f_GS
+    A vector of nt 3-vectors, each giving a force applied at one of the stations
+    P, expressed in Ground.
+@param[out]     f
+    The resulting product f=~JS(q,s)*f_GS, where JS(q,s) is the scaled station task
+    Jacobian. This result is in the generalized force space, that is, it has
+    one scalar entry for each of the n system mobilities. Resized if necessary.
+
+@see multiplyByScaledStationJacobian(), multiplyByStationJacobianTranspose() **/
+void multiplyByScaledStationJacobianTranspose(
+    const State&                      state,
+    const Vector_<Vec3>&              scales,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BS,
+    const Vector_<Vec3>&              f_GS,
+    Vector&                           f) const;
+
+/** Alternate signature for when you just have a single station task. **/
+void multiplyByScaledStationJacobianTranspose(
+    const State&         state,
+    const Vector_<Vec3>& scales,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BS,
+    const Vec3&          f_GS,
+    Vector&              f) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BS, &p_BS+1);
+    Vector_<Vec3>                       forces(1, f_GS);
+    multiplyByScaledStationJacobianTranspose(state, scales, bodies, stations,
+                                             forces, f);
+}
+
+/** Calculate the spatial velocities of a set of nt task frames A={Ai} fixed to
+nt bodies B={Bi} for a scaled system that result from a particular set of n
+generalized speeds u. The result is each task frame's angular and linear
+velocity measured and expressed in Ground. Cost is about 30*nt + 162*nb + 57*nu
+flops where nt is the number of frame tasks, nb is the number of bodies, and nu
+is the number of mobilities.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the task frames of
+    interest are fixed. These may be in any order and the same body may appear
+    more than once if there are multiple task frames on it.
+@param[in]      p_BA
+    An array of nt frame origin points Ao for the task frames of interest (one
+    per task), each corresponding to one of the bodies B from \a onBodyB, given
+    as vectors from each body B's origin Bo to its task frame origin Ao,
+    expressed in frame B.
+@param[in]      u
+    A mobility-space Vector, such as a set of generalized speeds. The length
+    and order must match the mobilities of this system (that is n, the number
+    of generalized speeds u, \e not nq, the number of generalized
+    coordinates q).
+@param[out]     JFu
+    The resulting product JF(s)*u, where JF(s) is the scaled frame task
+    Jacobian. Resized if needed to a Vector of nt SpatialVec entries.
+
+@see multiplyByScaledFrameJacobianTranspose(), multiplyByFrameJacobian() **/
+void multiplyByScaledFrameJacobian(
+    const State&                      state,
+    const Vector_<Vec3>&              s,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BA,
+    const Vector&                     u,
+    Vector_<SpatialVec>&              JFu) const;
+
+/** Simplified signature for when you just have a single frame task.
+@returns JF(q,s)*u, where JF(q,s) is the scaled single frame task Jacobian. **/
+SpatialVec multiplyByScaledFrameJacobian(
+    const State&         state,
+    const Vector_<Vec3>& s,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BA,
+    const Vector&        u) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BA, &p_BA+1);
+    Vector_<SpatialVec>                 JFu(1);
+    multiplyByScaledFrameJacobian(state, s, bodies, stations, u, JFu);
+    return JFu[0];
+}
+
+/** Calculate the n generalized forces f resulting from a set of spatial forces
+(torque,force pairs) F applied at nt task frames Ai fixed to nt bodies Bi for a
+scaled system. The applied forces are spatial vectors (pairs of 3-vectors)
+expressed in Ground. Cost is about 33*nt + 180*nb + 57*nu flops where nt is the
+number of frame tasks, nb is the number of bodies, and nu is the number of
+mobilities.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the task frames of
+    interest are fixed. These may be in any order and the same body may appear
+    more than once if there are multiple task frames on it.
+@param[in]      p_BA
+    An array of nt frame origin points Ao for the task frames of interest (one
+    per task), each corresponding to one of the bodies B from \a onBodyB, given
+    as vectors from each body B's origin Bo to its task frame origin Ao,
+    expressed in frame B.
+@param[in]      F_GA
+    A Vector of nt spatial forces, each applied one of the task frames. These
+    are expressed in Ground.
+@param[out]     f
+    The Vector of n generalized forces that results from applying the forces
+    \a F_GA to the task frames. Resized if necessary.
+
+@see multiplyByScaledFrameJacobian(), multiplyByFrameJacobianTranspose() **/
+void multiplyByScaledFrameJacobianTranspose(
+    const State&                      state,
+    const Vector_<Vec3>&              s,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BA,
+    const Vector_<SpatialVec>&        F_GA,
+    Vector&                           f) const;
+
+/** Simplified signature for when you just have a single frame task. See the
+other signature for documentation. **/
+void multiplyByScaledFrameJacobianTranspose(
+    const State&         state,
+    const Vector_<Vec3>& s,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BA,
+    const SpatialVec&    F_GA,
+    Vector&              f) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BA, &p_BA+1);
+    const Vector_<SpatialVec>           forces(1, F_GA);
+    multiplyByScaledFrameJacobianTranspose(state, s, bodies, stations,
+                                           forces, f);
+}
+
+/** Calculate the product of the Jacobian JP = partial(p_GB)/partial(s) and a
+body scale-like vector ds in O(n) time. Cost is about 75*nb flops, where nb is
+the number of bodies.
+
+@param[in]      state
+    A State compatible with this System that has already been realized to
+    Stage::Position.
+@param[in]      ds
+    A body scale-like vector, one Vec3 for each mobilized body indexed by
+    MobilizedBodyIndex.
+@param[out]     JPds
+    This is the product JPds=JP*ds as described above. Each element is a
+    position-like Vec3 indexed by MobilizedBodyIndex. The 0th element JPds[0]
+    (for Ground) is always zero. If ds is a vector of body scale perturbations,
+    JPds will be the resulting perturbations in body positions that would be
+    produced by those scale changes. Resized if necessary.
+
+The Jacobian JP is defined as:
+<pre>
+       partial(p_GB)
+  JP = -------------,  p_GB = [p_GB0 ... p_GB(nb-1)]^T,  s = [s0 ... s(nb-1)]^T
+       partial(s)
+</pre>
+where each p_GBi is the 3-vector position of body i's origin in Ground and each
+si is the Vec3 of XYZ scale factors for body i. JP is not block-diagonal:
+changing the scale factors of a body shifts not only that body's origin but
+also the origins of all its descendants in the kinematic tree. The transpose
+~JP maps body position gradients to scale factor gradients; see
+multiplyByPositionJacobianWrtBodyScalesTranspose().
+
+@see multiplyByPositionJacobianWrtBodyScalesTranspose() **/
+void multiplyByPositionJacobianWrtBodyScales(const State& state,
+                                             const Vector_<Vec3>& ds,
+                                             Vector_<Vec3>&       JPds) const;
+
+/** Calculate the product of the transposed position Jacobian ~JP (==JP^T) and a
+position-like vector dp in O(n) time. Cost is 102*nb flops, where nb is the
+number of bodies.
+
+@param[in]      state
+    A State compatible with this System that has already been realized to
+    Stage::Position.
+@param[in]      dp
+    A vector of position-like elements, one Vec3 per mobilized body indexed
+    by MobilizedBodyIndex.
+@param[out]     JPtdp
+    This is the product JPtdp=~JP*dp as described above. Each element is a
+    body-scale-like Vec3 indexed by MobilizedBodyIndex. The 0th
+    element dp[0] (for Ground) is always zero. If dp is a vector of body
+    position perturbations, JPtdp will be the resulting body-scale-like
+    perturbations. Resized if necessary.
+
+@see multiplyByPositionJacobianWrtBodyScales() **/
+void multiplyByPositionJacobianWrtBodyScalesTranspose(
+        const State& state,
+        const Vector_<Vec3>& dp,
+        Vector_<Vec3>&       JPtdp) const;
+
+/** Calculate the product of JS, the station Jacobian with respect to body
+scales, and a body scale-like vector ds in O(n+nt) time, where nt is the number
+of station tasks. Each station S is fixed to a mobilized body B at an unscaled
+body frame offset p_BS.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the stations are
+    fixed.
+@param[in]      p_BS
+    The nt unscaled station offsets (one per task), expressed in body frame B.
+@param[in]      ds
+    A body scale-like vector ds, one Vec3 per mobilized body indexed by
+    MobilizedBodyIndex.
+@param[out]     JSds
+    This is the product JSds=JS*ds as described above. Each element is a
+    position-like Vec3, one for each station task. Resized if necessary.
+
+@see multiplyByStationJacobianWrtBodyScalesTranspose(),
+     multiplyByPositionJacobianWrtBodyScales() **/
+void multiplyByStationJacobianWrtBodyScales(
+    const State&                      state,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BS,
+    const Vector_<Vec3>&              ds,
+    Vector_<Vec3>&                    JSds) const;
+
+/** Simplified signature for when you just have a single frame task. See the
+other signature for documentation. **/
+Vec3 multiplyByStationJacobianWrtBodyScales(
+    const State&         state,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BS,
+    const Vector_<Vec3>& ds) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BS, &p_BS+1);
+    Vector_<Vec3>                       JSds(1);
+    multiplyByStationJacobianWrtBodyScales(state, bodies, stations, ds, JSds);
+    return JSds[0];
+}
+
+/** Calculate the product of ~JS, the transpose of the station Jacobian with
+respect to body scales, and a position-like vector dp in O(n+nt) time, where nt
+is the number of station tasks. Each station S is fixed to a mobilized body B at
+an unscaled body frame offset p_BS.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the stations are
+    fixed.
+@param[in]      p_BS
+    The nt unscaled station offsets (one per task), expressed in body frame B.
+@param[in]      dp
+    The nt position-like vectors (one per task), expressed in Ground.
+@param[out]     JStdp
+    This is the product JStdp=~JS*dp as described above. Each element is a
+    body-scale-like Vec3, one for each mobilized body indexed by
+    MobilizedBodyIndex. If dp is a vector of body position perturbations, JStdp
+    will be the resulting body-scale-like perturbations.  The 0th element
+    JStdp[0] (for Ground) is always zero. Resized if necessary.
+
+@see multiplyByStationJacobianWrtBodyScales(),
+     multiplyByPositionJacobianWrtBodyScalesTranspose() **/
+void multiplyByStationJacobianWrtBodyScalesTranspose(
+    const State&                      state,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BS,
+    const Vector_<Vec3>&              dp,
+    Vector_<Vec3>&                    JStdp) const;
+
+/** Simplified signature for when you just have a single frame task. See the
+other signature for documentation. **/
+void multiplyByStationJacobianWrtBodyScalesTranspose(
+    const State&         state,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BS,
+    const Vec3&          dp,
+    Vector_<Vec3>&       JStdp) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BS, &p_BS+1);
+    Vector_<Vec3>                       positions(1, dp);
+    multiplyByStationJacobianWrtBodyScalesTranspose(state, bodies, stations,
+        positions, JStdp);
+}
+
+/** Calculate the positions of a set of nt station tasks expressed in Ground for
+a scaled multibody system in O(n+nt) time. Each station S is fixed to a
+mobilized body B at an unscaled body frame offset p_BS.
+
+@param[in]      state
+    A State that has already been realized through Position stage.
+@param[in]      s
+    A vector of scale factors for each mobilized body in the system indexed by
+    MobilizedBodyIndex. Each element is a Vec3 of values representing the body's
+    XYZ scale factors.
+@param[in]      onBodyB
+    An array of nt mobilized bodies (one per task) to which the stations are
+    fixed.
+@param[in]      p_BS
+    The nt unscaled station offsets (one per task), expressed in body frame B.
+@param[out]     p_GS
+    The nt Ground-frame positions of the task stations in the scaled system.
+    Resized if necessary.
+
+@see multiplyByStationJacobianWrtBodyScales() **/
+void calcScaledStationPosition(
+    const State&                      state,
+    const Vector_<Vec3>&              s,
+    const Array_<MobilizedBodyIndex>& onBodyB,
+    const Array_<Vec3>&               p_BS,
+    Vector_<Vec3>&                    p_GS) const;
+
+/** Simplified signature for when you just have a single frame task. See the
+other signature for documentation. **/
+Vec3 calcScaledStationPosition(
+    const State&         state,
+    const Vector_<Vec3>& s,
+    MobilizedBodyIndex   onBodyB,
+    const Vec3&          p_BS) const
+{
+    ArrayViewConst_<MobilizedBodyIndex> bodies(&onBodyB, &onBodyB+1);
+    ArrayViewConst_<Vec3>               stations(&p_BS, &p_BS+1);
+    Vector_<Vec3>                       p_GS(1);
+    calcScaledStationPosition(state, s, bodies, stations, p_GS);
+    return p_GS[0];
+}
+/**@}**/
+
+//==============================================================================
 /** @name               System matrix manipulation
 The documentation for the SimbodyMatterSubsystem describes the system equations
 in matrix notion, although internal computations are generally matrix-free.

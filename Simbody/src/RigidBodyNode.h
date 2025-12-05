@@ -250,38 +250,124 @@ void calcAcrossJointTransform(
     calcAcrossJointTransform(sbs, qp, nq, X_F0M0);
 }
 
+// This mandatory routine calculates the across-joint transform X_FM generated
+// by the supplied q values and parent scale factors s_P.
+//
+// See calcX_FM() for the full definition of the unscaled X_FM.
+virtual void calcScaledX_FM(const SBStateDigest& sbs,
+                            const Real* q,      int nq,
+                            const Real* qCache, int nQCache,
+                            const Vec3& s_P,
+                            Transform&  X_F0M0_scaled) const;
+
+// This is a pure operator form of calcScaledX_FM(). The StateDigest must have
+// been realized to model stage. The result depends only on the passed-in q,
+// and scale factors s_P, not anything in the State beyond model stage.
+void calcScaledAcrossJointTransform(
+    const SBStateDigest& sbs,
+    const Real* q, int nq,
+    const Vec3& s_P,
+    Transform&  X_F0M0_scaled) const
+{
+    const int poolz = getQPoolSize(sbs.getModelCache());
+    Real* qPool = poolz ? new Real[poolz] : 0;
+    Real qErr;
+    const int nQErr = isQuaternionInUse(sbs.getModelCache()) ? 1 : 0;
+    performQPrecalculations(sbs, q, nq, qPool, poolz, &qErr, nQErr);
+    calcScaledX_FM(sbs, q, nq, qPool, poolz, s_P, X_F0M0_scaled);
+    delete[] qPool;
+}
+
+// An alternate signature for when you have all the Q's together; this
+// method will find just ours and call the above method.
+void calcScaledAcrossJointTransform(
+    const SBStateDigest& sbs,
+    const Vector&        q,
+    const Vec3&          s_P,
+    Transform&           X_F0M0_scaled) const
+{
+    const SBModelCache mc = sbs.getModelCache();
+    const int   nq = getNumQInUse(mc);
+    const Real* qp = nq ? &q[getFirstQIndex(mc)] : (Real*)0;
+    calcScaledAcrossJointTransform(sbs, qp, nq, s_P, X_F0M0_scaled);
+}
+
+// Calculate the rigid body transformation matrix, Φ, accounting for the parent
+// and child body scaling.
+void calcScaledPhi(
+    const SBTreePositionCache&  pc,
+    const Vector_<Vec3>&        s,
+    const Transform&            X_FM_scaled,
+    PhiMatrix&                  phi_scaled) const;
+
+// Compute the parent scale factors along each axis of the mobilizer frame F. We
+// first "stretch" the columns of the rotation matrix R_PF, which define the
+// F basis vectors, by the parent body scale factors s_P. The magnitude of each
+// stretched column is the scale factor along that axis of F since the original
+// columns of R_PF are unit vectors, i.e.,
+//
+//  s_F[i] = ||s_P .* R_PF.col(i))|| for i = 0,1,2
+//
+Vec3 calcParentScalesInF(const Vec3& s_P) const {
+    const Rotation& R_PF = this->getX_PF().R();
+    Vec3 s_F;
+    for (int i = 0; i < 3; ++i) {
+        s_F[i] = s_P.elementwiseMultiply(Vec3(R_PF.col(i))).norm();
+    }
+    return s_F;
+}
+
+// Calculate the product of the Jacobian J_FP = dp_FM/ds_P with a
+// body scale-like vector ds_P (associated with the parent frame), i.e.,
+// dp_FM = J_FP * ds_P. If ds_P is a perturbation of the parent body scale
+// factors, then dp_FM is the resulting perturbation of the mobilizer
+// translation p_FM.
+virtual Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
+        const Vec3& ds_P) const {
+    return Vec3(0);
+}
+
+// Calculate the product of the transpose of the Jacobian J_FP = dp_FM/ds_P with
+// position-like vector dp_F (associated with the mobilizer frame), i.e.,
+// ds_P = J_FP^T * dp_F. If dp_F is a perturbation of the mobilizer translation
+// p_FM, then ds_P is the resulting perturbation of the parent body scale
+// factors.
+virtual Vec3 multiplyByScaledTranslationJacobianTranspose(
+        const SBTreePositionCache& pc, const Vec3& dp_F) const {
+    return Vec3(0);
+}
 
 // This operator pulls N(q) from the StateDigest if necessary and calculates 
 // qdot=N(q)*u from the supplied argument. For many mobilizers it 
 // can simply copy u to qdot without referencing the state at all.
 virtual void calcQDot
    (const SBStateDigest&,    const Real* u,    Real* qdot)    const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcQDot");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcQDot");}
 // This operator pulls N(q) and NDot(q,u) from the StateDigest if necessary
 // and calculates qdotdot=N*udot + NDot*u from the supplied argument.
 // For many mobilizers it can simply copy udot to qdotdot without referencing
 // the state at all.
 virtual void calcQDotDot
    (const SBStateDigest&,    const Real* udot, Real* qdotdot) const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcQDotDot");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcQDotDot");}
 virtual Transform  calcMobilizerTransformFromQ          
    (const SBStateDigest&,    const Real* q)    const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcMobilizerTransformFromQ");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcMobilizerTransformFromQ");}
 virtual SpatialVec calcMobilizerVelocityFromU           
    (const SBStateDigest&,    const Real* u)    const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcMobilizerVelocityFromU");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcMobilizerVelocityFromU");}
 virtual SpatialVec calcMobilizerAccelerationFromUDot    
    (const SBStateDigest&,    const Real* udot) const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcMobilizerAccelerationFromUDot");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcMobilizerAccelerationFromUDot");}
 virtual Transform  calcParentToChildTransformFromQ      
    (const SBStateDigest&,    const Real* q)    const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcParentToChildTransformFromQ");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcParentToChildTransformFromQ");}
 virtual SpatialVec calcParentToChildVelocityFromU       
    (const SBStateDigest&,    const Real* u)    const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcParentToChildVelocityFromU");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcParentToChildVelocityFromU");}
 virtual SpatialVec calcParentToChildAccelerationFromUDot
    (const SBStateDigest&,    const Real* udot) const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcParentToChildAccelerationFromUDot");}
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcParentToChildAccelerationFromUDot");}
 
 // Operators involving kinematics matrix N and related matrices NInv and
 // NDot. These methods perform operations involving just the block on the 
@@ -351,10 +437,10 @@ virtual bool enforceQuaternionConstraints(
 
 // Convert from quaternion to Euler angle representations.
 virtual void convertToEulerAngles(const Vector& inputQ, Vector& outputQ) const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "convertToEulerAngles");};
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "convertToEulerAngles");};
 // Convert from Euler angle to quaternion representations.
 virtual void convertToQuaternions(const Vector& inputQ, Vector& outputQ) const 
-{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "convertToQuaternions");};
+{   SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "convertToQuaternions");};
 
 // Called after Model variables are allocated by realizeTopology()
 virtual void setMobilizerDefaultModelValues
@@ -499,7 +585,7 @@ virtual void multiplyBySystemJacobian(
     const SBTreePositionCache&  pc,
     const Real*                 v,
     SpatialVec*                 Jv) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", 
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
     "multiplyBySystemJacobian"); }
 
 virtual void multiplyBySystemJacobianTranspose(
@@ -507,8 +593,37 @@ virtual void multiplyBySystemJacobianTranspose(
     SpatialVec*                 zTmp,
     const SpatialVec*           X, 
     Real*                       JtX) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", 
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
     "multiplyBySystemJacobianTranspose"); }
+
+virtual void multiplyByScaledSystemJacobian(
+    const SBStateDigest& sbs,
+    const Vector_<Vec3>& scales,
+    const Real*          v,
+    SpatialVec*          Jv) const
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+    "multiplyByScaledSystemJacobian"); }
+
+virtual void multiplyByScaledSystemJacobianTranspose(
+    const SBStateDigest& sbs,
+    const Vector_<Vec3>& scales,
+    PhiMatrix*           phiTmp,
+    SpatialVec*          zTmp,
+    const SpatialVec*    F,
+    Real*                JtF) const
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+    "multiplyByScaledSystemJacobianTranspose"); }
+
+virtual void multiplyByPositionJacobianWrtBodyScales(
+    const SBTreePositionCache& pc,
+    const Vector_<Vec3>&       ds,
+    Vec3*                      dp) const;
+
+virtual void multiplyByPositionJacobianWrtBodyScalesTranspose(
+    const SBTreePositionCache& pc,
+    Vec3*                      dpTmp,
+    const Vec3*                dp,
+    Vec3*                      ds) const;
 
 virtual void calcEquivalentJointForces(
     const SBTreePositionCache&  pc,
@@ -516,7 +631,7 @@ virtual void calcEquivalentJointForces(
     const SpatialVec*           bodyForces,
     SpatialVec*                 allZ,
     Real*                       jointForces) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", 
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
     "calcEquivalentJointForces"); }
 
 virtual void calcUDotPass1Inward(
@@ -563,7 +678,7 @@ virtual void calcBodyAccelerationsFromUdotOutward(
     const SBTreeVelocityCache&  vc,
     const Real*                 allUDot,
     SpatialVec*                 allA_GB) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcBodyAccelerationsFromUdotOutward"); }
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcBodyAccelerationsFromUdotOutward"); }
 virtual void calcInverseDynamicsPass2Inward(
     const SBTreePositionCache&  pc,
     const SBTreeVelocityCache&  vc,
@@ -572,26 +687,26 @@ virtual void calcInverseDynamicsPass2Inward(
     const SpatialVec*           bodyForces,
     SpatialVec*                 allFTmp,
     Real*                       allTau) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "calcInverseDynamicsPass2Inward"); }
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "calcInverseDynamicsPass2Inward"); }
 
 virtual void multiplyByMPass1Outward(
     const SBTreePositionCache&  pc,
     const Real*                 allUDot,
     SpatialVec*                 allA_GB) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "multiplyByMPass1Outward"); }
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "multiplyByMPass1Outward"); }
 virtual void multiplyByMPass2Inward(
     const SBTreePositionCache&  pc,
     const SpatialVec*           allA_GB,
     SpatialVec*                 allFTmp,
     Real*                       allTau) const
-  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "multiplyByMPass2Inward"); }
+  { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "multiplyByMPass2Inward"); }
 
 // Note that this requires columns of H to be packed like SpatialVec.
 virtual const SpatialVec& getHCol(const SBTreePositionCache&, int j) const 
-{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "getHCol");}
+{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "getHCol");}
 
 virtual const SpatialVec& getH_FMCol(const SBTreePositionCache&, int j) const 
-{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "getH_FMCol");}
+{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode", "getH_FMCol");}
 
 
     // BASE CLASS METHODS //
@@ -716,6 +831,7 @@ const Transform&      getX_PF          () const {return X_PF;}
 // TODO: principal axes
 const Inertia&        getInertia_CB_B  () const {return inertia_CB_B;}
 const Transform&      getX_MB          () const {return X_MB;}
+const Mat33&          getJs_FP          () const {return Js_FP;}
 
 // This says whether this mobilizer has prescribed *acceleration*, and if so
 // whether the acceleration is known to be zero.
@@ -996,6 +1112,29 @@ void realizeArticulatedBodyVelocityCache(
 
 
 protected:
+
+// Calculate the Jacobian of the parent scale factors in F with respect to the
+// parent scale factors in P, evaluated at unity scales, i.e.,
+//
+//   ∂s_F[i] / ∂s_P[j] = R_PF[j][i]^2 / ||s_P .* R_PF[:,i]||
+//
+// We still have a denominator term dependent on s_P, but we can evaluate it at
+// unity scales to get the Jacobian about a point representing the unscaled
+// system (i.e., linearized about s_P = 1). Then, the denominator terms become
+// ||R_PF[:,i]||, which is unity since R_PF is a rotation matrix. Therefore,
+//
+//   ∂s_F[i] / ∂s_P[j] |_{s_P=1} = R_PF[j][i]^2
+//
+// Since this only depends on R_PF, we compute it once on construction.
+static Mat33 calcJs_FP(const Rotation& R_PF) {
+    Mat33 K;
+    for (int i = 0; i < 3; ++i) {
+        const Vec3 col = R_PF.col(i);
+        K.row(i) = ~col.elementwiseMultiply(col);
+    }
+    return K;
+}
+
 // This is the constructor for the abstract base type for use by the derived
 // concrete types in their constructors.
 RigidBodyNode(const MassProperties& mProps_B,
@@ -1010,6 +1149,7 @@ RigidBodyNode(const MassProperties& mProps_B,
                  ? mProps_B.calcCentralInertia()
                  : (mProps_B.isInf() ? Inertia(Infinity) : Inertia())),
     X_BM(xform_BM), X_PF(xform_PF), X_MB(~xform_BM),
+    Js_FP(calcJs_FP(xform_PF.R())),
     qdotHandling(qdotType), quaternionUse(quatUse), reversed(reverse)
 {
     // If a quaternion might be used, it can't possibly be true that qdot is
@@ -1071,6 +1211,10 @@ const Transform X_MB; // inverse of X_BM, calculated on construction
 // to body B (F) measured from and expressed in the parent frame P. It is 
 // a constant in frame P. TODO: make it parameterizable.
 const Transform X_PF;
+
+// The Jacobian of the parent scale factors in F with respect to the
+// parent scale factors in P. See calcJs_FP() for details.
+const Mat33 Js_FP;
 
 // Concrete RigidBodyNodes should set this flag on construction to indicate whether they can guarantee
 // that their mobilizer's qdots are just the generalized speeds u, for all possible
