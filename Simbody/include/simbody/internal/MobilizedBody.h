@@ -157,6 +157,32 @@ such that a point P whose location is measured from F's origin Fo and expressed
 in F by position vector p_FP (or more explicitly p_FoP) is remeasured from frame
 A's origin Ao and reexpressed in A via p_AP = X_AF*p_FP, where p_AP==p_AoP. 
 
+<h3>Mobilizer Scaling</h3>
+
+Body scaling assigns a Vec3 of XYZ scale factors \c s_B to each body B in the
+multibody tree, stretching B's geometry non-uniformly along its body frame axes.
+Mobilizer scaling is only used in system-level operators
+(e.g., SimbodyMatterSubsystem::multiplyByScaledSystemJacobian()) where updated
+kinematics are computed in place, i.e., the underlying system is not actually
+scaled.
+
+Scaling only affects translational kinematics. The body scales applied to the
+mobilizer's parent body P will affect the position of the mobilizer frame F in
+P, and the body scales applied to the child body B will affect the position of
+the mobilizer frame M in B. The rotation matrices R_PF and R_MB are unaffected
+by scaling.
+
+For most mobilizers, the translation between mobilizer frames F and M, i.e.,
+the p_FM component of X_FM, is also unaffected by scaling. However, this is not
+true in general. The current mobilizers for which p_FM is affected by scaling
+are the Ellipsoid, CantileverFreeBeam, and Custom (e.g., FunctionBased)
+mobilizers. For these mobilizers, we first compute how the body scales from the
+parent frame, s_P, "stretch" the axes of the mobilizer frame F by taking the
+columns of R_PF (i.e., the axes of F in P) and multiplying them elementwise by
+s_P; the magnitude of these "stretched" columns then gives the effective scale
+factors for the mobilizer translations, i.e., s_F. The way that s_F affects the
+translation p_FM is specific to each mobilizer implementation.
+
 <h3>Theory</h3>
 For the mathematical and computational theory behind Simbody's mobilizers, see
   - the <a href="https://simtk.org/docman/view.php/47/1536/Seth-2010-ShermanEastmanDelp-MinimalJointFormulationForBiomechanisms-NonlinearDyn-v62-p291.pdf">

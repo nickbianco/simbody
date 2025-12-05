@@ -39,10 +39,34 @@ calculate the spatial rotations and translations based on those coordinates.
 It assumes there is a one to one correspondence between generalized coordinates 
 and generalized speeds, so qdot == u.
 
-Each of the Function objects must take some subset of the generalized 
-coordinates as inputs, and produce a single number as its output. It also must 
+Each of the Function objects must take some subset of the generalized
+coordinates as inputs, and produce a single number as its output. It also must
 support derivatives up to second order.  Taken together, the six functions
-define a SpatialVec giving the body's mobilizer transform. **/
+define a SpatialVec giving the body's mobilizer transform.
+
+<h3>Mobilizer Scaling</h3>
+
+MobilizedBody::FunctionBased uses the default mobilizer scaling behavior from
+MobilizedBody::Custom. When the parent body is scaled by XYZ scale factors 
+\c s_P, the effective scale factor for each F-frame axis \e i is
+
+  s_F[i] = ||s_P .* R_PF.col(i)||
+
+where R_PF is the (fixed) orientation of F in P. Then, the mobilizer translation
+p_FM is scaled element-wise by s_F:
+
+  p_FM_scaled = p_FM .* s_F
+
+The translational rows of the velocity Jacobian H_FM are also scaled by s_F. The
+rotational rows of H_FM and the orientation R_FM are invariant under scaling.
+
+@note If the transform axes associated with translational functions are "skew"
+axes, that is, not aligned with the F frame axes, then it may not be possible
+to modify the translation to match the scaled translation. The system-level
+scaled Jacobian methods are still available to you, but if using these methods
+to optimize the geometry of the system, you will need to modify your functions
+"best fit" based on the optimal scale factors.
+**/
 class SimTK_SIMBODY_EXPORT MobilizedBody::FunctionBased 
 :   public MobilizedBody::Custom {
 public:
@@ -51,7 +75,7 @@ public:
     FunctionBased() {}
 
     /** Create a FunctionBased MobilizedBody.
-    
+
     @param parent         the MobilizedBody's parent body
     @param bodyInfo       describes this MobilizedBody's physical properties
     @param nmobilities    the number of generalized coordinates belonging to this MobilizedBody

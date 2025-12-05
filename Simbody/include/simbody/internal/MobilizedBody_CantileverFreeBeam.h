@@ -137,6 +137,28 @@ you should not attempt to do any dynamics in that configuration.
 [1] Young, W. C., and R. G. Budynas. (2002). Roark's Formulas for Stress and
     Strain (7th Edition). McGraw-Hill.
 
+\section cf_beam_scaling Mobilizer Scaling
+
+The beam length L is a dimension of the parent body measured along the inboard
+mobilizer frame F in the Fz direction. When the parent body is scaled by XYZ
+scale factors \c s_P, the effective scale factor along Fz is
+
+  s_F[2] = ||s_P .* R_PF.col(2)||
+
+where R_PF is the (fixed) orientation of F in P. The scaled beam length is
+L_scaled = L * s_F[2], and all three position components scale proportionally:
+
+  p₀ = 2⁄3 q₁ L_scaled
+
+  p₁ = −2⁄3 q₀ L_scaled
+
+  p₂ = L_scaled − 4⁄15 (q₀² + q₁²) L_scaled
+
+Only the Fz scale factor affects the kinematics: the transverse deflections p₀
+and p₁, while perpendicular to the beam axis, are proportional to the beam
+length and therefore also scale with s_F[2], not with the transverse (Fx, Fy)
+scale factors.
+
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::CantileverFreeBeam :
         public MobilizedBody {

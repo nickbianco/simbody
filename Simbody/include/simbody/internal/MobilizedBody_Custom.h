@@ -221,6 +221,66 @@ public:
     /// modification.
     void invalidateTopologyCache() const;
 
+    /// @name Mobilizer Scaling
+    /// Override these methods if your Custom mobilizer's translational
+    /// kinematics depend on parent body geometry in a way that goes beyond
+    /// simple element-wise scaling. See MobilizedBody for a description of body
+    /// scaling.
+    ///
+    /// The default implementations apply element-wise scaling: p_FM is scaled
+    /// by the effective parent scale factors in the F frame,
+    ///
+    ///   s_F[i] = ||s_P .* R_PF.col(i)||   (i = 0, 1, 2)
+    ///
+    /// and the translational rows of H_FM are scaled the same way. This is
+    /// correct when p_FM's components are displacements along F-frame axes, as
+    /// for a generic translational joint. If your mobilizer's p_FM is a function
+    /// of parent body dimensions in a more complex way (e.g.,
+    /// CantileverFreeBeam), override all four methods consistently.
+    //@{
+
+    /// Compute the scaled mobilizer translation p_FM. \c s_F are the parent
+    /// body scale factors projected into the F frame. The state is guaranteed
+    /// to have been realized to at least Position stage.
+    ///
+    /// Default: returns p_FM scaled element-wise by \c s_F.
+    virtual Vec3 calcScaledMobilizerTranslation(const State& s,
+                                                const Vec3& s_F) const;
+
+    /// Compute the scaled Jacobian-vector product H_scaled(q,s_F)*u, where the
+    /// translational rows of H are scaled by \c s_F (parent scale factors in
+    /// F). The state is guaranteed to have been realized to at least Position
+    /// stage.
+    ///
+    /// Default: returns H*u with the translational part scaled element-wise by
+    /// \c s_F.
+    virtual SpatialVec multiplyByScaledHMatrix(const State& s,
+                                               int nu,
+                                               const Real* u,
+                                               const Vec3& s_F) const;
+
+    /// Compute dp_FM = J_FP * ds_P, the change in mobilizer translation due to
+    /// a perturbation \c ds_P of the parent body scale factors. \c p_FM is the
+    /// current (unscaled) mobilizer translation and \c Js_FP is the constant
+    /// Jacobian of parent-scale-in-F with respect to parent-scale-in-P
+    /// (Js_FP[i][j] = R_PF[j][i]^2), provided by underlying mobilizer
+    /// implementation.
+    ///
+    /// Default: J_FP[i][j] = p_FM[i] * Js_FP[i][j], valid when p_FM scales
+    /// element-wise with s_F.
+    virtual Vec3 multiplyByScaledTranslationJacobian(const Vec3& p_FM,
+                                                     const Mat33& Js_FP,
+                                                     const Vec3& ds_P) const;
+
+    /// Compute the transpose product ~J_FP * dp_F. See
+    /// multiplyByScaledTranslationJacobian() for the definition of J_FP.
+    ///
+    /// Default: ~Js_FP * (p_FM .* dp_F), the transpose of the default forward
+    /// product.
+    virtual Vec3 multiplyByScaledTranslationJacobianTranspose(
+            const Vec3& p_FM, const Mat33& Js_FP, const Vec3& dp_F) const;
+    //@}
+
     /// @name MobilizedBody Virtuals
     /// These must be defined for any Custom MobilizedBody.
     /// Note that the numbers nu, nq, and nAngles are passed in to these routines for

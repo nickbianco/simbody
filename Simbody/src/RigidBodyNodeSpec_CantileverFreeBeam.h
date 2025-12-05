@@ -227,6 +227,51 @@ void calcX_FM(const SBStateDigest& sbs,
     );
 }
 
+void calcScaledX_FM(const SBStateDigest& sbs,
+                    const Real* q,      int nq,
+                    const Real* qCache, int nQCache,
+                    const Vec3& s_P,
+                    Transform&  X_F0M0_scaled) const override
+{
+    assert(q && nq==3 && qCache && nQCache==PoolSize);
+
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    X_F0M0_scaled = this->findX_F0M0(pc);
+
+    const Real& q0 = Vec3::getAs(q)[0];
+    const Real& q1 = Vec3::getAs(q)[1];
+    const Vec3 s_F = this->calcParentScalesInF(s_P);
+    const Real lengthScaled = length * s_F[2];
+    const Real deflectionCoefficientScaled = (2.0 / 3.0) * lengthScaled;
+    const Real displacementCoefficientScaled = (4.0 / 15.0) * lengthScaled;
+
+    X_F0M0_scaled.updP() = Vec3(
+        q1 * deflectionCoefficientScaled,
+        -q0 * deflectionCoefficientScaled,
+        lengthScaled - displacementCoefficientScaled * (q0*q0 + q1*q1)
+    );
+}
+
+Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
+        const Vec3& ds_P) const override {
+    const Vec3 p_FM = this->findX_F0M0(pc).p();
+    const Mat33& Js_FP = this->getJs_FP();
+    const Mat33 J_FP(p_FM * Js_FP.elt(2,0),
+                     p_FM * Js_FP.elt(2,1),
+                     p_FM * Js_FP.elt(2,2));
+    return J_FP * ds_P;
+}
+
+Vec3 multiplyByScaledTranslationJacobianTranspose(
+        const SBTreePositionCache& pc, const Vec3& dp_F) const override {
+    const Vec3 p_FM = this->findX_F0M0(pc).p();
+    const Mat33& Js_FP = this->getJs_FP();
+    const Mat33 J_FP(p_FM * Js_FP.elt(2,0),
+                     p_FM * Js_FP.elt(2,1),
+                     p_FM * Js_FP.elt(2,2));
+    return ~J_FP * dp_F;
+}
+
 // Generalized speeds are the Euler angle derivatives.
 // Using the precalculations this requires only 5 flops, although there is
 // a fair bit of poking around in memory required.
@@ -250,6 +295,39 @@ void calcAcrossJointVelocityJacobian(const SBStateDigest& sbs,
     H_FM(1) = SpatialVec(Vec3(0,    c0,    s0),
         Vec3(deflectionCoefficient, 0, -2.0*displacementCoefficient*q[1]));
     H_FM(2) = SpatialVec(Vec3(s1, -s0*c1, c0*c1), Vec3(0));
+}
+
+void calcScaledAcrossJointVelocityJacobian(
+    const SBStateDigest& sbs,
+    const Vec3& s_P,
+    HType&      H_F0M0_scaled) const override
+{
+    const SBModelCache&        mc = sbs.getModelCache();
+    // Unlike calcAcrossJointVelocityJacobian(), use "get" here since we should
+    // already be realized to the position stage.
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const Real*                pool = this->getQPool(mc, pc);
+
+    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
+    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
+    const Vec3& q = this->fromQ(sbs.getQ());
+
+    const Vec3 s_F = this->calcParentScalesInF(s_P);
+    const Real lengthScaled = length * s_F[2];
+    const Real deflectionCoefficientScaled = (2.0 / 3.0) * lengthScaled;
+    const Real displacementCoefficientScaled = (4.0 / 15.0) * lengthScaled;
+
+    H_F0M0_scaled(0) = SpatialVec(Vec3(1,     0,    0),
+        Vec3(0,
+             -deflectionCoefficientScaled,
+             -2.0*displacementCoefficientScaled*q[0]));
+
+    H_F0M0_scaled(1) = SpatialVec(Vec3(0,    c0,    s0),
+        Vec3(deflectionCoefficientScaled,
+             0,
+             -2.0*displacementCoefficientScaled*q[1]));
+
+    H_F0M0_scaled(2) = SpatialVec(Vec3(s1, -s0*c1, c0*c1), Vec3(0));
 }
 
 // Differentiate H_FM to get HDot_FM. Note that this depends on qdot:

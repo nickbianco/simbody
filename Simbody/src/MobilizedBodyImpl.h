@@ -1263,7 +1263,7 @@ public:
         Arot = Mat33(axes[0].normalize(), axes[1].normalize(), axes[2].normalize());
         Atrans = Mat33(axes[3].normalize(), axes[4].normalize(), axes[5].normalize());
     }
-    
+
     ~FunctionBasedImpl() {
         if (--referenceCount[0] == 0) {
             for (int i = 0; i < (int) functions.size(); i++)
