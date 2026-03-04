@@ -142,6 +142,7 @@ struct MatrixWorkspace {
 
         normalPathError   = Vector(nC, 0.);
         binormalPathError = Vector(nC, 0.);
+        tangentPathError  = Vector(nC, 0.);
 
         normalPathErrorJacobian = Matrix(nC, nQ, 0.);
 
@@ -207,6 +208,7 @@ struct MatrixWorkspace {
     Stacking all path error elements, of all active obstacles, gives the
     binormal path error vector. */
     Vector binormalPathError;
+    Vector tangentPathError;
     /* The maximum of the normal and binormal path errors. */
     Real maxPathError = NaN;
     /* The Jacobian of the normal path error vector to the natural geodesic
@@ -2881,7 +2883,8 @@ Real calcPathErrorElement(
     const FrenetFrame& X,
     CoordinateAxis axis)
 {
-    return dot(e.direction, X.R().getAxisUnitVec(axis));
+    double offset = (axis == TangentAxis) ? -1.0 : 0.0;
+    return dot(e.direction, X.R().getAxisUnitVec(axis)) + offset;
 }
 
 /* Compute the path error for each curve segment at the boundary frames, and
@@ -3399,17 +3402,17 @@ void CableSpan::Impl::calcSolverStep(
             cableSegment,
             s,
             data.lineSegments,
-            {NormalAxis},
-            data.normalPathError);
+            {TangentAxis},
+            data.tangentPathError);
         calcPathErrorVector<1>(
             cableSegment,
             s,
             data.lineSegments,
-            {BinormalAxis},
-            data.binormalPathError);
+            {NormalAxis},
+            data.normalPathError);
         data.maxPathError = std::max(
-            data.normalPathError.normInf(),
-            data.binormalPathError.normInf());
+            data.tangentPathError.normInf(),
+            data.normalPathError.normInf());
     }
 
     // If the path error is small we have converged to the optimal solution,
@@ -3447,13 +3450,13 @@ void CableSpan::Impl::calcSolverStep(
             cableSegment,
             s,
             data.lineSegments,
-            {NormalAxis, BinormalAxis},
+            {TangentAxis, NormalAxis},
             b);
         calcPathErrorJacobian<2>(
             cableSegment,
             s,
             data.lineSegments,
-            {NormalAxis, BinormalAxis},
+            {TangentAxis, NormalAxis},
             A);
 
         // The last elements of the b vector contain the change in length

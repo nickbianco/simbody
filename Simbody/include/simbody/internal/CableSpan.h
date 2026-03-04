@@ -119,6 +119,32 @@ enum class CableSpanAlgorithm
     MinimumLength,
 };
 
+/** @enum SimTK::CableSpanPathErrorMethod
+These are the different methods for computing the path errors of a
+CableSpan.
+see CableSpan::setPathErrorMethod **/
+enum class CableSpanPathErrorMethod
+{
+    /** This is the original algorithm as described in:
+
+    Scholz, A., Sherman, M., Stavness, I. et al (2015). A fast multi-obstacle
+    muscle wrapping method using natural geodesic variations. Multibody System
+    Dynamics 36, 195–219, DOI https://doi.org/10.1007/s11044-015-9451-1.
+
+    The path error vector captures the misalignment of the straight line and
+    curved segments at the contact points by enforcing that the Frenet frame
+    normal and binormal Frame vectors of the the curve segments are orthogonal
+    to the adjacent straight line segment (i.e., the dot product is zero).
+
+    A drawback of this path error formulation is that the solver is free to
+    converge to solutions where the Frenet frame tangent vector is pointing in
+    the opposite direction of the straight line segment direction vector,
+    producing a non-smooth path. **/
+    Scholz2015,
+
+    MinimumLength,
+};
+
 class MultibodySystem;
 class CableSubsystem;
 class CableSubsystemTestHelper;
