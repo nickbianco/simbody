@@ -22,9 +22,15 @@
 using namespace SimTK;
 
 // This example represents an application where it would be valuable to have
-// methods for calculating moment arms across mobilizers where qdot != u. We
-// first simulate a 3D pendulum (mobilized by a MobilizedBody::Ball) driven by
-// an actuator whose tension is applied along a path defined by a CableSpan.
+// methods for calculating moment arms across mobilizers where qdot != u.
+// Function-based representations of muscle paths in OpenSim have benefitted
+// gradient-based optimization methods (e.g., OpenSim Moco) and made it easier
+// to export muscle paths to other dynamics engines that don't have
+// geometry-based muscle wrapping. However, any joints where qdot != u (e.g.,
+// ball joints) have not been able to leverage function-based muscle paths.
+//
+// We first simulate a 3D pendulum (mobilized by a MobilizedBody::Ball) driven
+// by an actuator whose tension is applied along a path defined by a CableSpan.
 // Then, we use least-squares to fit a set of multivariate polynomial
 // coefficients to the path lengths and moment arms calculated from the states
 // trajectory from the simulation. Finally, we create a new pendulum system that
@@ -42,12 +48,14 @@ using namespace SimTK;
 // l = f(q)
 //
 // In this example, we use choose to calculate moment arms based on path speed
-// formulation described in Sherman et al. (2023)
+// formulation described in Sherman et al. (2023):
 //
 // rᵢ = l̇ / q̇ᵢ
 //
-// Since q̇ != u, we need to use the N matrix to calculate q̇ from u. First, we
-// set q̇ for the coordinate of interest to 1 and all other coordinates to 0:
+// Note that in this example, we do not have kinematic constraints, which would
+// require special handling with the path speed approach. Since q̇ != u, we need
+// to use the N matrix to calculate q̇ from u. First, we set q̇ for the
+// coordinate of interest to 1 and all other coordinates to 0:
 //
 // q̇= 0
 // q̇ᵢ = 1
@@ -65,15 +73,16 @@ using namespace SimTK;
 // We can also use the transpose of N to compute the contribution of a scalar
 // tension, T, to the the mobility forces, fu, for a function based path:
 //
-// fq = T [r₀, r₁, r₂, ... ]
+// fq = [T*r₀, T*r₁, T*r₂, ... ]
 // fu = Nᵀ fq
 //
 // While this won't produce the same body forces as the original system, we will
 // show in this example that we can produce the same inverse dynamics moments as
-// the original cable-actuated system.
+// the original cable-actuated system, up to a tolerannce limited by the
+// accuracy of the polynomial fit.
 
 // The code for representing multivariate polynomials is based on OpenSim's
-// MultivariatePolynomial class:
+// MultivariatePolynomialFunction class:
 // https://github.com/opensim-org/opensim-core/blob/main/OpenSim/Common/MultivariatePolynomialFunction.cpp
 
 // The code for estimating polynomial coefficients is based on OpenSim's
