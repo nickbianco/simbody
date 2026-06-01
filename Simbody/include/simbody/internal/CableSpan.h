@@ -703,6 +703,17 @@ public:
 
     ///@}
 
+    /** @name Cache invalidation */
+    ///@{
+
+    /** Invalidate the cached path solution for this cable span, forcing a full
+    recomputation the next time the State is realized to Stage::Position.
+    State must have been realized to at least Stage::Topology.
+    @param state The State whose cache entries are to be invalidated. **/
+    void invalidatePositionCache(const State& state) const;
+
+    ///@}
+
     /** @cond **/ // Hide from Doxygen.
     class Impl;
 

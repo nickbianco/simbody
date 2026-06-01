@@ -1824,6 +1824,15 @@ public:
         }
     }
 
+    void invalidatePositionCache(const State& state) const
+    {
+        getSubsystem().markCacheValueNotRealized(state, m_indexDataPos);
+        getSubsystem().markCacheValueNotRealized(state, m_indexDataVel);
+        for (const CurveSegment& segment : m_curveSegments) {
+            segment.invalidatePosEntry(state);
+        }
+    }
+
     void realizeModel(State& state) const
     {
         // No choices at the moment.
@@ -4881,4 +4890,9 @@ UnitVec3 CableSpan::calcViaPointOutgoingTangentDirection(
     getImpl().realizePosition(state);
     const CableSpanData::Position& dataPos = getImpl().getDataPos(state);
     return dataPos.viaPointOutTangents_G[ix];
+}
+
+void CableSpan::invalidatePositionCache(const State& state) const
+{
+    getImpl().invalidatePositionCache(state);
 }
