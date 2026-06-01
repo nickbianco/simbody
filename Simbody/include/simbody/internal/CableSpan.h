@@ -712,6 +712,15 @@ public:
     @param state The State whose cache entries are to be invalidated. **/
     void invalidatePositionCache(const State& state) const;
 
+    /** Reset the warm-start for each obstacle's curve segment to the initial
+    contact point hint. The warm-start is the previous curve segment solution
+    used to initialize the path solver. Calling this method discards the
+    previous solution; the solver will restart from the initial contact point
+    hints set for each obstacle. State must have been realized to at least
+    Stage::Topology.
+    @param state The State whose warm-start data is to be reset. **/
+    void resetWarmStart(State& state) const;
+
     ///@}
 
     /** @cond **/ // Hide from Doxygen.

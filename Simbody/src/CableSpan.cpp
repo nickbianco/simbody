@@ -669,11 +669,10 @@ public:
     // Realizing and cache access.
     //--------------------------------------------------------------------------
 
-    // Allocate state variables and cache entries.
-    void realizeTopology(State& state)
+    // Compute the initial instance data based on the contact point hint.
+    CurveSegmentData::Instance computeInitialInstanceData() const
     {
         CurveSegmentData::Instance dataInst;
-        // Initialize the contact point if a hint is available.
         if (isContactPointHintAvailable()) {
             const Vec3 initContactPoint =
                 getContactGeometry().projectDownhillToNearestPoint(
@@ -682,16 +681,21 @@ public:
             dataInst.X_SQ.updP()    = initContactPoint;
             dataInst.wrappingStatus = ObstacleWrappingStatus::InitialGuess;
         } else {
-            // Otherwise assume no contact.
             dataInst.trackingPointOnLine_S = Vec3{0.};
             dataInst.wrappingStatus = ObstacleWrappingStatus::LiftedFromSurface;
         }
+        return dataInst;
+    }
+
+    // Allocate state variables and cache entries.
+    void realizeTopology(State& state)
+    {
         // Use auto-update discrete variable to retain the previous path as a
         // warmstart.
         m_indexDataInst = updSubsystem().allocateAutoUpdateDiscreteVariable(
             state,
             Stage::Position,
-            new Value<CurveSegmentData::Instance>(dataInst),
+            new Value<CurveSegmentData::Instance>(computeInitialInstanceData()),
             Stage::Instance);
 
         m_indexDataPos = updSubsystem().allocateCacheEntry(
@@ -704,6 +708,14 @@ public:
     void invalidatePosEntry(const State& state) const
     {
         getSubsystem().markCacheValueNotRealized(state, m_indexDataPos);
+    }
+
+    void resetWarmStart(State& state) const
+    {
+        const CurveSegmentData::Instance dataInst = computeInitialInstanceData();
+        updPrevDataInst(state) = dataInst;
+        updDataInst(state) = dataInst;
+        getSubsystem().markDiscreteVarUpdateValueRealized(state, m_indexDataInst);
     }
 
     const CurveSegmentData::Instance& getDataInst(const State& state) const
@@ -1830,6 +1842,13 @@ public:
         getSubsystem().markCacheValueNotRealized(state, m_indexDataVel);
         for (const CurveSegment& segment : m_curveSegments) {
             segment.invalidatePosEntry(state);
+        }
+    }
+
+    void resetWarmStart(State& state) const
+    {
+        for (const CurveSegment& segment : m_curveSegments) {
+            segment.resetWarmStart(state);
         }
     }
 
@@ -4895,4 +4914,9 @@ UnitVec3 CableSpan::calcViaPointOutgoingTangentDirection(
 void CableSpan::invalidatePositionCache(const State& state) const
 {
     getImpl().invalidatePositionCache(state);
+}
+
+void CableSpan::resetWarmStart(State& state) const
+{
+    getImpl().resetWarmStart(state);
 }
