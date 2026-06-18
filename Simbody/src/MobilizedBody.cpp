@@ -3235,14 +3235,14 @@ MobilizedBody::FunctionBased::FunctionBased
 }
 
 MobilizedBody::FunctionBased::FunctionBased
-   (MobilizedBody& parent, const Transform& inbFrame,
-    const Body& body, const Transform& outbFrame,
+   (MobilizedBody& parent, const Transform& inbFrame, 
+    const Body& body, const Transform& outbFrame, 
     int nmobilities, const Array_<const Function*>& functions,
     const Array_<Array_<int> >& coordIndices, const Array_<Vec3>& axes,
     Direction direction)
-:   Custom(parent, new FunctionBasedImpl(parent.updMatterSubsystem(),
-                                         nmobilities, functions,
-                                         coordIndices, axes),
+:   Custom(parent, new FunctionBasedImpl(parent.updMatterSubsystem(), 
+                                         nmobilities, functions, 
+                                         coordIndices, axes), 
            body, direction)
 {
     setDefaultInboardFrame(inbFrame);

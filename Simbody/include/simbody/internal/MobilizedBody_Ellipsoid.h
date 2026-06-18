@@ -82,7 +82,7 @@ public:
     /** Modify the default semi-axis dimensions of the ellipsoid, given in
     the F frame. These are usually set on construction. **/
     Ellipsoid& setDefaultRadii(const Vec3& radii);
-    /** Get the default semi-axis dimensions of the ellipsoid as specified
+    /** Get the default semi-axis dimensions of the ellipsoid as specified 
     during construction or via setDefaultRadii(). **/
     const Vec3& getDefaultRadii() const;
 

@@ -39,14 +39,10 @@ calculate the spatial rotations and translations based on those coordinates.
 It assumes there is a one to one correspondence between generalized coordinates 
 and generalized speeds, so qdot == u.
 
-Each of the Function objects must take some subset of the generalized
-coordinates as inputs, and produce a single number as its output. It also must
+Each of the Function objects must take some subset of the generalized 
+coordinates as inputs, and produce a single number as its output. It also must 
 support derivatives up to second order.  Taken together, the six functions
-define a SpatialVec giving the body's mobilizer transform.
-
-The functions are an Instance-stage State variable; see setFunctions() and
-getFunctions(). The axes and coordIndices remain topology-time properties.
-**/
+define a SpatialVec giving the body's mobilizer transform. **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::FunctionBased 
 :   public MobilizedBody::Custom {
 public:
@@ -55,7 +51,7 @@ public:
     FunctionBased() {}
 
     /** Create a FunctionBased MobilizedBody.
-
+    
     @param parent         the MobilizedBody's parent body
     @param bodyInfo       describes this MobilizedBody's physical properties
     @param nmobilities    the number of generalized coordinates belonging to this MobilizedBody
@@ -178,7 +174,7 @@ public:
                   Direction direction=Forward);
 
     /** For compatibility with std::vector. **/
-    FunctionBased(MobilizedBody& parent, const Transform& X_PF,
+    FunctionBased(MobilizedBody& parent, const Transform& X_PF, 
                   const Body& bodyInfo, const Transform& X_BM,
                   int nmobilities, const std::vector<const Function*>& functions,
                   const std::vector<std::vector<int> >& coordIndices, const std::vector<Vec3>& axes,
@@ -187,8 +183,8 @@ public:
         Array_< Array_<int> > coordCopy(coordIndices); // sorry, must copy
         // Use the above constructor.
         new(this) FunctionBased(parent,X_PF,bodyInfo,X_BM,
-                                nmobilities, ArrayViewConst_<const Function*>(functions),
-                                coordCopy, ArrayViewConst_<Vec3>(axes),
+                                nmobilities, ArrayViewConst_<const Function*>(functions), 
+                                coordCopy, ArrayViewConst_<Vec3>(axes), 
                                 direction);
     }
 
