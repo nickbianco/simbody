@@ -207,10 +207,9 @@ RigidBodyNode* MobilizedBody::EllipsoidImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    return new RBNodeEllipsoid(
+    return new RBNodeEllipsoid(*this,
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
-        getDefaultRadii(),
         isReversed(),
         nextUSlot,nextUSqSlot,nextQSlot);
 }
@@ -244,10 +243,9 @@ RigidBodyNode* MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    return new RBNodeCantileverFreeBeam(
+    return new RBNodeCantileverFreeBeam(*this,
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
-        getDefaultLength(),
         isReversed(),
         nextUSlot,nextUSqSlot,nextQSlot);
 }

@@ -17,29 +17,6 @@ PRs and issues that were included in a particular release.
 * Required C++ level was increased from C++11 to C++20
 * Fixed an out-of-bounds warning/error emitted by overloads of SimTK::Mat accessing
   out-of-bounds rows
-* **Breaking change:** Removed the "scaled System Jacobian" operators that
-  parameterized perturbations by a per-body XYZ scale-factor vector. The
-  removed methods on `SimbodyMatterSubsystem` are
-  `multiplyByScaledSystemJacobian`/`...Transpose`,
-  `multiplyByScaledStationJacobian`/`...Transpose`,
-  `multiplyByScaledFrameJacobian`/`...Transpose`,
-  `multiplyByPositionJacobianWrtBodyScales`/`...Transpose`,
-  `multiplyByStationJacobianWrtBodyScales`/`...Transpose`, and
-  `calcScaledStationPosition`. The matching `RigidBodyNode` virtuals,
-  per-mobilizer scaled overrides, and the `Custom::Implementation` scaling
-  hooks (`calcScaledMobilizerTranslation`, `multiplyByScaledHMatrix`,
-  `multiplyByScaledTranslationJacobian`/`...Transpose`) were removed too.
-* Mobilizer geometric properties are now Instance-stage State variables. To
-  compute Jacobians or other kinematics under a perturbed geometry, set the
-  property on a `State` and re-realize through Position; the regular
-  `multiplyBySystemJacobian` family then returns the result. The new public
-  API: `MobilizedBody::setInboardFrame(state, X_PF)` /
-  `setOutboardFrame(state, X_BM)` (universal),
-  `MobilizedBody::Ellipsoid::setRadii(state, Vec3)`,
-  `MobilizedBody::CantileverFreeBeam::setLength(state, Real)`,
-  `MobilizedBody::FunctionBased::setFunctions(state, Array_<const Function*>)`
-  (caller retains pointer ownership), each with a matching `get*(state)`.
-  See the "State-parameterized geometry" section of `MobilizedBody.h`.
 
 3.8 (May 2025)
 --------------------

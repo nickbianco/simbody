@@ -1319,16 +1319,6 @@ public:
     Array_<Transform,     MobilizedBodyIndex>   outboardMobilizerFrames;
     Array_<Transform,     MobilizedBodyIndex>   inboardMobilizerFrames;
 
-    // Per-mobilizer geometric parameters that derived MobilizedBody classes
-    // promote from topology-time defaults to Instance-stage State variables.
-    // Entries for mobilizer types that do not use a particular parameter are
-    // left at sentinel values (NaN) and never read. RigidBodyNode overrides
-    // of setMobilizerDefaultInstanceValues populate the relevant slots from
-    // their topology defaults; public set/get methods on the MobilizedBody
-    // subclass read/write here, which invalidates Stage::Instance.
-    Array_<Vec3,          MobilizedBodyIndex>   ellipsoidRadii;             // Ellipsoid
-    Array_<Real,          MobilizedBodyIndex>   cantileverFreeBeamLength;   // CantileverFreeBeam
-
     Array_<Motion::Level, MobilizedBodyIndex>   mobilizerLockLevel;
     Vector                                      lockedQs;
     Vector                                      lockedUs; // also used for udot
@@ -1355,15 +1345,6 @@ public:
 
         inboardMobilizerFrames.clear();
         inboardMobilizerFrames.resize(nb, Transform());
-
-        // Per-mobilizer geometric parameter slots are NaN-initialized so that
-        // misuse (read before the relevant mobilizer's default-setter ran) is
-        // caught loudly rather than silently producing zeros.
-        ellipsoidRadii.clear();
-        ellipsoidRadii.resize(nb, Vec3(NaN));
-
-        cantileverFreeBeamLength.clear();
-        cantileverFreeBeamLength.resize(nb, NaN);
 
         mobilizerLockLevel.clear();
         mobilizerLockLevel.resize(nb, Motion::NoLevel);

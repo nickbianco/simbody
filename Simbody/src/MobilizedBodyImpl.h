@@ -815,8 +815,8 @@ private:
 
 class MobilizedBody::EllipsoidImpl : public MobilizedBodyImpl {
 public:
-    explicit EllipsoidImpl(Direction d) 
-    :   MobilizedBodyImpl(d), defaultRadii(Real(0.5),Real(1./3.),Real(0.25)), 
+    explicit EllipsoidImpl(Direction d)
+    :   MobilizedBodyImpl(d), defaultRadii(Real(0.5),Real(1./3.),Real(0.25)),
         defaultQ() { } // default is (1,0,0,0), the identity rotation
     EllipsoidImpl* clone() const override { return new EllipsoidImpl(*this); }
 
@@ -826,7 +826,7 @@ public:
         QIndex&        nextQSlot) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
-        SimTK_ASSERT(nq==4||nq==3, 
+        SimTK_ASSERT(nq==4||nq==3,
             "MobilizedBody::EllipsoidImpl::copyOutDefaultQImpl(): wrong number of q's");
         if (nq==4)
             Vec4::updAs(q) = defaultQ.asVec4();
@@ -844,20 +844,36 @@ public:
     }
     const Vec3& getDefaultRadii() const {return defaultRadii;}
 
+    // Allocate the Instance-stage discrete variable that carries the
+    // State-current radii. The default is the topology-time `defaultRadii`.
+    // Writes invalidate Stage::Instance and above so the next realize sees
+    // them.
+    void realizeTopologyVirtual(State& s) const override {
+        stateRadiiIndex = s.allocateDiscreteVariable(
+            getMyMatterSubsystemRep().getMySubsystemIndex(),
+            Stage::Instance,
+            new Value<Vec3>(defaultRadii));
+    }
+
     void setRadii(State& s, const Vec3& r) const {
-        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
-        iv.ellipsoidRadii[getMyMobilizedBodyIndex()] = r;
+        Value<Vec3>::updDowncast(
+            s.updDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                stateRadiiIndex)).upd() = r;
     }
     const Vec3& getRadii(const State& s) const {
-        const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
-        return iv.ellipsoidRadii[getMyMobilizedBodyIndex()];
+        return Value<Vec3>::downcast(
+            s.getDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                stateRadiiIndex)).get();
     }
 
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
-    Vec3 defaultRadii;    // used for visualization only
-    Quaternion defaultQ;  // the default orientation
+    Vec3 defaultRadii;            // topology default; State carries the live value
+    Quaternion defaultQ;          // the default orientation
+    mutable DiscreteVariableIndex stateRadiiIndex; // allocated at realizeTopology
 };
 
 class MobilizedBody::TranslationImpl : public MobilizedBodyImpl {
@@ -1067,20 +1083,35 @@ public:
     }
     const Real& getDefaultLength() const {return defaultLength;}
 
+    // Allocate the Instance-stage discrete variable that carries the
+    // State-current beam length. Defaults to defaultLength; writes
+    // invalidate Stage::Instance.
+    void realizeTopologyVirtual(State& s) const override {
+        stateLengthIndex = s.allocateDiscreteVariable(
+            getMyMatterSubsystemRep().getMySubsystemIndex(),
+            Stage::Instance,
+            new Value<Real>(defaultLength));
+    }
+
     void setLength(State& s, const Real& length) const {
-        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
-        iv.cantileverFreeBeamLength[getMyMobilizedBodyIndex()] = length;
+        Value<Real>::updDowncast(
+            s.updDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                stateLengthIndex)).upd() = length;
     }
     const Real& getLength(const State& s) const {
-        const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
-        return iv.cantileverFreeBeamLength[getMyMobilizedBodyIndex()];
+        return Value<Real>::downcast(
+            s.getDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                stateLengthIndex)).get();
     }
 
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::CantileverFreeBeam;
-    Real defaultLength; // topology default; State carries the live value
-    Vec3 defaultQ;      // the default orientation
+    Real defaultLength;            // topology default; State carries the live value
+    Vec3 defaultQ;                 // the default orientation
+    mutable DiscreteVariableIndex stateLengthIndex; // allocated at realizeTopology
 };
 
 /////////////////////////////////////////////////

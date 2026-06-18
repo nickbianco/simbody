@@ -31,6 +31,7 @@
 #include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+#include "MobilizedBodyImpl.h" // need MobilizedBody::CantileverFreeBeamImpl
 
     // CANTILEVER FREE BEAM //
 
@@ -61,16 +62,15 @@
 
 class RBNodeCantileverFreeBeam :
         public RigidBodyNodeSpec<3, false> {
-    Real defaultLength;  // topology-time default; State carries the live value
 public:
 
 typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "cantilever free beam"; }
 
-RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
+RBNodeCantileverFreeBeam(const MobilizedBody::CantileverFreeBeamImpl& impl,
+                         const MassProperties& mProps_B,
                          const Transform&      X_PF,
                          const Transform&      X_BM,
-                         const Real&           length,
                          bool                  isReversed,
                          UIndex&               nextUSlot,
                          USquaredIndex&        nextUSqSlot,
@@ -81,23 +81,13 @@ RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
         RigidBodyNode::QDotIsAlwaysTheSameAsU,
         RigidBodyNode::QuaternionIsNeverUsed,
         isReversed),
-    defaultLength(length)
+    impl(impl)
 {
     this->updateSlots(nextUSlot, nextUSqSlot, nextQSlot);
 }
 
-// Seed the State's default beam length from the topology-time value.
-void setMobilizerDefaultInstanceValues(const SBModelVars&,
-                                       SBInstanceVars& iv) const override
-{   iv.cantileverFreeBeamLength[this->getNodeNum()] = defaultLength; }
-
-// Helper: get the State-current beam length. Multiplying by these constants
-// gives the deflection coefficient (Fx,Fy translation magnitude per unit
-// deflection angle) and the displacement coefficient (Fz shortening per unit
-// deflection angle squared). The constants are derived from the analytical
-// beam mode shape.
-Real getLength(const SBStateDigest& sbs) const {
-    return sbs.getInstanceVars().cantileverFreeBeamLength[this->getNodeNum()];
+const Real& getLength(const SBStateDigest& sbs) const {
+    return impl.getLength(sbs.getState());
 }
 
     // Implementations of virtual methods.
@@ -156,7 +146,7 @@ void setUToFitLinearVelocityImpl(const SBStateDigest& sbs, const Vector& q,
 {
     Real q0 = this->fromQ(q)[0];
     Real q1 = this->fromQ(q)[1];
-    const Real L  = getLength(sbs);
+    const Real& L  = getLength(sbs);
     const Real dC = (2.0 / 3.0) * L;
     const Real pC = (4.0 / 15.0) * L;
     Matrix m(3, 2, 0.0);
@@ -223,7 +213,7 @@ void calcX_FM(const SBStateDigest& sbs,
 
     const Real& q0 = Vec3::getAs(q)[0];
     const Real& q1 = Vec3::getAs(q)[1];
-    const Real L  = getLength(sbs);
+    const Real& L  = getLength(sbs);
     const Real dC = (2.0 / 3.0) * L;
     const Real pC = (4.0 / 15.0) * L;
     X_F0M0.updP() = Vec3(
@@ -247,7 +237,7 @@ void calcAcrossJointVelocityJacobian(const SBStateDigest& sbs,
     const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
     const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
     const Vec3& q = this->fromQ(sbs.getQ());
-    const Real L  = getLength(sbs);
+    const Real& L  = getLength(sbs);
     const Real dC = (2.0 / 3.0) * L;
     const Real pC = (4.0 / 15.0) * L;
 
@@ -292,7 +282,8 @@ void calcAcrossJointVelocityJacobianDot(
 
 // Can use default for calcQDot, multiplyByN, etc., since qdot==u for
 // CantileverFreeBeam mobilizer.
-
+private:
+    const MobilizedBody::CantileverFreeBeamImpl& impl;
 };
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_CANTILEVER_FREE_BEAM_H_
