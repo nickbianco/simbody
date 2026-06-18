@@ -48,11 +48,10 @@
 // modeling option allows the Ball to be switched to use Euler angles when 
 // convenient.
 
-template<bool noX_MB, bool noR_PF>
-class RBNodeGimbal : public RigidBodyNodeSpec<3, false, noX_MB, noR_PF> {
+class RBNodeGimbal : public RigidBodyNodeSpec<3, false> {
 public:
 
-typedef typename RigidBodyNodeSpec<3, false, noX_MB, noR_PF>::HType HType;
+typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "gimbal"; }
 
 RBNodeGimbal( const MassProperties& mProps_B,
@@ -62,7 +61,7 @@ RBNodeGimbal( const MassProperties& mProps_B,
               UIndex&               nextUSlot,
               USquaredIndex&        nextUSqSlot,
               QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<3, false, noX_MB, noR_PF>
+:   RigidBodyNodeSpec<3, false>
        (mProps_B,X_PF,X_BM,
         nextUSlot,nextUSqSlot,nextQSlot,
         RigidBodyNode::QDotIsAlwaysTheSameAsU, 

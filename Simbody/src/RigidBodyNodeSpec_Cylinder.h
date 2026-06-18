@@ -44,10 +44,9 @@
 // In addition, the origin points of M and F are separated only along the
 // z axis; i.e., they have the same x & y coords in the F frame. The two
 // generalized coordinates are the rotation and the translation, in that order.
-template<bool noX_MB, bool noR_PF>
-class RBNodeCylinder : public RigidBodyNodeSpec<2, false, noX_MB, noR_PF> {
+class RBNodeCylinder : public RigidBodyNodeSpec<2, false> {
 public:
-    typedef typename RigidBodyNodeSpec<2, false, noX_MB, noR_PF>::HType HType;
+    typedef typename RigidBodyNodeSpec<2, false>::HType HType;
     virtual const char* type() { return "cylinder"; }
 
     RBNodeCylinder(const MassProperties& mProps_B,
@@ -57,7 +56,7 @@ public:
                    UIndex&               nextUSlot,
                    USquaredIndex&        nextUSqSlot,
                    QIndex&               nextQSlot)
-      : RigidBodyNodeSpec<2, false, noX_MB, noR_PF>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
+      : RigidBodyNodeSpec<2, false>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
                              RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, isReversed)
     {
         this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);

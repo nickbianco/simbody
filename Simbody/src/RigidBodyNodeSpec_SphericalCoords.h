@@ -87,10 +87,9 @@ One common convention for atomic (torsion,bend,stretch) uses the default
 spherical coordinate system but the final stretch is along the -z direction. 
 For that, take all defaults but set s2=-1. */
 
-template<bool noX_MB, bool noR_PF>
-class RBNodeSphericalCoords : public RigidBodyNodeSpec<3, false, noX_MB, noR_PF> {
+class RBNodeSphericalCoords : public RigidBodyNodeSpec<3, false> {
 public:
-typedef typename RigidBodyNodeSpec<3, false, noX_MB, noR_PF>::HType HType;
+typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "spherical coords"; }
 
 RBNodeSphericalCoords(const MassProperties&   mProps_B,
@@ -106,7 +105,7 @@ RBNodeSphericalCoords(const MassProperties&   mProps_B,
                         UIndex&               nextUSlot,
                         USquaredIndex&        nextUSqSlot,
                         QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<3, false, noX_MB, noR_PF>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
+:   RigidBodyNodeSpec<3, false>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
                          RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
                          isReversed),
     az0(azimuthOffset), ze0(zenithOffset), axisT(translationAxis),

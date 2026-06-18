@@ -59,11 +59,10 @@
 //     NOTE: THAT IS A DIFFERENT FRAME THAN IS USED FOR BALL AND GIMBAL
 // Thus the qdots have to be derived from the generalized speeds to
 // be turned into either 4 quaternion derivatives or 3 Euler angle derivatives.
-template<bool noX_MB, bool noR_PF>
-class RBNodeLineOrientation : public RigidBodyNodeSpec<2, false, noX_MB, noR_PF> {
+class RBNodeLineOrientation : public RigidBodyNodeSpec<2, false> {
 public:
 
-typedef typename RigidBodyNodeSpec<2, false, noX_MB, noR_PF>::HType HType;
+typedef typename RigidBodyNodeSpec<2, false>::HType HType;
 virtual const char* type() { return "lineOrientation"; }
 
 RBNodeLineOrientation(const MassProperties& mProps_B,
@@ -73,7 +72,7 @@ RBNodeLineOrientation(const MassProperties& mProps_B,
                       UIndex&               nextUSlot,
                       USquaredIndex&        nextUSqSlot,
                       QIndex&               nextQSlot)
-  : RigidBodyNodeSpec<2, false, noX_MB, noR_PF>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
+  : RigidBodyNodeSpec<2, false>(mProps_B,X_PF,X_BM,nextUSlot,nextUSqSlot,nextQSlot,
                          RigidBodyNode::QDotMayDifferFromU, RigidBodyNode::QuaternionMayBeUsed, isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);

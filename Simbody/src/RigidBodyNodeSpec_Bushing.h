@@ -51,11 +51,10 @@
 // singularity. A modeling option allows the Free to be switched to use Euler
 // angles when necessary.
 
-template<bool noX_MB, bool noR_PF>
-class RBNodeBushing : public RigidBodyNodeSpec<6, false, noX_MB, noR_PF> {
+class RBNodeBushing : public RigidBodyNodeSpec<6, false> {
 public:
 
-typedef typename RigidBodyNodeSpec<6, false, noX_MB, noR_PF>::HType HType;
+typedef typename RigidBodyNodeSpec<6, false>::HType HType;
 virtual const char* type() { return "bushing"; }
 
 RBNodeBushing(const MassProperties& mProps_B,
@@ -65,7 +64,7 @@ RBNodeBushing(const MassProperties& mProps_B,
               UIndex&               nextUSlot,
               USquaredIndex&        nextUSqSlot,
               QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<6, false, noX_MB, noR_PF>
+:   RigidBodyNodeSpec<6, false>
        (mProps_B,X_PF,X_BM,
         nextUSlot,nextUSqSlot,nextQSlot,
         RigidBodyNode::QDotIsAlwaysTheSameAsU, 

@@ -59,13 +59,12 @@
 // NOTE: This mobilizer has a singularity when the middle angle (q[1]) is near
 // +/-90 degrees.
 
-template<bool noX_MB, bool noR_PF>
 class RBNodeCantileverFreeBeam :
-        public RigidBodyNodeSpec<3, false, noX_MB, noR_PF> {
+        public RigidBodyNodeSpec<3, false> {
     Real defaultLength;  // topology-time default; State carries the live value
 public:
 
-typedef typename RigidBodyNodeSpec<3, false, noX_MB, noR_PF>::HType HType;
+typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "cantilever free beam"; }
 
 RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
@@ -76,7 +75,7 @@ RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
                          UIndex&               nextUSlot,
                          USquaredIndex&        nextUSqSlot,
                          QIndex&               nextQSlot)
-  : RigidBodyNodeSpec<3, false, noX_MB, noR_PF>(
+  : RigidBodyNodeSpec<3, false>(
         mProps_B, X_PF, X_BM,
         nextUSlot, nextUSqSlot, nextQSlot,
         RigidBodyNode::QDotIsAlwaysTheSameAsU,

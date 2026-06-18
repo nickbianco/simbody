@@ -32,6 +32,7 @@
 #include "RigidBodyNodeSpec_SphericalCoords.h"
 #include "RigidBodyNodeSpec_Ball.h"
 #include "RigidBodyNodeSpec_Ellipsoid.h"
+#include "RigidBodyNodeSpec_Translation.h"
 #include "RigidBodyNodeSpec_Free.h"
 #include "RigidBodyNodeSpec_Screw.h"
 #include "RigidBodyNodeSpec_Universal.h"
@@ -45,16 +46,6 @@
 #include "RigidBodyNodeSpec_Custom.h"
 // Note: _Translation is handled separately so we can special case
 // a lone particle for speed if we find one.
-
-// A macro for instantiating rigid body nodes. The noX_MB / noR_PF template
-// shortcuts that used to skip rotation/translation work when the mobilizer
-// frames were identity at topology are no longer correct: the frames are
-// Instance-stage State variables and may be overridden at runtime via
-// setInboardFrame() / setOutboardFrame(). Always instantiate the
-// general-case <false,false> path so the per-frame computations honor the
-// state-current X_PF and X_BM.
-#define INSTANTIATE(CLASS, ...) \
-    return new CLASS<false, false> (__VA_ARGS__);
 
     /////////////////////////////////////////////////////////
     // MoblizedBodyImpl::createRigidBodyNode() definitions //
@@ -70,11 +61,11 @@ RigidBodyNode* MobilizedBody::PinImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeTorsion,
+    return new RBNodeTorsion(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 
@@ -83,11 +74,11 @@ RigidBodyNode* MobilizedBody::SliderImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeSlider,
+    return new RBNodeSlider(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 
@@ -96,11 +87,11 @@ RigidBodyNode* MobilizedBody::BallImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeBall,
+    return new RBNodeBall(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 
@@ -109,11 +100,11 @@ RigidBodyNode* MobilizedBody::FreeImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeFree,
+    return new RBNodeFree(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 
@@ -123,12 +114,12 @@ RigidBodyNode* MobilizedBody::ScrewImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeScrew,
+    return new RBNodeScrew(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         getDefaultPitch(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 
@@ -137,11 +128,11 @@ RigidBodyNode* MobilizedBody::UniversalImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeUJoint,
+    return new RBNodeUJoint(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::CylinderImpl::createRigidBodyNode(
@@ -149,10 +140,10 @@ RigidBodyNode* MobilizedBody::CylinderImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeCylinder, getDefaultRigidBodyMassProperties(),
+    return new RBNodeCylinder( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::BendStretchImpl::createRigidBodyNode(
@@ -160,10 +151,10 @@ RigidBodyNode* MobilizedBody::BendStretchImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeBendStretch, getDefaultRigidBodyMassProperties(),
+    return new RBNodeBendStretch( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::PlanarImpl::createRigidBodyNode(
@@ -171,10 +162,10 @@ RigidBodyNode* MobilizedBody::PlanarImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodePlanar, getDefaultRigidBodyMassProperties(),
+    return new RBNodePlanar( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::SphericalCoordsImpl::createRigidBodyNode(
@@ -182,11 +173,11 @@ RigidBodyNode* MobilizedBody::SphericalCoordsImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeSphericalCoords, getDefaultRigidBodyMassProperties(),
+    return new RBNodeSphericalCoords( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         az0, negAz, ze0, negZe, axisT, negT,
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::GimbalImpl::createRigidBodyNode(
@@ -194,10 +185,10 @@ RigidBodyNode* MobilizedBody::GimbalImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeGimbal, getDefaultRigidBodyMassProperties(),
+    return new RBNodeGimbal( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::BushingImpl::createRigidBodyNode(
@@ -205,10 +196,10 @@ RigidBodyNode* MobilizedBody::BushingImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeBushing, getDefaultRigidBodyMassProperties(),
+    return new RBNodeBushing( getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::EllipsoidImpl::createRigidBodyNode(
@@ -216,12 +207,12 @@ RigidBodyNode* MobilizedBody::EllipsoidImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeEllipsoid,
+    return new RBNodeEllipsoid(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         getDefaultRadii(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::LineOrientationImpl::createRigidBodyNode(
@@ -229,11 +220,11 @@ RigidBodyNode* MobilizedBody::LineOrientationImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeLineOrientation,
+    return new RBNodeLineOrientation(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::FreeLineImpl::createRigidBodyNode(
@@ -241,11 +232,11 @@ RigidBodyNode* MobilizedBody::FreeLineImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeFreeLine,
+    return new RBNodeFreeLine(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
@@ -253,18 +244,25 @@ RigidBodyNode* MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    INSTANTIATE(RBNodeCantileverFreeBeam,
+    return new RBNodeCantileverFreeBeam(
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         getDefaultLength(),
         isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
-// See the comment on INSTANTIATE above for why the optimization branches
-// were dropped.
-#define INSTANTIATE_CUSTOM(DOF, ...) \
-    return new RBNodeCustom<DOF, false, false> (__VA_ARGS__);
+RigidBodyNode* MobilizedBody::TranslationImpl::createRigidBodyNode(
+        UIndex&        nextUSlot,
+        USquaredIndex& nextUSqSlot,
+        QIndex&        nextQSlot) const {
+    
+    return new RBNodeTranslate(
+        getDefaultRigidBodyMassProperties(),
+        getDefaultInboardFrame(),getDefaultOutboardFrame(),
+        isReversed(),
+        nextUSlot,nextUSqSlot,nextQSlot);
+}
 
 RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(
     UIndex&        nextUSlot,
@@ -273,23 +271,23 @@ RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(
 {
     switch (getImplementation().getImpl().getNU()) {
     case 1:
-        INSTANTIATE_CUSTOM(1, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<1>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     case 2:
-        INSTANTIATE_CUSTOM(2, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<2>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     case 3:
-        INSTANTIATE_CUSTOM(3, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<3>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     case 4:
-        INSTANTIATE_CUSTOM(4, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<4>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     case 5:
-        INSTANTIATE_CUSTOM(5, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<5>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     case 6:
-        INSTANTIATE_CUSTOM(6, getImplementation(), getDefaultRigidBodyMassProperties(),
-            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot)
+        return new RBNodeCustom<6>(getImplementation(), getDefaultRigidBodyMassProperties(),
+            getDefaultInboardFrame(), getDefaultOutboardFrame(), isReversed(), nextUSlot, nextUSqSlot, nextQSlot);
     default:
         assert(!"Illegal number of degrees of freedom for custom MobilizedBody");
         return 0;

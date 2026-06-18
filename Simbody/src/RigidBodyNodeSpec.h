@@ -56,7 +56,7 @@
  * mobilities). Each implementation works only on fixed size Vec<> and Mat<> 
  * types, so can use very high speed inline operators.
  */
-template<int dof, bool noR_FM=false, bool noX_MB=false, bool noR_PF=false>
+template<int dof, bool noR_FM=false>
 class RigidBodyNodeSpec : public RigidBodyNode {
 public:
 
@@ -561,11 +561,9 @@ void calcBodyTransforms(
     const Transform& X_FM = getX_FM(pc); // just calculated
     const Transform& X_GP = getX_GP(pc); // already calculated
 
-    const Transform X_FB = (noX_MB ? X_FM                   // cheap
-                                   : X_FM*X_MB);            // 63 flops
-    X_PB = (noR_PF ? Transform(X_FB.R(), X_PF.p()+X_FB.p()) // cheap
-                   : X_PF*X_FB);                            // 63 flops
-    X_GB = X_GP * X_PB;                                     // 63 flops
+    const Transform X_FB = X_FM * X_MB;  // 63 flops
+    X_PB = X_PF * X_FB;                  // 63 flops
+    X_GB = X_GP * X_PB;                  // 63 flops
 }
 
 // Same for all mobilizers. The return matrix here is precisely the 
