@@ -815,8 +815,8 @@ private:
 
 class MobilizedBody::EllipsoidImpl : public MobilizedBodyImpl {
 public:
-    explicit EllipsoidImpl(Direction d)
-    :   MobilizedBodyImpl(d), defaultRadii(Real(0.5),Real(1./3.),Real(0.25)),
+    explicit EllipsoidImpl(Direction d) 
+    :   MobilizedBodyImpl(d), defaultRadii(Real(0.5),Real(1./3.),Real(0.25)), 
         defaultQ() { } // default is (1,0,0,0), the identity rotation
     EllipsoidImpl* clone() const override { return new EllipsoidImpl(*this); }
 
@@ -826,7 +826,7 @@ public:
         QIndex&        nextQSlot) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
-        SimTK_ASSERT(nq==4||nq==3,
+        SimTK_ASSERT(nq==4||nq==3, 
             "MobilizedBody::EllipsoidImpl::copyOutDefaultQImpl(): wrong number of q's");
         if (nq==4)
             Vec4::updAs(q) = defaultQ.asVec4();
@@ -844,12 +844,8 @@ public:
     }
     const Vec3& getDefaultRadii() const {return defaultRadii;}
 
-    // Allocate the Instance-stage discrete variable that carries the
-    // State-current radii. The default is the topology-time `defaultRadii`.
-    // Writes invalidate Stage::Instance and above so the next realize sees
-    // them.
     void realizeTopologyVirtual(State& s) const override {
-        stateRadiiIndex = s.allocateDiscreteVariable(
+        radiiIndex = s.allocateDiscreteVariable(
             getMyMatterSubsystemRep().getMySubsystemIndex(),
             Stage::Instance,
             new Value<Vec3>(defaultRadii));
@@ -859,21 +855,21 @@ public:
         Value<Vec3>::updDowncast(
             s.updDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
-                stateRadiiIndex)).upd() = r;
+                radiiIndex)).upd() = r;
     }
     const Vec3& getRadii(const State& s) const {
         return Value<Vec3>::downcast(
             s.getDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
-                stateRadiiIndex)).get();
+                radiiIndex)).get();
     }
 
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
-    Vec3 defaultRadii;            // topology default; State carries the live value
-    Quaternion defaultQ;          // the default orientation
-    mutable DiscreteVariableIndex stateRadiiIndex; // allocated at realizeTopology
+    Vec3 defaultRadii;                        // topology default
+    Quaternion defaultQ;                      // the default orientation
+    mutable DiscreteVariableIndex radiiIndex; // allocated at topology stage
 };
 
 class MobilizedBody::TranslationImpl : public MobilizedBodyImpl {
@@ -1083,11 +1079,8 @@ public:
     }
     const Real& getDefaultLength() const {return defaultLength;}
 
-    // Allocate the Instance-stage discrete variable that carries the
-    // State-current beam length. Defaults to defaultLength; writes
-    // invalidate Stage::Instance.
     void realizeTopologyVirtual(State& s) const override {
-        stateLengthIndex = s.allocateDiscreteVariable(
+        lengthIndex = s.allocateDiscreteVariable(
             getMyMatterSubsystemRep().getMySubsystemIndex(),
             Stage::Instance,
             new Value<Real>(defaultLength));
@@ -1097,21 +1090,21 @@ public:
         Value<Real>::updDowncast(
             s.updDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
-                stateLengthIndex)).upd() = length;
+                lengthIndex)).upd() = length;
     }
     const Real& getLength(const State& s) const {
         return Value<Real>::downcast(
             s.getDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
-                stateLengthIndex)).get();
+                lengthIndex)).get();
     }
 
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::CantileverFreeBeam;
-    Real defaultLength;            // topology default; State carries the live value
-    Vec3 defaultQ;                 // the default orientation
-    mutable DiscreteVariableIndex stateLengthIndex; // allocated at realizeTopology
+    Real defaultLength;                        // topology default
+    Vec3 defaultQ;                             // the default orientation
+    mutable DiscreteVariableIndex lengthIndex; // allocated at topology stage
 };
 
 /////////////////////////////////////////////////
@@ -1312,7 +1305,7 @@ public:
         Arot = Mat33(axes[0].normalize(), axes[1].normalize(), axes[2].normalize());
         Atrans = Mat33(axes[3].normalize(), axes[4].normalize(), axes[5].normalize());
     }
-
+    
     ~FunctionBasedImpl() {
         if (--referenceCount[0] == 0) {
             for (int i = 0; i < (int) functions.size(); i++)
@@ -1330,16 +1323,16 @@ public:
         // Initialize the tranformation to be returned
         Transform X(Vec3(0));
         Vec6 spatialCoords;
-
+        
         // Get the spatial cooridinates as a function of the q's
         for(int i=0; i < 6; i++){
             //Coordinates for this function
             int nc = coordIndices[i].size();
             Vector fcoords(nc);
-
+    
             for(int j=0; j < nc; j++)
-                fcoords(j) = q[coordIndices[i][j]];
-
+                fcoords(j) = q[coordIndices[i][j]];            
+            
             //default behavior of constant function should take a Vector of length 0
             spatialCoords(i) = functions[i]->calcValue(fcoords);
         }
