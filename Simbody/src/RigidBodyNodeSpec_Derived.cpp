@@ -32,7 +32,6 @@
 #include "RigidBodyNodeSpec_SphericalCoords.h"
 #include "RigidBodyNodeSpec_Ball.h"
 #include "RigidBodyNodeSpec_Ellipsoid.h"
-#include "RigidBodyNodeSpec_Translation.h"
 #include "RigidBodyNodeSpec_Free.h"
 #include "RigidBodyNodeSpec_Screw.h"
 #include "RigidBodyNodeSpec_Universal.h"
@@ -85,19 +84,6 @@ RigidBodyNode* MobilizedBody::SliderImpl::createRigidBodyNode(
     QIndex&        nextQSlot) const
 {
     INSTANTIATE(RBNodeSlider,
-        getDefaultRigidBodyMassProperties(),
-        getDefaultInboardFrame(),getDefaultOutboardFrame(),
-        isReversed(),
-        nextUSlot,nextUSqSlot,nextQSlot)
-}
-
-
-RigidBodyNode* MobilizedBody::TranslationImpl::createRigidBodyNode(
-    UIndex&        nextUSlot,
-    USquaredIndex& nextUSqSlot,
-    QIndex&        nextQSlot) const
-{
-    INSTANTIATE(RBNodeTranslate,
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
