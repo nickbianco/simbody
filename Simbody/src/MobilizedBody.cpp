@@ -3250,17 +3250,17 @@ MobilizedBody::FunctionBased::FunctionBased
 }
 
 void MobilizedBody::FunctionBased::
-setFunctions(State& state, const Array_<const Function*>& functions) const {
+setTranslationScale(State& state, const Vec3& tScale) const {
     const FunctionBasedImpl& impl =
         dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    impl.setFunctions(state, functions);
+    impl.setTranslationScale(state, tScale);
 }
 
-const Array_<const Function*>& MobilizedBody::FunctionBased::
-getFunctions(const State& state) const {
+const Vec3& MobilizedBody::FunctionBased::
+getTranslationScale(const State& state) const {
     const FunctionBasedImpl& impl =
         dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    return impl.getStateFunctions(state);
+    return impl.getTranslationScale(state);
 }
 
 } // namespace SimTK

@@ -192,25 +192,25 @@ public:
                                 direction);
     }
 
-    /** Override the basis functions for this State. This is an Instance-stage
-    variable: setting it invalidates Stage::Instance and higher, so the State
-    must be re-realized to Position before any kinematic query reflects the
-    new functions. The new array must be of length 6 and each function's
-    argument size and derivative-order requirements must match those of the
-    topology defaults; otherwise an exception is thrown.
+    /** Set per-axis scale factors applied to the three translation function
+    outputs for this State. Specifically, the scaled translation outputs
+    are spatialCoords_scaled[i] = tScale[i] * spatialCoords[i] for i = 0,1,2
+    (corresponding to functions[3], functions[4], functions[5]), and these
+    flow through Atrans into p_FM and through the function derivatives into
+    the translation rows of the H/Hdot Jacobians. The default is (1,1,1),
+    i.e. no scaling, so callers who never invoke this setter see the
+    topology-time behavior.
 
-    Unlike the constructor, this method does NOT take ownership of the supplied
-    pointers. The caller is responsible for keeping them valid for the lifetime
-    of any State that references them. The axes (Arot, Atrans) and the
-    coordIndices array are NOT overridable per the design intent.
-    @see getFunctions() **/
-    void setFunctions(State& state,
-                      const Array_<const Function*>& functions) const;
+    This is an Instance-stage variable: setting it invalidates
+    Stage::Instance and higher, so the State must be re-realized to Position
+    before any kinematic query reflects the new scale.
+    @see getTranslationScale() **/
+    void setTranslationScale(State& state, const Vec3& tScale) const;
 
-    /** Get the basis functions currently in effect for this State. The State
-    must have been realized to Stage::Instance or higher.
-    @see setFunctions() **/
-    const Array_<const Function*>& getFunctions(const State& state) const;
+    /** Get the per-axis translation-output scale factors currently in effect
+    for this State. Defaults to Vec3(1,1,1).
+    @see setTranslationScale() **/
+    const Vec3& getTranslationScale(const State& state) const;
 };
 
 } // namespace SimTK

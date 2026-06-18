@@ -399,8 +399,8 @@ void testFunctionBasedStateOverrides() {
         Vec3(1,0,0), Vec3(0,1,0), Vec3(0,0,1)};
     const Array_<Vec3> axes(axesVec);
 
-    Array_<const Function*> fnsDefault(6);
-    for (int i = 0; i < 6; ++i) fnsDefault[i] = new LinearFunction(1.0);
+    Array_<const Function*> fns(6);
+    for (int i = 0; i < 6; ++i) fns[i] = new LinearFunction(1.0);
 
     MultibodySystem sys;
     SimbodyMatterSubsystem matter(sys);
@@ -408,7 +408,7 @@ void testFunctionBasedStateOverrides() {
     Body::Rigid body(MassProperties(1.0, Vec3(0), UnitInertia(0.1)));
     MobilizedBody::FunctionBased fb(matter.Ground(), Transform(),
                                     body, Transform(),
-                                    6, fnsDefault, coordIndices, axes);
+                                    6, fns, coordIndices, axes);
     sys.realizeTopology();
     State s = sys.getDefaultState();
     setNonTrivialState(s);
@@ -416,22 +416,84 @@ void testFunctionBasedStateOverrides() {
     exerciseOverride(sys, s, fb.getMobilizedBodyIndex(), Vec3(0.04, 0.02, -0.01),
                      "FunctionBased/default");
 
-    // Override functions: slope=2 set; ownership stays with us (delete later).
-    Array_<const Function*> fnsOverride(6);
-    for (int i = 0; i < 6; ++i) fnsOverride[i] = new LinearFunction(2.0);
-    fb.setFunctions(s, fnsOverride);
+    // Apply per-axis translation-output scale. Internal consistency check:
+    // multiplyBySystemJacobian should still agree with the realized body
+    // velocity through the scaled translation rows of H.
+    const Vec3 tScale(2.0, 1.5, 0.7);
+    fb.setTranslationScale(s, tScale);
+    SimTK_TEST_EQ_TOL(fb.getTranslationScale(s), tScale, 1e-15);
     exerciseOverride(sys, s, fb.getMobilizedBodyIndex(), Vec3(0.04, 0.02, -0.01),
-                     "FunctionBased/functions");
+                     "FunctionBased/translationScale");
 
     fb.setInboardFrame(s, makeFramePerturbation(6));
     exerciseOverride(sys, s, fb.getMobilizedBodyIndex(), Vec3(0.04, 0.02, -0.01),
-                     "FunctionBased/functions+X_PF");
+                     "FunctionBased/translationScale+X_PF");
 
     fb.setOutboardFrame(s, makeFramePerturbation(7));
     exerciseOverride(sys, s, fb.getMobilizedBodyIndex(), Vec3(0.04, 0.02, -0.01),
-                     "FunctionBased/functions+X_PF+X_BM");
+                     "FunctionBased/translationScale+X_PF+X_BM");
+}
 
-    for (auto* f : fnsOverride) delete f;
+// Bit-exact cross-check: setTranslationScale(state, tScale) should produce
+// the same Jacobian as a system built with the scaled slopes baked into the
+// translation functions at construction.
+void testFunctionBasedTranslationScaleMatchesBakedIn() {
+    Array_<Array_<int>> coordIndices(6);
+    for (int i = 0; i < 6; ++i) coordIndices[i].push_back(i);
+    const std::vector<Vec3> axesVec = {
+        Vec3(1,0,0), Vec3(0,1,0), Vec3(0,0,1),
+        Vec3(1,0,0), Vec3(0,1,0), Vec3(0,0,1)};
+    const Array_<Vec3> axes(axesVec);
+
+    auto buildSys = [&](Real rotSlope, Real txSlope, Real tySlope, Real tzSlope,
+                        MobilizedBody::FunctionBased& outFb) {
+        MultibodySystem* sys = new MultibodySystem();
+        SimbodyMatterSubsystem matter(*sys);
+        GeneralForceSubsystem forces(*sys);
+        Body::Rigid body(MassProperties(1.0, Vec3(0), UnitInertia(0.1)));
+        Array_<const Function*> fns(6);
+        fns[0] = new LinearFunction(rotSlope);
+        fns[1] = new LinearFunction(rotSlope);
+        fns[2] = new LinearFunction(rotSlope);
+        fns[3] = new LinearFunction(txSlope);
+        fns[4] = new LinearFunction(tySlope);
+        fns[5] = new LinearFunction(tzSlope);
+        outFb = MobilizedBody::FunctionBased(matter.Ground(), Transform(),
+                                             body, Transform(),
+                                             6, fns, coordIndices, axes);
+        sys->realizeTopology();
+        return sys;
+    };
+
+    const Vec3 tScale(2.0, 1.5, 0.7);
+
+    MobilizedBody::FunctionBased fbRef, fbTest;
+    MultibodySystem* ref  = buildSys(1.0, tScale[0], tScale[1], tScale[2], fbRef);
+    MultibodySystem* test = buildSys(1.0, 1.0, 1.0, 1.0, fbTest);
+
+    State refState  = ref->getDefaultState();
+    State testState = test->getDefaultState();
+    refState.updQ()  = 0.1; refState.updU()  = 0.05;
+    testState.updQ() = 0.1; testState.updU() = 0.05;
+
+    fbTest.setTranslationScale(testState, tScale);
+
+    ref->realize(refState, Stage::Position);
+    test->realize(testState, Stage::Position);
+
+    Vector u(refState.getU().size(), 0.0);
+    u[0] = 1.0; u[1] = 0.3; u[2] = -0.2; u[3] = 0.5;
+
+    Vector_<SpatialVec> VuRef(ref->getMatterSubsystem().getNumBodies());
+    ref->getMatterSubsystem().multiplyBySystemJacobian(refState, u, VuRef);
+    Vector_<SpatialVec> VuTest(test->getMatterSubsystem().getNumBodies());
+    test->getMatterSubsystem().multiplyBySystemJacobian(testState, u, VuTest);
+
+    for (int i = 0; i < VuRef.size(); ++i)
+        SimTK_TEST_EQ_TOL(VuTest[i], VuRef[i], 1e-12);
+
+    delete ref;
+    delete test;
 }
 
 void testCustomMobilizerFrameOverrides() {
@@ -501,6 +563,7 @@ int main() {
         SimTK_SUBTEST(testEllipsoidStateOverrides);
         SimTK_SUBTEST(testCantileverFreeBeamStateOverrides);
         SimTK_SUBTEST(testFunctionBasedStateOverrides);
+        SimTK_SUBTEST(testFunctionBasedTranslationScaleMatchesBakedIn);
         SimTK_SUBTEST(testCustomMobilizerFrameOverrides);
         SimTK_SUBTEST(testFrameOverrideActuallyChangesJacobian);
     SimTK_END_TEST();

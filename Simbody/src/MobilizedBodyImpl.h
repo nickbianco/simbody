@@ -1331,8 +1331,6 @@ public:
         Transform X(Vec3(0));
         Vec6 spatialCoords;
 
-        const Array_<const Function*>& fns = getStateFunctions(s);
-
         // Get the spatial cooridinates as a function of the q's
         for(int i=0; i < 6; i++){
             //Coordinates for this function
@@ -1343,7 +1341,7 @@ public:
                 fcoords(j) = q[coordIndices[i][j]];
 
             //default behavior of constant function should take a Vector of length 0
-            spatialCoords(i) = fns[i]->calcValue(fcoords);
+            spatialCoords(i) = functions[i]->calcValue(fcoords);
         }
 
 /*
@@ -1358,8 +1356,13 @@ public:
         //X.updR().setRotationToBodyFixedXYZ(spatialCoords.getSubVec<3>(0));
         X.updR().setRotationFromMat33TrustMe(Rotation(spatialCoords(0), UnitVec3::getAs(&Arot(0,0)))*
             Rotation(spatialCoords(1), UnitVec3::getAs(&Arot(0,1)))*Rotation(spatialCoords(2), UnitVec3::getAs(&Arot(0,2))));
-        X.updP() = spatialCoords(3)*UnitVec3::getAs(&Atrans(0,0))+spatialCoords(4)*UnitVec3::getAs(&Atrans(0,1))
-                    +spatialCoords(5)*UnitVec3::getAs(&Atrans(0,2));
+        // Apply the per-axis translation-output scale to the translation
+        // function outputs (spatialCoords[3..5]) before they are combined
+        // into p_FM via Atrans.
+        const Vec3& tScale = getTranslationScale(s);
+        X.updP() = (tScale[0]*spatialCoords(3))*UnitVec3::getAs(&Atrans(0,0))
+                 + (tScale[1]*spatialCoords(4))*UnitVec3::getAs(&Atrans(0,1))
+                 + (tScale[2]*spatialCoords(5))*UnitVec3::getAs(&Atrans(0,2));
 
         return X;
     }
@@ -1618,43 +1621,32 @@ public:
             break;
         }
         // Allocate the Instance-stage discrete variable that carries the
-        // state-current set of basis functions. The default value is the
-        // topology-time `functions` array supplied at construction. Writes
-        // to this variable invalidate Stage::Instance and higher, which in
-        // turn forces the H/Hdot caches to be rebuilt at the next realize.
-        stateFunctionsIndex = s.allocateDiscreteVariable(
+        // per-axis scale factors applied to the three translation function
+        // outputs. The default is (1,1,1) — no scaling — so callers who
+        // never invoke setTranslationScale see the topology-time behavior.
+        // Writes invalidate Stage::Instance and higher, which forces the
+        // H/Hdot caches to be rebuilt at the next realize.
+        translationScaleIndex = s.allocateDiscreteVariable(
             subsystem, Stage::Instance,
-            new Value<Array_<const Function*> >(functions));
+            new Value<Vec3>(Vec3(1, 1, 1)));
     }
 
-    // State-current basis functions. May differ from the topology-default
-    // `functions` member if the caller has invoked setFunctions(s, ...).
-    const Array_<const Function*>& getStateFunctions(const State& s) const {
-        return Value<Array_<const Function*> >::downcast(
-            s.getDiscreteVariable(subsystem, stateFunctionsIndex)).get();
+    // Per-axis scale factors applied to spatialCoords[3..5] before Atrans
+    // assembles them into p_FM. Same scale carries through the function
+    // derivatives into the translation rows of H and Hdot.
+    const Vec3& getTranslationScale(const State& s) const {
+        return Value<Vec3>::downcast(
+            s.getDiscreteVariable(subsystem, translationScaleIndex)).get();
     }
 
-    void setFunctions(State& s, const Array_<const Function*>& newFunctions) const {
-        SimTK_ERRCHK1(newFunctions.size() == 6,
-            "MobilizedBody::FunctionBased::setFunctions()",
-            "Expected exactly 6 functions; got %d.", (int)newFunctions.size());
-        for (int i = 0; i < 6; ++i) {
-            SimTK_ERRCHK1(newFunctions[i] != nullptr,
-                "MobilizedBody::FunctionBased::setFunctions()",
-                "functions[%d] is null.", i);
-            SimTK_ERRCHK2(newFunctions[i]->getArgumentSize() == coordIndices[i].size(),
-                "MobilizedBody::FunctionBased::setFunctions()",
-                "functions[%d] has wrong argument size (%d).",
-                i, newFunctions[i]->getArgumentSize());
-            SimTK_ERRCHK1(newFunctions[i]->getMaxDerivativeOrder() >= 2,
-                "MobilizedBody::FunctionBased::setFunctions()",
-                "functions[%d] must support derivatives through order 2.", i);
-        }
-        // NOTE: ownership of newFunctions is NOT taken; the caller must keep
-        // them valid for the lifetime of any State that references them.
-        Value<Array_<const Function*> >::updDowncast(
-            s.updDiscreteVariable(subsystem, stateFunctionsIndex)).upd() =
-                newFunctions;
+    void setTranslationScale(State& s, const Vec3& tScale) const {
+        for (int i = 0; i < 3; ++i)
+            SimTK_ERRCHK2(SimTK::isFinite(tScale[i]),
+                "MobilizedBody::FunctionBased::setTranslationScale()",
+                "tScale[%d] = %g is not finite.", i, tScale[i]);
+        Value<Vec3>::updDowncast(
+            s.updDiscreteVariable(subsystem, translationScaleIndex)).upd() =
+                tScale;
     }
 
     void realizePosition(const State& s) const override {
@@ -1734,42 +1726,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
@@ -1784,42 +1776,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid  
                 cache.isValidHdot = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans, getTranslationScale(s));
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
@@ -1831,10 +1823,10 @@ private:
     const SubsystemIndex subsystem;
     const int nu;
     mutable CacheEntryIndex cacheIndex;
-    // The Instance-stage discrete variable holding the State-current set of
-    // basis functions. Defaults to `functions`; user code calls
-    // setFunctions(state, ...) to override per-State.
-    mutable DiscreteVariableIndex stateFunctionsIndex;
+    // Per-axis scale factors applied to the three translation function
+    // outputs (spatialCoords[3..5]) before they're combined into p_FM via
+    // Atrans. Defaults to Vec3(1,1,1); callers set via setTranslationScale.
+    mutable DiscreteVariableIndex translationScaleIndex;
     const Array_<const Function*> functions;
     const Array_<Array_<int> > coordIndices;
     int* referenceCount;
@@ -1844,7 +1836,7 @@ private:
     public:
         CacheInfo() : isValidH(false), isValidHdot(false) { }
 
-        void buildH(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans)
+        void buildH(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans, const Vec3& tScale)
         {
             // Build the Fq and Fqq matrices of partials of the spatial functions with respect to the gen coordinates, q    
             // Cycle through each row (function describing spatial coordinate)
@@ -1890,12 +1882,20 @@ private:
             for(int i=0; i < N; i++){
                 temp = W*(Fq.template getSubMat<3,1>(0,i));
                 h(0,i) = Vec3::getAs(&temp(0,0));
-                temp = Atrans*(Fq.template getSubMat<3,1>(3,i));
+                // Scale the translation derivative rows by tScale before
+                // mapping through Atrans, so the resulting H translation
+                // rows are consistent with the scaled p_FM in
+                // calcMobilizerTransformFromQ.
+                Mat<3,1> scaledFq3 = Fq.template getSubMat<3,1>(3,i);
+                scaledFq3(0,0) *= tScale[0];
+                scaledFq3(1,0) *= tScale[1];
+                scaledFq3(2,0) *= tScale[2];
+                temp = Atrans*scaledFq3;
                 h(1,i) = Vec3::getAs(&temp(0,0));
             }
         }
 
-        void buildHdot(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans)
+        void buildHdot(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans, const Vec3& tScale)
         {
             Mat<6,N> Fqdot(0);
             Vec6 spatialCoords;
@@ -1960,7 +1960,13 @@ private:
             for(int i=0; i < N; i++){
                 temp = Wdot*(Fq.template getSubMat<3,1>(0,i))+W*(Fqdot.template getSubMat<3,1>(0,i));
                 hdot(0,i) = Vec3::getAs(&temp(0,0));
-                temp = Atrans*(Fqdot.template getSubMat<3,1>(3,i));
+                // Same per-axis scaling as in buildH, applied to the
+                // translation rows of Fqdot.
+                Mat<3,1> scaledFqdot3 = Fqdot.template getSubMat<3,1>(3,i);
+                scaledFqdot3(0,0) *= tScale[0];
+                scaledFqdot3(1,0) *= tScale[1];
+                scaledFqdot3(2,0) *= tScale[2];
+                temp = Atrans*scaledFqdot3;
                 hdot(1,i) = Vec3::getAs(&temp(0,0));
             }
         }

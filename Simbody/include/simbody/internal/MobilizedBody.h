@@ -180,10 +180,10 @@ when the State is created.
 Several derived mobilizers expose additional state-parameterizable geometry:
   - MobilizedBody::Ellipsoid::setRadii(state, Vec3) — semi-axis dimensions
   - MobilizedBody::CantileverFreeBeam::setLength(state, Real) — beam length
-  - MobilizedBody::FunctionBased::setFunctions(state, Array_<const Function*>)
-    — the six basis functions. Unlike the constructor, the setter does NOT
-    take ownership; the caller keeps the Function* objects alive for the
-    lifetime of any State that references them.
+  - MobilizedBody::FunctionBased::setTranslationScale(state, Vec3) — per-axis
+    scale factors applied to the three translation function outputs before
+    they are combined into p_FM via Atrans. The basis functions themselves
+    remain topology-time only.
 
 Contract: any of these setters writes a Stage::Instance discrete variable,
 which automatically invalidates Stage::Instance and above. Before any
