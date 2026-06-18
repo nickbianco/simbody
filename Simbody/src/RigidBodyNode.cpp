@@ -41,6 +41,8 @@ void RigidBodyNode::addChild(RigidBodyNode* child) {
     children.push_back( child );
 }
 
+
+
 //==============================================================================
 //                    CALC JOINT INDEPENDENT KINEMATICS POS
 //==============================================================================

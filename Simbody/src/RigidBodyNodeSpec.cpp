@@ -106,11 +106,11 @@ calcParentToChildVelocityJacobianInGroundDot(
     const HType& H_PB_G = getH(pc);
     if (noR_FM)
         HDot_PB_G = R_GF * HDot_FM // 48*dof
-                  + HType(w_GF % H_PB_G[0],
+                  + HType(w_GF % H_PB_G[0], 
                           w_GF % H_PB_G[1]);
     else {
-        // want r_MB_F, that is, the vector from OM to OB, expressed in F
-        const Vec3&     r_MB   = getX_MB(pc).p();   // M-to-B in M, from inst vars
+        // want r_MB_F, that is, the vector from OM to OB, expressed in F 
+        const Vec3&     r_MB   = getX_MB(pc).p();   // from instance vars
         const Rotation& R_FM   = getX_FM(pc).R();   // just calculated
         const Vec3      r_MB_F = R_FM * r_MB;       // 15 flops
 
@@ -851,14 +851,11 @@ RigidBodyNodeSpec<dof, noR_FM>::calcEquivalentJointForces(
     // INSTANTIATIONS //
     ////////////////////
 
-#define INSTANTIATE(dof, noR_FM) \
-template class RigidBodyNodeSpec<dof, noR_FM>;
-
-INSTANTIATE(1, false)
-INSTANTIATE(2, false)
-INSTANTIATE(3, false)
-INSTANTIATE(4, false)
-INSTANTIATE(5, false)
-INSTANTIATE(6, false)
-INSTANTIATE(1, true)
-INSTANTIATE(3, true)
+template class RigidBodyNodeSpec<1, false>;
+template class RigidBodyNodeSpec<2, false>;
+template class RigidBodyNodeSpec<3, false>;
+template class RigidBodyNodeSpec<4, false>;
+template class RigidBodyNodeSpec<5, false>;
+template class RigidBodyNodeSpec<6, false>;
+template class RigidBodyNodeSpec<1, true>;
+template class RigidBodyNodeSpec<3, true>;

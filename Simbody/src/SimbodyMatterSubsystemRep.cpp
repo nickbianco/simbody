@@ -1116,7 +1116,7 @@ realizePositionKinematics(const State& state) const {
     if (isCacheValueRealized(state, tpcx))
         return; // already realized
 
-    SimTK_STAGECHECK_GE_ALWAYS(getStage(state), Stage::Instance,
+    SimTK_STAGECHECK_GE_ALWAYS(getStage(state), Stage::Instance, 
         "SimbodyMatterSubsystem::realizePositionKinematics()");
 
     const SBStateDigest     stateDigest(state, *this, Stage::Time);
@@ -1141,9 +1141,9 @@ realizePositionKinematics(const State& state) const {
     // Any body which is using quaternions should calculate the quaternion
     // constraint here and put it in the appropriate slot of qErr.
     // Set generalized coordinates: sweep from base to tips.
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++)
+    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++) 
         for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++)
-            rbNodeLevels[i][j]->realizePosition(stateDigest);
+            rbNodeLevels[i][j]->realizePosition(stateDigest); 
 
     // Ask the constraints to calculate ancestor-relative kinematics (still 
     // goes in TreePositionCache).

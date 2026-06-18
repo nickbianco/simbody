@@ -325,7 +325,7 @@ public:
     void multiplyBySystemJacobian(
         const SBTreePositionCache&  pc,
         const Real*                 v,
-        SpatialVec*                 Jv) const override
+        SpatialVec*                 Jv) const override    
     {
         Jv[0] = SpatialVec(Vec3(0));
     }
@@ -648,7 +648,7 @@ public:
         // Shift parent's result outward (ground result is 0).
         const SpatialVec outP = ~getPhi(pc) * Jv[parent->getNodeNum()];
 
-        out = outP;
+        out = outP;  
     }
 
     void multiplyBySystemJacobianTranspose(

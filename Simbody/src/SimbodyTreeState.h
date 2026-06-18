@@ -744,7 +744,7 @@ public:
         bodyConfigInGround.resize(nBodies);          
         bodyConfigInGround[GroundIndex].setToZero();
 
-        bodyToParentShift.resize(nBodies);
+        bodyToParentShift.resize(nBodies);           
         bodyToParentShift[GroundIndex].setToZero();
 
         mobilizerFrameInParent.resize(nBodies);

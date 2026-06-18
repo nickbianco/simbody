@@ -578,9 +578,10 @@ void calcParentToChildVelocityJacobianInGround(
 // Ground frame.
 void calcParentToChildVelocityJacobianInGroundDot(
     const SBModelVars&          mv,
-    const SBTreePositionCache&  pc,
-    const SBTreeVelocityCache&  vc,
+    const SBTreePositionCache&  pc, 
+    const SBTreeVelocityCache&  vc, 
     HType&                      HDot_PB_G) const;
+
 
 // Access to body-oriented state and cache entries is the same for all nodes,
 // and joint oriented access is almost the same but parametrized by dof. There 

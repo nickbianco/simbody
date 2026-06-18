@@ -250,7 +250,8 @@ void calcAcrossJointTransform(
     calcAcrossJointTransform(sbs, qp, nq, X_F0M0);
 }
 
-// This operator pulls N(q) from the StateDigest if necessary and calculates
+
+// This operator pulls N(q) from the StateDigest if necessary and calculates 
 // qdot=N(q)*u from the supplied argument. For many mobilizers it 
 // can simply copy u to qdot without referencing the state at all.
 virtual void calcQDot
@@ -1012,7 +1013,6 @@ void realizeArticulatedBodyVelocityCache(
 
 
 protected:
-
 // This is the constructor for the abstract base type for use by the derived
 // concrete types in their constructors.
 RigidBodyNode(const MassProperties& mProps_B,
@@ -1022,7 +1022,7 @@ RigidBodyNode(const MassProperties& mProps_B,
               QuaternionUse         quatUse,
               bool                  reverse=false)
   : parent(0), children(), level(-1),
-    massProps_B(mProps_B),
+    massProps_B(mProps_B), 
     inertia_CB_B(mProps_B.isFinite()
                  ? mProps_B.calcCentralInertia()
                  : (mProps_B.isInf() ? Inertia(Infinity) : Inertia())),
@@ -1085,7 +1085,7 @@ const Transform X_MB; // inverse of X_BM, calculated on construction
 
 // This is set when we attach this node to its parent in the tree. This is the
 // configuration of the parent's outboard mobilizer attachment frame corresponding
-// to body B (F) measured from and expressed in the parent frame P. It is
+// to body B (F) measured from and expressed in the parent frame P. It is 
 // a constant in frame P. TODO: make it parameterizable.
 const Transform X_PF;
 
