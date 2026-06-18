@@ -2028,6 +2028,16 @@ const Vec3& MobilizedBody::Ellipsoid::getDefaultRadii() const {
     return getImpl().getDefaultRadii();
 }
 
+void MobilizedBody::Ellipsoid::setRadii(State& s, const Vec3& r) const {
+    SimTK_ERRCHK3(r[0]>0 && r[1]>0 && r[2]>0, "MobilizedBody::Ellipsoid::setRadii()",
+        "All three radii must be greater than zero; got (%g,%g,%g).", r[0], r[1], r[2]);
+    getImpl().setRadii(s, r);
+}
+
+const Vec3& MobilizedBody::Ellipsoid::getRadii(const State& s) const {
+    return getImpl().getRadii(s);
+}
+
 const Quaternion& MobilizedBody::Ellipsoid::getDefaultQ() const {
     return getImpl().defaultQ;
 }
@@ -2720,6 +2730,16 @@ MobilizedBody::CantileverFreeBeam::CantileverFreeBeam
      return getImpl().getDefaultLength();
  }
 
+ void MobilizedBody::CantileverFreeBeam::setLength(State& s, const Real& length) const {
+     SimTK_ERRCHK1(length > 0, "MobilizedBody::CantileverFreeBeam::setLength()",
+         "Length must be greater than zero; got %g.", length);
+     getImpl().setLength(s, length);
+ }
+
+ const Real& MobilizedBody::CantileverFreeBeam::getLength(const State& s) const {
+     return getImpl().getLength(s);
+ }
+
  const Vec3& MobilizedBody::CantileverFreeBeam::getDefaultQ() const {
      return getImpl().defaultQ;
  }
@@ -3175,30 +3195,6 @@ setUToFitVelocity(const State& state, const SpatialVec& V_FM,
         u[i] = uvec[i];
 }
 
-Vec3 MobilizedBody::Custom::Implementation::
-calcScaledMobilizerTranslation(const State& s, const Vec3& s_F) const {
-    return getMobilizerTransform(s).p().elementwiseMultiply(s_F);
-}
-
-SpatialVec MobilizedBody::Custom::Implementation::
-multiplyByScaledHMatrix(const State& s, int nu, const Real* u,
-                        const Vec3& s_F) const {
-    const SpatialVec Hu = multiplyByHMatrix(s, nu, u);
-    return SpatialVec(Hu[0], Hu[1].elementwiseMultiply(s_F));
-}
-
-Vec3 MobilizedBody::Custom::Implementation::
-multiplyByScaledTranslationJacobian(const Vec3& p_FM, const Mat33& Js_FP,
-                                    const Vec3& ds_P) const {
-    return p_FM.elementwiseMultiply(Js_FP * ds_P);
-}
-
-Vec3 MobilizedBody::Custom::Implementation::
-multiplyByScaledTranslationJacobianTranspose(
-        const Vec3& p_FM, const Mat33& Js_FP, const Vec3& dp_F) const {
-    return ~Js_FP * p_FM.elementwiseMultiply(dp_F);
-}
-
 // Constructors without user-specified axes for function-based mobilized body
 MobilizedBody::FunctionBased::FunctionBased
    (MobilizedBody& parent, const Body& body, 
@@ -3239,18 +3235,32 @@ MobilizedBody::FunctionBased::FunctionBased
 }
 
 MobilizedBody::FunctionBased::FunctionBased
-   (MobilizedBody& parent, const Transform& inbFrame, 
-    const Body& body, const Transform& outbFrame, 
+   (MobilizedBody& parent, const Transform& inbFrame,
+    const Body& body, const Transform& outbFrame,
     int nmobilities, const Array_<const Function*>& functions,
     const Array_<Array_<int> >& coordIndices, const Array_<Vec3>& axes,
     Direction direction)
-:   Custom(parent, new FunctionBasedImpl(parent.updMatterSubsystem(), 
-                                         nmobilities, functions, 
-                                         coordIndices, axes), 
-           body, direction) 
+:   Custom(parent, new FunctionBasedImpl(parent.updMatterSubsystem(),
+                                         nmobilities, functions,
+                                         coordIndices, axes),
+           body, direction)
 {
     setDefaultInboardFrame(inbFrame);
     setDefaultOutboardFrame(outbFrame);
+}
+
+void MobilizedBody::FunctionBased::
+setFunctions(State& state, const Array_<const Function*>& functions) const {
+    const FunctionBasedImpl& impl =
+        dynamic_cast<const FunctionBasedImpl&>(getImplementation());
+    impl.setFunctions(state, functions);
+}
+
+const Array_<const Function*>& MobilizedBody::FunctionBased::
+getFunctions(const State& state) const {
+    const FunctionBasedImpl& impl =
+        dynamic_cast<const FunctionBasedImpl&>(getImplementation());
+    return impl.getStateFunctions(state);
 }
 
 } // namespace SimTK

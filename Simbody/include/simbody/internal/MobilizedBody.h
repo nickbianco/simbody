@@ -155,33 +155,41 @@ vector v expressed in F is reexpressed in A by v_A = R_AF*v_F. X_AF is the
 spatial transform giving frame F's orientation and origin location in frame A, 
 such that a point P whose location is measured from F's origin Fo and expressed 
 in F by position vector p_FP (or more explicitly p_FoP) is remeasured from frame
-A's origin Ao and reexpressed in A via p_AP = X_AF*p_FP, where p_AP==p_AoP. 
+A's origin Ao and reexpressed in A via p_AP = X_AF*p_FP, where p_AP==p_AoP.
 
-<h3>Mobilizer Scaling</h3>
+<h3>State-parameterized geometry</h3>
 
-Body scaling assigns a Vec3 of XYZ scale factors \c s_B to each body B in the
-multibody tree, stretching B's geometry non-uniformly along its body frame axes.
-Mobilizer scaling is only used in system-level operators
-(e.g., SimbodyMatterSubsystem::multiplyByScaledSystemJacobian()) where updated
-kinematics are computed in place, i.e., the underlying system is not actually
-scaled.
+Several mobilizer geometric properties live on the State as Instance-stage
+variables. This lets you perturb the geometry of an existing System and
+recompute kinematics (Jacobians, body positions, body velocities) on the
+modified State without rebuilding the System. The most common use is
+computing how the system Jacobian, station Jacobian, or frame Jacobian
+varies with a small change in geometry — for example, in inverse-kinematic
+calibration or in optimization over mobilizer parameters.
 
-Scaling only affects translational kinematics. The body scales applied to the
-mobilizer's parent body P will affect the position of the mobilizer frame F in
-P, and the body scales applied to the child body B will affect the position of
-the mobilizer frame M in B. The rotation matrices R_PF and R_MB are unaffected
-by scaling.
+The mobilizer frames are universally State-parameterizable:
+  - setInboardFrame(state, X_PF) / getInboardFrame(state) — frame F on the
+    parent body P
+  - setOutboardFrame(state, X_BM) / getOutboardFrame(state) — frame M on
+    this body B
 
-For most mobilizers, the translation between mobilizer frames F and M, i.e.,
-the p_FM component of X_FM, is also unaffected by scaling. However, this is not
-true in general. The current mobilizers for which p_FM is affected by scaling
-are the Ellipsoid, CantileverFreeBeam, and Custom (e.g., FunctionBased)
-mobilizers. For these mobilizers, we first compute how the body scales from the
-parent frame, s_P, "stretch" the axes of the mobilizer frame F by taking the
-columns of R_PF (i.e., the axes of F in P) and multiplying them elementwise by
-s_P; the magnitude of these "stretched" columns then gives the effective scale
-factors for the mobilizer translations, i.e., s_F. The way that s_F affects the
-translation p_FM is specific to each mobilizer implementation.
+Each setDefault*Frame()/getDefault*Frame() sets the topology-time default;
+each State carries the live value, initialized from the topology default
+when the State is created.
+
+Several derived mobilizers expose additional state-parameterizable geometry:
+  - MobilizedBody::Ellipsoid::setRadii(state, Vec3) — semi-axis dimensions
+  - MobilizedBody::CantileverFreeBeam::setLength(state, Real) — beam length
+  - MobilizedBody::FunctionBased::setFunctions(state, Array_<const Function*>)
+    — the six basis functions. Unlike the constructor, the setter does NOT
+    take ownership; the caller keeps the Function* objects alive for the
+    lifetime of any State that references them.
+
+Contract: any of these setters writes a Stage::Instance discrete variable,
+which automatically invalidates Stage::Instance and above. Before any
+subsequent kinematic query (Jacobian operator, getBodyTransform, etc.) the
+State must be re-realized to the stage that query requires (typically
+Stage::Position).
 
 <h3>Theory</h3>
 For the mathematical and computational theory behind Simbody's mobilizers, see
@@ -471,13 +479,18 @@ MobilizedBody object itself. The State must have been realized to
 Stage::Instance or higher. **/
 const Transform& getOutboardFrame(const State& state) const;    // X_BM
 
-/** TODO: not implemented yet. Set the location and orientation of the inboard 
-(parent) mobilizer frame F, fixed to this mobilizer's parent body P.
-@see setDefaultInboardFrame() **/
+/** Override the location and orientation of the inboard (parent) mobilizer
+frame F, fixed to this mobilizer's parent body P, in the given State. This is
+an Instance-stage variable: setting it invalidates Stage::Instance and higher,
+so the State must be re-realized to Position before any kinematic queries.
+The topology default (see setDefaultInboardFrame()) is used as the initial
+value when the State is created.
+@see setDefaultInboardFrame(), getInboardFrame() **/
 void setInboardFrame (State& state, const Transform& X_PF) const;
-/** TODO: not implemented yet. Set the location and orientation of the outboard 
-mobilizer frame M, fixed to this body B.
-@see setDefaultOutboardFrame() **/
+/** Override the location and orientation of the outboard mobilizer frame M,
+fixed to this body B, in the given State. This is an Instance-stage variable;
+see setInboardFrame() for the realization semantics.
+@see setDefaultOutboardFrame(), getOutboardFrame() **/
 void setOutboardFrame(State& state, const Transform& X_BM) const;
 
 // End of State Access - Bodies

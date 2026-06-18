@@ -53,7 +53,7 @@ calcParentToChildVelocityJacobianInGround
     // We want R_GF so we can reexpress the cross-joint velocity V_FB (==V_PB)
     // in the ground frame, to get V_PB_G.
 
-    const Rotation& R_PF = getX_PF().R();      // fixed config of F in P
+    const Rotation& R_PF = getX_PF(pc).R();    // F in P, from instance vars
 
     // Calculated already since we're going base to tip.
     const Rotation& R_GP = getX_GP(pc).R(); // parent orientation in ground
@@ -63,7 +63,7 @@ calcParentToChildVelocityJacobianInGround
         H_PB_G = R_GF * H_FM;       // 3*dof flops
     else {
         // want r_MB_F, that is, the vector from Mo to Bo, expressed in F
-        const Vec3&     r_MB   = getX_MB().p();     // fixed
+        const Vec3&     r_MB   = getX_MB(pc).p();   // M-to-B in M, from inst vars
         const Rotation& R_FM   = getX_FM(pc).R();   // just calculated
         const Vec3      r_MB_F = (noR_FM ? r_MB : R_FM*r_MB);       // 15 flops
         HType H_MB_F;
@@ -93,7 +93,7 @@ calcParentToChildVelocityJacobianInGroundDot(
     // We want R_GF so we can reexpress the cross-joint velocity V_FB (==V_PB)
     // in the ground frame, to get V_PB_G.
 
-    const Rotation& R_PF = getX_PF().R();       // fixed config of F in P
+    const Rotation& R_PF = getX_PF(pc).R();     // F in P, from instance vars
 
     // Calculated already since we're going base to tip.
     const Rotation& R_GP = getX_GP(pc).R();     // parent orientation in ground
@@ -106,11 +106,11 @@ calcParentToChildVelocityJacobianInGroundDot(
     const HType& H_PB_G = getH(pc);
     if (noX_MB || noR_FM)
         HDot_PB_G = R_GF * HDot_FM // 48*dof
-                  + HType(w_GF % H_PB_G[0], 
+                  + HType(w_GF % H_PB_G[0],
                           w_GF % H_PB_G[1]);
     else {
-        // want r_MB_F, that is, the vector from OM to OB, expressed in F 
-        const Vec3&     r_MB   = getX_MB().p();     // fixed
+        // want r_MB_F, that is, the vector from OM to OB, expressed in F
+        const Vec3&     r_MB   = getX_MB(pc).p();   // M-to-B in M, from inst vars
         const Rotation& R_FM   = getX_FM(pc).R();   // just calculated
         const Vec3      r_MB_F = (noR_FM ? r_MB : R_FM*r_MB); // 15 flops
 
@@ -126,77 +126,6 @@ calcParentToChildVelocityJacobianInGroundDot(
                     + HType(w_GF % H_PB_G[0], 
                             w_GF % H_PB_G[1]);
     }
-}
-
-//==============================================================================
-//                            CALC SCALED H_PB_G
-//==============================================================================
-// Same for all mobilizers.
-// Similar to calcParentToChildVelocityJacobianInGround() above, but some
-// calculations need to be updated to account for the shift in the M frame
-// position due to the child body scaling.
-// Cost: 78 + 45*dof flops
-template<int dof, bool noR_FM, bool noX_MB, bool noR_PF> void
-RigidBodyNodeSpec<dof, noR_FM, noX_MB, noR_PF>::
-calcScaledParentToChildVelocityJacobianInGround(
-    const SBTreePositionCache&  pc,
-    const Vector_<Vec3>&        scales,
-    const HType&                H_FM_scaled,
-    HType&                      H_PB_G_scaled) const
-{
-
-    // We want R_GF so we can reexpress the cross-joint velocity V_FB (==V_PB)
-    // in the ground frame, to get V_PB_G.
-
-    const Rotation& R_PF = getX_PF().R();      // fixed config of F in P
-
-    // Calculated already since we're going base to tip.
-    const Rotation& R_GP = getX_GP(pc).R(); // parent orientation in ground
-    const Rotation  R_GF = (noR_PF ? R_GP : R_GP * R_PF);     // 45 flops
-
-    if (noX_MB || noR_FM)
-        H_PB_G_scaled = R_GF * H_FM_scaled;     // 3*dof flops
-    else {
-        // We want the scaled r_MB_F, that is, the vector from Mo to Bo,
-        // expressed in F.
-
-        // Recalculate the position vector from the child body B to the child's
-        // mobilizer frame M, accounting for the child body scaling.
-        const Vec3& r_BM     = getX_BM().p();
-        const Rotation& R_MB = getX_MB().R();
-        // We apply the scaling in B and then re-express in M, because we will
-        // multiply by R_FM below to calculate r_PB_scaled. Flip the sign because
-        // we are going from M to B.
-        const Vec3& s_B = scales[nodeNum];
-        const Vec3 r_MB_scaled = -R_MB * r_BM.elementwiseMultiply(s_B);
-
-        // R_FM is unaffected by scaling, so we can pull the rotation from the
-        // unscaled X_FM here.
-        const Rotation& R_FM = getX_FM(pc).R();
-        // 15 flops
-        const Vec3 r_MB_F_scaled = (noR_FM ? r_MB_scaled : R_FM*r_MB_scaled);
-
-        HType H_MB_F_scaled;
-        H_MB_F_scaled[0] =  Vec3(0); // fills top row with zero
-        // 9*dof flops (negation not actually done)
-        H_MB_F_scaled[1] = -r_MB_F_scaled % H_FM_scaled[0];
-        H_PB_G_scaled = R_GF * (H_FM_scaled + H_MB_F_scaled); // 36*dof flops
-    }
-}
-
-//==============================================================================
-//                  CALC SCALED ACROSS-JOINT VELOCITY JACOBIAN
-//==============================================================================
-template<int dof, bool noR_FM, bool noX_MB, bool noR_PF> void
-RigidBodyNodeSpec<dof, noR_FM, noX_MB, noR_PF>::
-calcScaledAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
-    const Vec3& s_P,
-    HType&      H_F0M0_scaled) const
-{
-    // Default behavior: no scaling associated with the mobilizer.
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    H_F0M0_scaled = getH_FM(pc);
 }
 
 //==============================================================================
@@ -883,105 +812,6 @@ multiplyBySystemJacobianTranspose(
     }
 
     out = ~getH(pc) * z; // 11*dof flops
-}
-
-//==============================================================================
-//                     MULTIPLY BY SCALED SYSTEM JACOBIAN
-//==============================================================================
-// Calculate product of a scaled kinematic Jacobian J(s)=~Phi(s)*H(s) and a
-// mobility-space vector where "s" is a vector containing the XYZ scale factors
-// for each mobilized body in the system. Requires that the unscaled Phi and H
-// are available, so this should only be called in Stage::Position or higher.
-// This does not change the cache at all.
-//
-// Call base to tip (outward).
-//
-template<int dof, bool noR_FM, bool noX_MB, bool noR_PF> void
-RigidBodyNodeSpec<dof, noR_FM, noX_MB, noR_PF>::
-multiplyByScaledSystemJacobian(
-    const SBStateDigest& sbs,
-    const Vector_<Vec3>& scales,
-    const Real*          v,
-    SpatialVec*          Jv) const
-{
-    const Vec<dof>& in  = fromU(v);
-    SpatialVec&     out = Jv[nodeNum];
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-
-    // Mobilizer-specific scaled X_FM.
-    const Vector& q = sbs.getQ();
-    Transform X_FM_scaled;
-    const Vec3& s_P = scales[parent->getNodeNum()];
-    calcScaledAcrossJointTransform(sbs, q, s_P, X_FM_scaled);
-
-    // Mobilizer-specific scaled H_FM.
-    HType H_FM_scaled;
-    calcScaledAcrossJointVelocityJacobian(sbs, s_P, H_FM_scaled);
-
-    // Scaled H.
-    HType H_scaled;
-    calcScaledParentToChildVelocityJacobianInGround(
-        pc, scales, H_FM_scaled, H_scaled);
-
-    // Scaled Phi.
-    PhiMatrix phiScaled;
-    calcScaledPhi(pc, scales, X_FM_scaled, phiScaled);
-
-    // Shift parent's result outward (ground result is 0).
-    const SpatialVec outP = ~phiScaled * Jv[parent->getNodeNum()]; // 12 flops
-
-    out = outP + H_scaled*in;  // 12*dof flops
-}
-
-//==============================================================================
-//               MULTIPLY BY SCALED SYSTEM JACOBIAN TRANSPOSE
-//==============================================================================
-// Calculate product of a scaled kinematic Jacobian transpose ~J(s) and a
-// spatial force vector F where "s" is a vector containing the XYZ scale factors
-// for each mobilized body.
-//
-// Call tip to base.
-//
-template<int dof, bool noR_FM, bool noX_MB, bool noR_PF> void
-RigidBodyNodeSpec<dof, noR_FM, noX_MB, noR_PF>::
-multiplyByScaledSystemJacobianTranspose(
-    const SBStateDigest& sbs,
-    const Vector_<Vec3>& scales,
-    PhiMatrix*           phiTmp,
-    SpatialVec*          zTmp,
-    const SpatialVec*    F,
-    Real*                JtF) const
-{
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    const Vector& q = sbs.getQ();
-    const Vec3& s_P = scales[parent->getNodeNum()];
-
-    // Compute scaled X_FM, H_FM, H, and phi — same as forward pass.
-    Transform X_FM_scaled;
-    calcScaledAcrossJointTransform(sbs, q, s_P, X_FM_scaled);
-
-    HType H_FM_scaled;
-    calcScaledAcrossJointVelocityJacobian(sbs, s_P, H_FM_scaled);
-
-    HType H_scaled;
-    calcScaledParentToChildVelocityJacobianInGround(
-        pc, scales, H_FM_scaled, H_scaled);
-
-    // Store this node's scaled phi for its parent to use.
-    calcScaledPhi(pc, scales, X_FM_scaled, phiTmp[nodeNum]);
-
-    const SpatialVec& in = F[nodeNum];
-    Vec<dof>&         out = Vec<dof>::updAs(&JtF[getUIndex()]);
-    SpatialVec&       z   = zTmp[nodeNum];
-
-    z = in;
-
-    for (unsigned i=0; i<children.size(); ++i) {
-        const int childNum = children[i]->getNodeNum();
-        z += phiTmp[childNum] * zTmp[childNum]; // 18 flops
-    }
-
-    out = ~H_scaled * z; // 11*dof flops
 }
 
 //==============================================================================

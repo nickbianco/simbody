@@ -266,21 +266,21 @@ public:
     }
 
     const Transform& getInboardFrame (const State& s) const {
-        // TODO: these should come from the state if the mobilizer has variable frames
         const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
-        return getMyRigidBodyNode().getX_PF();
+        return iv.inboardMobilizerFrames[myMobilizedBodyIndex];
     }
     const Transform& getOutboardFrame(const State& s) const {
-        // TODO: these should come from the state if the mobilizer has variable frames
         const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
-        return getMyRigidBodyNode().getX_BM();
+        return iv.outboardMobilizerFrames[myMobilizedBodyIndex];
     }
 
     void setInboardFrame (State& s, const Transform& X_PF) const {
-        assert(!"setInboardFrame(s) not implemented yet");
+        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
+        iv.inboardMobilizerFrames[myMobilizedBodyIndex] = X_PF;
     }
     void setOutboardFrame(State& s, const Transform& X_BM) const {
-        assert(!"setOutboardFrame(s) not implemented yet");
+        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
+        iv.outboardMobilizerFrames[myMobilizedBodyIndex] = X_BM;
     }
 
     const Transform& getBodyTransform(const State& s) const {
@@ -844,6 +844,15 @@ public:
     }
     const Vec3& getDefaultRadii() const {return defaultRadii;}
 
+    void setRadii(State& s, const Vec3& r) const {
+        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
+        iv.ellipsoidRadii[getMyMobilizedBodyIndex()] = r;
+    }
+    const Vec3& getRadii(const State& s) const {
+        const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
+        return iv.ellipsoidRadii[getMyMobilizedBodyIndex()];
+    }
+
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
@@ -1058,10 +1067,19 @@ public:
     }
     const Real& getDefaultLength() const {return defaultLength;}
 
+    void setLength(State& s, const Real& length) const {
+        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
+        iv.cantileverFreeBeamLength[getMyMobilizedBodyIndex()] = length;
+    }
+    const Real& getLength(const State& s) const {
+        const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
+        return iv.cantileverFreeBeamLength[getMyMobilizedBodyIndex()];
+    }
+
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::CantileverFreeBeam;
-    Real defaultLength; // used for visualization only
+    Real defaultLength; // topology default; State carries the live value
     Vec3 defaultQ;      // the default orientation
 };
 
@@ -1281,18 +1299,20 @@ public:
         // Initialize the tranformation to be returned
         Transform X(Vec3(0));
         Vec6 spatialCoords;
-        
+
+        const Array_<const Function*>& fns = getStateFunctions(s);
+
         // Get the spatial cooridinates as a function of the q's
         for(int i=0; i < 6; i++){
             //Coordinates for this function
             int nc = coordIndices[i].size();
             Vector fcoords(nc);
-    
+
             for(int j=0; j < nc; j++)
-                fcoords(j) = q[coordIndices[i][j]];            
-            
+                fcoords(j) = q[coordIndices[i][j]];
+
             //default behavior of constant function should take a Vector of length 0
-            spatialCoords(i) = functions[i]->calcValue(fcoords);
+            spatialCoords(i) = fns[i]->calcValue(fcoords);
         }
 
 /*
@@ -1566,6 +1586,44 @@ public:
             cacheIndex = s.allocateCacheEntry(subsystem, Stage::Topology, new Value<CacheInfo<6> >());
             break;
         }
+        // Allocate the Instance-stage discrete variable that carries the
+        // state-current set of basis functions. The default value is the
+        // topology-time `functions` array supplied at construction. Writes
+        // to this variable invalidate Stage::Instance and higher, which in
+        // turn forces the H/Hdot caches to be rebuilt at the next realize.
+        stateFunctionsIndex = s.allocateDiscreteVariable(
+            subsystem, Stage::Instance,
+            new Value<Array_<const Function*> >(functions));
+    }
+
+    // State-current basis functions. May differ from the topology-default
+    // `functions` member if the caller has invoked setFunctions(s, ...).
+    const Array_<const Function*>& getStateFunctions(const State& s) const {
+        return Value<Array_<const Function*> >::downcast(
+            s.getDiscreteVariable(subsystem, stateFunctionsIndex)).get();
+    }
+
+    void setFunctions(State& s, const Array_<const Function*>& newFunctions) const {
+        SimTK_ERRCHK1(newFunctions.size() == 6,
+            "MobilizedBody::FunctionBased::setFunctions()",
+            "Expected exactly 6 functions; got %d.", (int)newFunctions.size());
+        for (int i = 0; i < 6; ++i) {
+            SimTK_ERRCHK1(newFunctions[i] != nullptr,
+                "MobilizedBody::FunctionBased::setFunctions()",
+                "functions[%d] is null.", i);
+            SimTK_ERRCHK2(newFunctions[i]->getArgumentSize() == coordIndices[i].size(),
+                "MobilizedBody::FunctionBased::setFunctions()",
+                "functions[%d] has wrong argument size (%d).",
+                i, newFunctions[i]->getArgumentSize());
+            SimTK_ERRCHK1(newFunctions[i]->getMaxDerivativeOrder() >= 2,
+                "MobilizedBody::FunctionBased::setFunctions()",
+                "functions[%d] must support derivatives through order 2.", i);
+        }
+        // NOTE: ownership of newFunctions is NOT taken; the caller must keep
+        // them valid for the lifetime of any State that references them.
+        Value<Array_<const Function*> >::updDowncast(
+            s.updDiscreteVariable(subsystem, stateFunctionsIndex)).upd() =
+                newFunctions;
     }
 
     void realizePosition(const State& s) const override {
@@ -1645,42 +1703,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
@@ -1695,42 +1753,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid  
                 cache.isValidHdot = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(q, u, getMobilizerTransform(s), getStateFunctions(s), coordIndices, Arot, Atrans);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
@@ -1742,6 +1800,10 @@ private:
     const SubsystemIndex subsystem;
     const int nu;
     mutable CacheEntryIndex cacheIndex;
+    // The Instance-stage discrete variable holding the State-current set of
+    // basis functions. Defaults to `functions`; user code calls
+    // setFunctions(state, ...) to override per-State.
+    mutable DiscreteVariableIndex stateFunctionsIndex;
     const Array_<const Function*> functions;
     const Array_<Array_<int> > coordIndices;
     int* referenceCount;

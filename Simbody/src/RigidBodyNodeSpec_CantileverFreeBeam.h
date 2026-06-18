@@ -62,9 +62,7 @@
 template<bool noX_MB, bool noR_PF>
 class RBNodeCantileverFreeBeam :
         public RigidBodyNodeSpec<3, false, noX_MB, noR_PF> {
-    Real length;  // length of the beam
-    Real deflectionCoefficient;
-    Real displacementCoefficient;
+    Real defaultLength;  // topology-time default; State carries the live value
 public:
 
 typedef typename RigidBodyNodeSpec<3, false, noX_MB, noR_PF>::HType HType;
@@ -84,20 +82,23 @@ RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
         RigidBodyNode::QDotIsAlwaysTheSameAsU,
         RigidBodyNode::QuaternionIsNeverUsed,
         isReversed),
-    length(length)
+    defaultLength(length)
 {
-    // Multiplying this term by the beam deflection angle gives the beam
-    // deflection, which is the absolute value of the beam's end point position
-    // in the Fx and Fy directions. This coefficient may also be used to
-    // calculate the beam deflection speed.
-    deflectionCoefficient = (2.0 / 3.0) * length;
-
-    // Multiplying this term by the beam deflection angle squared gives the beam
-    // displacement, which can be subtracted from the beam length to give the
-    // Fz-position of the beam's endpoint.
-    displacementCoefficient = (4.0 / 15.0) * length;
-
     this->updateSlots(nextUSlot, nextUSqSlot, nextQSlot);
+}
+
+// Seed the State's default beam length from the topology-time value.
+void setMobilizerDefaultInstanceValues(const SBModelVars&,
+                                       SBInstanceVars& iv) const override
+{   iv.cantileverFreeBeamLength[this->getNodeNum()] = defaultLength; }
+
+// Helper: get the State-current beam length. Multiplying by these constants
+// gives the deflection coefficient (Fx,Fy translation magnitude per unit
+// deflection angle) and the displacement coefficient (Fz shortening per unit
+// deflection angle squared). The constants are derived from the analytical
+// beam mode shape.
+Real getLength(const SBStateDigest& sbs) const {
+    return sbs.getInstanceVars().cantileverFreeBeamLength[this->getNodeNum()];
 }
 
     // Implementations of virtual methods.
@@ -156,17 +157,20 @@ void setUToFitLinearVelocityImpl(const SBStateDigest& sbs, const Vector& q,
 {
     Real q0 = this->fromQ(q)[0];
     Real q1 = this->fromQ(q)[1];
+    const Real L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
     Matrix m(3, 2, 0.0);
 
     // The y-component of qdot induces a positive Fx speed.
-    m(0, 1) = deflectionCoefficient;
+    m(0, 1) = dC;
 
     // The x-component of qdot induces a negative Fy speed.
-    m(1, 0) = -deflectionCoefficient;
+    m(1, 0) = -dC;
 
     // The x- and y-components of qdot induce a negative Fz speed.
-    m(2, 0) = -2.0*displacementCoefficient * q0;
-    m(2, 1) = -2.0*displacementCoefficient * q1;
+    m(2, 0) = -2.0*pC * q0;
+    m(2, 1) = -2.0*pC * q1;
 
     // Solve for qdot0 and qdot1 via least squares.
     FactorQTZ qtz(m);
@@ -220,56 +224,14 @@ void calcX_FM(const SBStateDigest& sbs,
 
     const Real& q0 = Vec3::getAs(q)[0];
     const Real& q1 = Vec3::getAs(q)[1];
+    const Real L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
     X_F0M0.updP() = Vec3(
-        q1 * deflectionCoefficient,
-        -q0 * deflectionCoefficient,
-        length - displacementCoefficient * (q0*q0 + q1*q1)
+        q1 * dC,
+        -q0 * dC,
+        L - pC * (q0*q0 + q1*q1)
     );
-}
-
-void calcScaledX_FM(const SBStateDigest& sbs,
-                    const Real* q,      int nq,
-                    const Real* qCache, int nQCache,
-                    const Vec3& s_P,
-                    Transform&  X_F0M0_scaled) const override
-{
-    assert(q && nq==3 && qCache && nQCache==PoolSize);
-
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    X_F0M0_scaled = this->findX_F0M0(pc);
-
-    const Real& q0 = Vec3::getAs(q)[0];
-    const Real& q1 = Vec3::getAs(q)[1];
-    const Vec3 s_F = this->calcParentScalesInF(s_P);
-    const Real lengthScaled = length * s_F[2];
-    const Real deflectionCoefficientScaled = (2.0 / 3.0) * lengthScaled;
-    const Real displacementCoefficientScaled = (4.0 / 15.0) * lengthScaled;
-
-    X_F0M0_scaled.updP() = Vec3(
-        q1 * deflectionCoefficientScaled,
-        -q0 * deflectionCoefficientScaled,
-        lengthScaled - displacementCoefficientScaled * (q0*q0 + q1*q1)
-    );
-}
-
-Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
-        const Vec3& ds_P) const override {
-    const Vec3 p_FM = this->findX_F0M0(pc).p();
-    const Mat33& Js_FP = this->getJs_FP();
-    const Mat33 J_FP(p_FM * Js_FP.elt(2,0),
-                     p_FM * Js_FP.elt(2,1),
-                     p_FM * Js_FP.elt(2,2));
-    return J_FP * ds_P;
-}
-
-Vec3 multiplyByScaledTranslationJacobianTranspose(
-        const SBTreePositionCache& pc, const Vec3& dp_F) const override {
-    const Vec3 p_FM = this->findX_F0M0(pc).p();
-    const Mat33& Js_FP = this->getJs_FP();
-    const Mat33 J_FP(p_FM * Js_FP.elt(2,0),
-                     p_FM * Js_FP.elt(2,1),
-                     p_FM * Js_FP.elt(2,2));
-    return ~J_FP * dp_F;
 }
 
 // Generalized speeds are the Euler angle derivatives.
@@ -286,48 +248,18 @@ void calcAcrossJointVelocityJacobian(const SBStateDigest& sbs,
     const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
     const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
     const Vec3& q = this->fromQ(sbs.getQ());
+    const Real L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
 
     // Fill in columns of H_FM. See Rotation::calcNInvForBodyXYZInParentFrame().
     // Include the contributions of the Euler angle derivatives to the linear
     // velocity of the beam's endpoint.
     H_FM(0) = SpatialVec(Vec3(1,     0,    0),
-        Vec3(0, -deflectionCoefficient, -2.0*displacementCoefficient*q[0]));
+        Vec3(0, -dC, -2.0*pC*q[0]));
     H_FM(1) = SpatialVec(Vec3(0,    c0,    s0),
-        Vec3(deflectionCoefficient, 0, -2.0*displacementCoefficient*q[1]));
+        Vec3(dC, 0, -2.0*pC*q[1]));
     H_FM(2) = SpatialVec(Vec3(s1, -s0*c1, c0*c1), Vec3(0));
-}
-
-void calcScaledAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
-    const Vec3& s_P,
-    HType&      H_F0M0_scaled) const override
-{
-    const SBModelCache&        mc = sbs.getModelCache();
-    // Unlike calcAcrossJointVelocityJacobian(), use "get" here since we should
-    // already be realized to the position stage.
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    const Real*                pool = this->getQPool(mc, pc);
-
-    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
-    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
-    const Vec3& q = this->fromQ(sbs.getQ());
-
-    const Vec3 s_F = this->calcParentScalesInF(s_P);
-    const Real lengthScaled = length * s_F[2];
-    const Real deflectionCoefficientScaled = (2.0 / 3.0) * lengthScaled;
-    const Real displacementCoefficientScaled = (4.0 / 15.0) * lengthScaled;
-
-    H_F0M0_scaled(0) = SpatialVec(Vec3(1,     0,    0),
-        Vec3(0,
-             -deflectionCoefficientScaled,
-             -2.0*displacementCoefficientScaled*q[0]));
-
-    H_F0M0_scaled(1) = SpatialVec(Vec3(0,    c0,    s0),
-        Vec3(deflectionCoefficientScaled,
-             0,
-             -2.0*displacementCoefficientScaled*q[1]));
-
-    H_F0M0_scaled(2) = SpatialVec(Vec3(s1, -s0*c1, c0*c1), Vec3(0));
 }
 
 // Differentiate H_FM to get HDot_FM. Note that this depends on qdot:
@@ -346,15 +278,16 @@ void calcAcrossJointVelocityJacobianDot(
     // Use "upd" here because we're realizing velocities now.
     const Vec3& qdot = this->fromQ(sbs.updQDot());
     const Real qd0 = qdot[0], qd1 = qdot[1];
+    const Real pC = (4.0 / 15.0) * getLength(sbs);
 
     const Real dc0 = -s0*qd0, dc1 = -s1*qd1; // derivatives of c0,c1,s0,s1
     const Real ds0 =  c0*qd0, ds1 =  c1*qd1;
 
     // Compare with H_FM above.
     HDot_FM(0) = SpatialVec(Vec3(0, 0, 0),
-        Vec3(0, 0, -2.0*displacementCoefficient*qd0));
+        Vec3(0, 0, -2.0*pC*qd0));
     HDot_FM(1) = SpatialVec(Vec3(0, dc0, ds0),
-        Vec3(0, 0, -2.0*displacementCoefficient*qd1));
+        Vec3(0, 0, -2.0*pC*qd1));
     HDot_FM(2) = SpatialVec(Vec3(ds1, -ds0*c1-s0*dc1, dc0*c1+c0*dc1), Vec3(0));
 }
 

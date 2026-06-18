@@ -43,25 +43,8 @@ relative angular velocity of the outboard M frame in the inboard F frame,
 expressed in the F frame. That is unchanged by setting the "use Euler
 angles" modeling option. Note that qdot != u for this mobilizer.
 
-<h3>Mobilizer Scaling</h3>
-
-The ellipsoid surface is embedded in the inboard (parent) mobilizer frame F.
-When the parent body is scaled by XYZ scale factors \c s_P, the ellipsoid
-semi-axes scale accordingly. The effective scale factor for each F-frame axis
-\e i is
-
-  s_F[i] = ||s_P .* R_PF.col(i)||
-
-where R_PF is the (fixed) orientation of F in P.
-
-The contact point p_FM (the position of the M-frame origin relative to the
-F-frame origin, expressed in F) scales element-wise by s_F:
-
-  p_FM_scaled = p_FM .* s_F
-
-The translational components of the velocity Jacobian H_FM are also scaled by
-s_F, since they are a function of the ellipsoid semi-axis dimensions.
-
+The semi-axis radii are an Instance-stage State variable; see setRadii() and
+getRadii().
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::Ellipsoid : public MobilizedBody {
 public:
@@ -99,9 +82,22 @@ public:
     /** Modify the default semi-axis dimensions of the ellipsoid, given in
     the F frame. These are usually set on construction. **/
     Ellipsoid& setDefaultRadii(const Vec3& radii);
-    /** Get the default semi-axis dimensions of the ellipsoid as specified 
+    /** Get the default semi-axis dimensions of the ellipsoid as specified
     during construction or via setDefaultRadii(). **/
     const Vec3& getDefaultRadii() const;
+
+    /** Override the semi-axis dimensions of the ellipsoid for this State.
+    This is an Instance-stage variable: setting it invalidates Stage::Instance
+    and higher, so the State must be re-realized to Position before any
+    kinematic query reflects the new radii. All three components must be
+    strictly positive. The topology default (see setDefaultRadii()) is used
+    as the initial value when the State is created.
+    @see setDefaultRadii(), getRadii() **/
+    void setRadii(State& state, const Vec3& radii) const;
+    /** Get the semi-axis dimensions of the ellipsoid currently in effect for
+    this State. The State must have been realized to Stage::Instance or higher.
+    @see setRadii(), getDefaultRadii() **/
+    const Vec3& getRadii(const State& state) const;
 
 
     /** Provide a default orientation for this mobilizer if you don't want to

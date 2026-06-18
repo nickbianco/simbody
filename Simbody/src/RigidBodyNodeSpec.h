@@ -372,20 +372,6 @@ void multiplyBySystemJacobianTranspose(
     const SpatialVec*           X, 
     Real*                       JtX) const override;
 
-void multiplyByScaledSystemJacobian(
-    const SBStateDigest& sbs,
-    const Vector_<Vec3>& scales,
-    const Real*          v,
-    SpatialVec*          Jv) const override;
-
-void multiplyByScaledSystemJacobianTranspose(
-    const SBStateDigest& sbs,
-    const Vector_<Vec3>& scales,
-    PhiMatrix*           phiTmp,
-    SpatialVec*          zTmp,
-    const SpatialVec*    F,
-    Real*                JtF) const override;
-
 void calcEquivalentJointForces(
     const SBTreePositionCache&  pc,
     const SBTreeVelocityCache&  vc,
@@ -534,11 +520,6 @@ virtual void calcAcrossJointVelocityJacobian(
     const SBStateDigest& sbs,
     HType&               H_F0M0) const = 0;
 
-virtual void calcScaledAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
-    const Vec3& s_P,
-    HType&      H_F0M0_scaled) const;
-
 // This mandatory routine calculates the time derivative taken in F of
 // the matrix H_FM (call it HDot_FM). This is zero if the generalized
 // speeds are all defined in terms of the F frame, which is often the case.
@@ -575,8 +556,8 @@ void calcBodyTransforms(
     Transform&                  X_PB, 
     Transform&                  X_GB) const 
 {
-    const Transform& X_MB = getX_MB();   // fixed
-    const Transform& X_PF = getX_PF();   // fixed
+    const Transform& X_MB = getX_MB(pc); // from instance vars
+    const Transform& X_PF = getX_PF(pc); // from instance vars
     const Transform& X_FM = getX_FM(pc); // just calculated
     const Transform& X_GP = getX_GP(pc); // already calculated
 
@@ -599,15 +580,9 @@ void calcParentToChildVelocityJacobianInGround(
 // Ground frame.
 void calcParentToChildVelocityJacobianInGroundDot(
     const SBModelVars&          mv,
-    const SBTreePositionCache&  pc, 
-    const SBTreeVelocityCache&  vc, 
-    HType&                      HDot_PB_G) const;
-
-void calcScaledParentToChildVelocityJacobianInGround(
     const SBTreePositionCache&  pc,
-    const Vector_<Vec3>&        scales,
-    const HType&                H_FM_scaled,
-    HType&                      H_PB_G_scaled) const;
+    const SBTreeVelocityCache&  vc,
+    HType&                      HDot_PB_G) const;
 
 // Access to body-oriented state and cache entries is the same for all nodes,
 // and joint oriented access is almost the same but parametrized by dof. There 

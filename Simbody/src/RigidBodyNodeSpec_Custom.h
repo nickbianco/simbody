@@ -249,46 +249,6 @@ public:
         }
     }
 
-    void calcScaledX_FM(const SBStateDigest& sbs,
-                        const Real* q,      int nq,
-                        const Real* qCache, int nQCache,
-                        const Vec3& s_P,
-                        Transform&  X_F0M0_scaled) const override
-    {
-        const SBTreePositionCache& pc = sbs.getTreePositionCache();
-        const Vec3 s_F = this->calcParentScalesInF(s_P);
-        // Rotation is unaffected by scaling; only p_FM may change.
-        X_F0M0_scaled = Transform(this->getX_FM(pc).R(),
-                                  impl.calcScaledMobilizerTranslation(
-                                      sbs.getState(), s_F));
-    }
-
-    Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
-            const Vec3& ds_P) const override {
-        return impl.multiplyByScaledTranslationJacobian(
-            this->findX_F0M0(pc).p(), this->getJs_FP(), ds_P);
-    }
-
-    Vec3 multiplyByScaledTranslationJacobianTranspose(
-            const SBTreePositionCache& pc, const Vec3& dp_F) const override {
-        return impl.multiplyByScaledTranslationJacobianTranspose(
-            this->findX_F0M0(pc).p(), this->getJs_FP(), dp_F);
-    }
-
-    void calcScaledAcrossJointVelocityJacobian(
-        const SBStateDigest& sbs,
-        const Vec3&          s_P,
-        HType&               H_F0M0_scaled) const override
-    {
-        const Vec3 s_F = this->calcParentScalesInF(s_P);
-        for (int i = 0; i < nu; ++i) {
-            Vec<nu> u(Real(0));
-            u[i] = Real(1);
-            H_F0M0_scaled(i) =
-                impl.multiplyByScaledHMatrix(sbs.getState(), nu, &u[0], s_F);
-        }
-    }
-
     void calcAcrossJointVelocityJacobianDot(
         const SBStateDigest& sbs,
         HType&  HDot_F0M0) const {

@@ -1116,12 +1116,23 @@ realizePositionKinematics(const State& state) const {
     if (isCacheValueRealized(state, tpcx))
         return; // already realized
 
-    SimTK_STAGECHECK_GE_ALWAYS(getStage(state), Stage::Instance, 
+    SimTK_STAGECHECK_GE_ALWAYS(getStage(state), Stage::Instance,
         "SimbodyMatterSubsystem::realizePositionKinematics()");
 
     const SBStateDigest     stateDigest(state, *this, Stage::Time);
     const SBInstanceVars&   iv = stateDigest.getInstanceVars();
     SBTreePositionCache&    tpc = stateDigest.updTreePositionCache();
+
+    // Snapshot the currently-active mobilizer frames from SBInstanceVars into
+    // the position cache so position-stage computations see any user overrides
+    // applied via MobilizedBody::setInboardFrame()/setOutboardFrame(). Also
+    // precompute the inverse X_MB for use in cross-mobilizer kinematics.
+    tpc.mobilizerFrameInParent = iv.inboardMobilizerFrames;
+    tpc.mobilizerFrameInBody   = iv.outboardMobilizerFrames;
+    const int nb = (int)iv.outboardMobilizerFrames.size();
+    tpc.mobilizerFrameInBodyInverse.resize(nb);
+    for (MobilizedBodyIndex mbx(0); mbx < nb; ++mbx)
+        tpc.mobilizerFrameInBodyInverse[mbx] = ~iv.outboardMobilizerFrames[mbx];
 
     // realize tree positions (kinematics)
     // This includes all local cross-mobilizer kinematics (M in F, B in P)
@@ -1130,9 +1141,9 @@ realizePositionKinematics(const State& state) const {
     // Any body which is using quaternions should calculate the quaternion
     // constraint here and put it in the appropriate slot of qErr.
     // Set generalized coordinates: sweep from base to tips.
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++) 
+    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++)
         for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++)
-            rbNodeLevels[i][j]->realizePosition(stateDigest); 
+            rbNodeLevels[i][j]->realizePosition(stateDigest);
 
     // Ask the constraints to calculate ancestor-relative kinematics (still 
     // goes in TreePositionCache).
@@ -6347,179 +6358,6 @@ void SimbodyMatterSubsystemRep::multiplyBySystemJacobianTranspose
         }
 }
 //................... MULTIPLY BY SYSTEM JACOBIAN TRANSPOSE ....................
-
-
-// =============================================================================
-//                     MULTIPLY BY SCALED SYSTEM JACOBIAN
-// =============================================================================
-void SimbodyMatterSubsystemRep::multiplyByScaledSystemJacobian(const State& s,
-    const Vector_<Vec3>&       scales,
-    const Vector&              v,
-    Vector_<SpatialVec>&       Jv) const
-{
-    Jv.resize(getNumBodies());
-
-    assert(v.size() == getNU(s));
-    assert(v.hasContiguousData() && Jv.hasContiguousData());
-
-    // i.e., we must be *done* with Stage::Position
-    const SBStateDigest sbs(s, *this, Stage(Stage::Position).next());
-
-    const Real* vPtr = v.size() ? &v[0] : NULL;
-    SpatialVec* jvPtr = Jv.size() ? &Jv[0] : NULL;
-
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++) {
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByScaledSystemJacobian(sbs, scales, vPtr, jvPtr);
-        }
-    }
-}
-//..................... MULTIPLY BY SCALED SYSTEM JACOBIAN .....................
-
-
-// =============================================================================
-//               MULTIPLY BY SCALED SYSTEM JACOBIAN TRANSPOSE
-// =============================================================================
-void SimbodyMatterSubsystemRep::multiplyByScaledSystemJacobianTranspose(
-    const State&               s,
-    const Vector_<Vec3>&       scales,
-    const Vector_<SpatialVec>& F,
-    Vector&                    JtF) const
-{
-    assert(F.size() == getNumBodies());
-    JtF.resize(getNU(s));
-    JtF.setToZero();
-
-    assert(F.hasContiguousData() && JtF.hasContiguousData());
-
-    const SBStateDigest sbs(s, *this, Stage(Stage::Position).next());
-
-    Array_<PhiMatrix> phiTemp(getNumBodies());
-    Vector_<SpatialVec> zTemp(getNumBodies()); zTemp.setToZero();
-    const SpatialVec* fPtr   = F.size()       ? &F[0]       : NULL;
-    Real*             jtfPtr = JtF.size()     ? &JtF[0]     : NULL;
-    PhiMatrix*        phiPtr = phiTemp.size() ? &phiTemp[0] : NULL;
-    SpatialVec*       zPtr   = zTemp.size()   ? &zTemp[0]   : NULL;
-
-    for (int i = rbNodeLevels.size()-1; i >= 0; i--) {
-        for (int j = 0; j < (int)rbNodeLevels[i].size(); j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByScaledSystemJacobianTranspose(
-                sbs, scales, phiPtr, zPtr, fPtr, jtfPtr);
-        }
-    }
-}
-//................ MULTIPLY BY SCALED SYSTEM JACOBIAN TRANSPOSE ................
-
-
-// =============================================================================
-//                  MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES
-// =============================================================================
-void SimbodyMatterSubsystemRep::multiplyByPositionJacobianWrtBodyScales(const State& s,
-    const Vector_<Vec3>& sv,
-    Vector_<Vec3>&       JPs) const
-{
-    JPs.resize(getNumBodies());
-
-    assert(JPs.hasContiguousData());
-
-    const SBTreePositionCache& tpc = getTreePositionCache(s);
-
-    Vec3* JPsPtr = JPs.size() ? &JPs[0] : NULL;
-
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++) {
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByPositionJacobianWrtBodyScales(tpc, sv, JPsPtr);
-        }
-    }
-}
-//.................. MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES .............
-
-
-// =============================================================================
-//             MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES TRANSPOSE
-// =============================================================================
-void SimbodyMatterSubsystemRep::multiplyByPositionJacobianWrtBodyScalesTranspose(
-    const State&         s,
-    const Vector_<Vec3>& p,
-    Vector_<Vec3>&       JPtp) const
-{
-    const int numBodies = getNumBodies();
-    JPtp.resize(numBodies);
-    JPtp.setToZero();
-
-    assert(p.size() == numBodies);
-    assert(p.hasContiguousData() && JPtp.hasContiguousData());
-
-    const SBTreePositionCache& tpc = getTreePositionCache(s);
-
-    Vector_<Vec3> dpTemp(numBodies); dpTemp.setToZero();
-    const Vec3* pPtr      = p.size()     ? &p[0]      : NULL;
-    Vec3*       JPtpPtr   = JPtp.size()  ? &JPtp[0]   : NULL;
-    Vec3*       dpTempPtr = dpTemp.size() ? &dpTemp[0] : NULL;
-
-    for (int i = rbNodeLevels.size()-1; i >= 0; i--) {
-        for (int j = 0; j < (int)rbNodeLevels[i].size(); j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByPositionJacobianWrtBodyScalesTranspose(tpc, dpTempPtr, pPtr, JPtpPtr);
-        }
-    }
-}
-//.............. MULTIPLY BY POSITION JACOBIAN WRT BODY SCALES TRANSPOSE ......
-
-
-// =============================================================================
-//                           CALC SCALED BODY POSITIONS
-// =============================================================================
-void SimbodyMatterSubsystemRep::calcScaledBodyPositions(
-    const State&         s,
-    const Vector_<Vec3>& scales,
-    Vector_<Vec3>&       p_GB_scaled) const
-{
-    const int nb = getNumBodies();
-    p_GB_scaled.resize(nb);
-    p_GB_scaled[0] = Vec3(0); // Ground origin is fixed
-
-    const SBStateDigest sbs(s, *this, Stage::Position);
-    const SBTreePositionCache& pc = getTreePositionCache(s);
-    const Vector& q = sbs.getQ();
-
-    for (int i = 1; i < (int)rbNodeLevels.size(); ++i) {
-        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            const MobilizedBodyIndex idxB = node.getNodeNum();
-            const MobilizedBodyIndex idxP = node.getParent()->getNodeNum();
-            const Vec3& s_P = scales[idxP];
-            const Vec3& s_B = scales[idxB];
-
-            // Scaled X_PF translation: F's position on parent P scales by s_P.
-            const Vec3 r_PF_scaled =
-                node.getX_PF().p().elementwiseMultiply(s_P);
-
-            // Mobilizer transform X_FM (accounts for s_P).
-            Transform X_FM_scaled;
-            node.calcScaledAcrossJointTransform(sbs, q, s_P, X_FM_scaled);
-            const Vec3& r_FM_scaled = X_FM_scaled.p();
-
-            // Scaled r_MB: M's position on body B scales by s_B (in B frame),
-            // then converted to M frame.
-            const Vec3 r_MB_scaled = -(node.getX_MB().R()) *
-                s_B.elementwiseMultiply(node.getX_BM().p());
-
-            // Rotation matrices are unchanged by scaling.
-            const Rotation& R_GP = node.getX_GP(pc).R();
-            const Rotation& R_PF = node.getX_PF().R();
-            const Rotation& R_FM = X_FM_scaled.R();
-
-            const Vec3& p_FB_scaled = r_FM_scaled + R_FM * r_MB_scaled;
-            const Vec3& p_PB_scaled = r_PF_scaled + R_PF * p_FB_scaled;
-            p_GB_scaled[idxB] = p_GB_scaled[idxP] + R_GP * p_PB_scaled;
-        }
-    }
-}
-//....................... CALC SCALED BODY POSITIONS ...........................
 
 
 // =============================================================================

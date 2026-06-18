@@ -94,6 +94,12 @@ RBNodeEllipsoid(const MassProperties& mProps_B,
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
 }
 
+// Seed the State's default ellipsoid radii from the topology-time value passed
+// to this node at construction.
+void setMobilizerDefaultInstanceValues(const SBModelVars&,
+                                       SBInstanceVars& iv) const override
+{   this->toB(iv.ellipsoidRadii) = semi; }
+
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
                        Vector& q) const
 {
@@ -233,39 +239,15 @@ void calcX_FM(const SBStateDigest& sbs,
         assert(q && nq==4 && qCache && nQCache==QuatPoolSize);
         // Must use a normalized quaternion to generate the rotation matrix.
         // Here we normalize with just 4 flops using precalculated 1/norm(q).
-        const Quaternion quat(Vec4::getAs(q)*qCache[QuatOONorm], true); 
+        const Quaternion quat(Vec4::getAs(q)*qCache[QuatOONorm], true);
         X_F0M0.updR().setRotationFromQuaternion(quat); // 29 flops
     }
 
-    // Translation.
+    // Translation. Read the radii from instance state so user overrides via
+    // MobilizedBody::Ellipsoid::setRadii(state, r) take effect.
+    const Vec3& r = this->fromB(sbs.getInstanceVars().ellipsoidRadii);
     const Vec3& n = X_F0M0.z(); // just calculated above
-    X_F0M0.updP() = Vec3(semi[0]*n[0], semi[1]*n[1], semi[2]*n[2]);
-}
-
-void calcScaledX_FM(const SBStateDigest& sbs,
-                    const Real* q,      int nq,
-                    const Real* qCache, int nQCache,
-                    const Vec3& s_P,
-                    Transform&  X_F0M0_scaled) const override
-{
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    X_F0M0_scaled = this->findX_F0M0(pc);
-    const Vec3 s_F = this->calcParentScalesInF(s_P);
-    X_F0M0_scaled.updP() = X_F0M0_scaled.p().elementwiseMultiply(s_F);
-}
-
-Vec3 multiplyByScaledTranslationJacobian(const SBTreePositionCache& pc,
-        const Vec3& ds_P) const override {
-    const Vec3 p_FM = this->findX_F0M0(pc).p();
-    const Mat33& Js_FP = this->getJs_FP();
-    return p_FM.elementwiseMultiply(Js_FP * ds_P);
-}
-
-Vec3 multiplyByScaledTranslationJacobianTranspose(const SBTreePositionCache& pc,
-        const Vec3& dp_F) const override {
-    const Vec3 p_FM = this->findX_F0M0(pc).p();
-    const Mat33& Js_FP = this->getJs_FP();
-    return ~Js_FP * p_FM.elementwiseMultiply(dp_F);
+    X_F0M0.updP() = Vec3(r[0]*n[0], r[1]*n[1], r[2]*n[2]);
 }
 
 // Generalized speeds are the angular velocity expressed in F, so they
@@ -280,30 +262,11 @@ void calcAcrossJointVelocityJacobian(
     // used to *define* this mobilizer, not necessarily the ones used after
     // handling mobilizer reversal.
     const Vec3 n = this->findX_F0M0(pc).z();
+    const Vec3& r = this->fromB(sbs.getInstanceVars().ellipsoidRadii);
 
-    H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
-    H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
-    H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*semi[0], n[0]*semi[1],       0     ) );
-}
-
-void calcScaledAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
-    const Vec3& s_P,
-    HType&      H_F0M0_scaled) const
-{
-    // Unlike calcAcrossJointVelocityJacobian(), use "get" here since we should
-    // already be realized to the position stage.
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-
-    const Vec3 s_F = this->calcParentScalesInF(s_P);
-    const Vec3 s = semi.elementwiseMultiply(s_F);
-    const Vec3& n = this->findX_F0M0(pc).z();
-    H_F0M0_scaled(0) = SpatialVec(Vec3(1,0,0),
-                                  Vec3(         0, -n[2]*s[1],  n[1]*s[2]));
-    H_F0M0_scaled(1) = SpatialVec(Vec3(0,1,0),
-                                  Vec3( n[2]*s[0],          0, -n[0]*s[2]));
-    H_F0M0_scaled(2) = SpatialVec(Vec3(0,0,1),
-                                  Vec3(-n[1]*s[0],  n[0]*s[1],          0));
+    H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*r[1], n[1]*r[2]) );
+    H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*r[0],       0,     -n[0]*r[2]) );
+    H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*r[0], n[0]*r[1],       0     ) );
 }
 
 // Calculate time derivative of H_FM, which is *not* constant. (18 flops)
@@ -314,16 +277,17 @@ void calcAcrossJointVelocityJacobianDot(
     const SBTreePositionCache& pc = sbs.getTreePositionCache();
     const SBTreeVelocityCache& vc = sbs.updTreeVelocityCache(); // "upd" because we're realizing velocities now
 
-    // We need the normal and cross-joint velocity in the frames we're 
-    // using to *define* the mobilizer, not necessarily the frames we're 
+    // We need the normal and cross-joint velocity in the frames we're
+    // using to *define* the mobilizer, not necessarily the frames we're
     // using to compute it it (if it has been reversed).
     const Vec3       n      = this->findX_F0M0(pc).z();
     const Vec3       w_F0M0 = this->find_w_F0M0(pc, vc);
     const Vec3       ndot   = w_F0M0 % n; // w_FM x n (9 flops)
+    const Vec3&      r      = this->fromB(sbs.getInstanceVars().ellipsoidRadii);
 
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*semi[1], ndot[1]*semi[2]) );
-    HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*semi[0],       0,        -ndot[0]*semi[2]) );
-    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(-ndot[1]*semi[0], ndot[0]*semi[1],       0        ) );
+    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*r[1], ndot[1]*r[2]) );
+    HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*r[0],       0,        -ndot[0]*r[2]) );
+    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(-ndot[1]*r[0], ndot[0]*r[1],       0        ) );
 }
 
 // Calculate qdot=N(q)*u. Precalculations make this fast in Euler angle

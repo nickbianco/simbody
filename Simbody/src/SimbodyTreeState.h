@@ -653,6 +653,12 @@ public:
     Transform&       updX_PB(MobilizedBodyIndex mbx)       {return bodyConfigInParent[mbx];}
     const Transform& getX_GB(MobilizedBodyIndex mbx) const {return bodyConfigInGround[mbx];}
     Transform&       updX_GB(MobilizedBodyIndex mbx)       {return bodyConfigInGround[mbx];}
+    const Transform& getX_PF(MobilizedBodyIndex mbx) const {return mobilizerFrameInParent[mbx];}
+    Transform&       updX_PF(MobilizedBodyIndex mbx)       {return mobilizerFrameInParent[mbx];}
+    const Transform& getX_BM(MobilizedBodyIndex mbx) const {return mobilizerFrameInBody[mbx];}
+    Transform&       updX_BM(MobilizedBodyIndex mbx)       {return mobilizerFrameInBody[mbx];}
+    const Transform& getX_MB(MobilizedBodyIndex mbx) const {return mobilizerFrameInBodyInverse[mbx];}
+    Transform&       updX_MB(MobilizedBodyIndex mbx)       {return mobilizerFrameInBodyInverse[mbx];}
 
     const Transform& getX_AB(AncestorConstrainedBodyPoolIndex cbpx) const 
     {   return constrainedBodyConfigInAncestor[cbpx]; }
@@ -680,6 +686,16 @@ public:
     Array_<Transform,MobilizedBodyIndex>    bodyConfigInParent;           // nb (X_PB)
     Array_<Transform,MobilizedBodyIndex>    bodyConfigInGround;           // nb (X_GB)
     Array_<PhiMatrix,MobilizedBodyIndex>    bodyToParentShift;            // nb (phi)
+
+    // Copied at the start of realizePositionKinematics() from the
+    // corresponding arrays in SBInstanceVars, so position-stage computations
+    // see the mobilizer frames that are current in the State (which may have
+    // been overridden by MobilizedBody::setInboardFrame()/setOutboardFrame()).
+    // mobilizerFrameInBodyInverse is the inverse of mobilizerFrameInBody,
+    // cached for use in cross-mobilizer position computations.
+    Array_<Transform,MobilizedBodyIndex>    mobilizerFrameInParent;       // nb (X_PF)
+    Array_<Transform,MobilizedBodyIndex>    mobilizerFrameInBody;         // nb (X_BM)
+    Array_<Transform,MobilizedBodyIndex>    mobilizerFrameInBodyInverse;  // nb (X_MB)
 
     // This contains mass m, p_BBc_G (center of mass location measured from
     // B origin, expressed in Ground), and G_Bo_G (unit inertia [gyration]
@@ -728,8 +744,17 @@ public:
         bodyConfigInGround.resize(nBodies);          
         bodyConfigInGround[GroundIndex].setToZero();
 
-        bodyToParentShift.resize(nBodies);           
+        bodyToParentShift.resize(nBodies);
         bodyToParentShift[GroundIndex].setToZero();
+
+        mobilizerFrameInParent.resize(nBodies);
+        mobilizerFrameInParent[GroundIndex].setToZero();
+
+        mobilizerFrameInBody.resize(nBodies);
+        mobilizerFrameInBody[GroundIndex].setToZero();
+
+        mobilizerFrameInBodyInverse.resize(nBodies);
+        mobilizerFrameInBodyInverse[GroundIndex].setToZero();
 
         bodySpatialInertiaInGround.resize(nBodies); 
         bodySpatialInertiaInGround[GroundIndex].setMass(Infinity);
@@ -1294,6 +1319,16 @@ public:
     Array_<Transform,     MobilizedBodyIndex>   outboardMobilizerFrames;
     Array_<Transform,     MobilizedBodyIndex>   inboardMobilizerFrames;
 
+    // Per-mobilizer geometric parameters that derived MobilizedBody classes
+    // promote from topology-time defaults to Instance-stage State variables.
+    // Entries for mobilizer types that do not use a particular parameter are
+    // left at sentinel values (NaN) and never read. RigidBodyNode overrides
+    // of setMobilizerDefaultInstanceValues populate the relevant slots from
+    // their topology defaults; public set/get methods on the MobilizedBody
+    // subclass read/write here, which invalidates Stage::Instance.
+    Array_<Vec3,          MobilizedBodyIndex>   ellipsoidRadii;             // Ellipsoid
+    Array_<Real,          MobilizedBodyIndex>   cantileverFreeBeamLength;   // CantileverFreeBeam
+
     Array_<Motion::Level, MobilizedBodyIndex>   mobilizerLockLevel;
     Vector                                      lockedQs;
     Vector                                      lockedUs; // also used for udot
@@ -1320,6 +1355,15 @@ public:
 
         inboardMobilizerFrames.clear();
         inboardMobilizerFrames.resize(nb, Transform());
+
+        // Per-mobilizer geometric parameter slots are NaN-initialized so that
+        // misuse (read before the relevant mobilizer's default-setter ran) is
+        // caught loudly rather than silently producing zeros.
+        ellipsoidRadii.clear();
+        ellipsoidRadii.resize(nb, Vec3(NaN));
+
+        cantileverFreeBeamLength.clear();
+        cantileverFreeBeamLength.resize(nb, NaN);
 
         mobilizerLockLevel.clear();
         mobilizerLockLevel.resize(nb, Motion::NoLevel);

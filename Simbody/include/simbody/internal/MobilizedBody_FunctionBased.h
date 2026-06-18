@@ -44,28 +44,8 @@ coordinates as inputs, and produce a single number as its output. It also must
 support derivatives up to second order.  Taken together, the six functions
 define a SpatialVec giving the body's mobilizer transform.
 
-<h3>Mobilizer Scaling</h3>
-
-MobilizedBody::FunctionBased uses the default mobilizer scaling behavior from
-MobilizedBody::Custom. When the parent body is scaled by XYZ scale factors 
-\c s_P, the effective scale factor for each F-frame axis \e i is
-
-  s_F[i] = ||s_P .* R_PF.col(i)||
-
-where R_PF is the (fixed) orientation of F in P. Then, the mobilizer translation
-p_FM is scaled element-wise by s_F:
-
-  p_FM_scaled = p_FM .* s_F
-
-The translational rows of the velocity Jacobian H_FM are also scaled by s_F. The
-rotational rows of H_FM and the orientation R_FM are invariant under scaling.
-
-@note If the transform axes associated with translational functions are "skew"
-axes, that is, not aligned with the F frame axes, then it may not be possible
-to modify the translation to match the scaled translation. The system-level
-scaled Jacobian methods are still available to you, but if using these methods
-to optimize the geometry of the system, you will need to modify your functions
-"best fit" based on the optimal scale factors.
+The functions are an Instance-stage State variable; see setFunctions() and
+getFunctions(). The axes and coordIndices remain topology-time properties.
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::FunctionBased 
 :   public MobilizedBody::Custom {
@@ -198,7 +178,7 @@ public:
                   Direction direction=Forward);
 
     /** For compatibility with std::vector. **/
-    FunctionBased(MobilizedBody& parent, const Transform& X_PF, 
+    FunctionBased(MobilizedBody& parent, const Transform& X_PF,
                   const Body& bodyInfo, const Transform& X_BM,
                   int nmobilities, const std::vector<const Function*>& functions,
                   const std::vector<std::vector<int> >& coordIndices, const std::vector<Vec3>& axes,
@@ -207,10 +187,30 @@ public:
         Array_< Array_<int> > coordCopy(coordIndices); // sorry, must copy
         // Use the above constructor.
         new(this) FunctionBased(parent,X_PF,bodyInfo,X_BM,
-                                nmobilities, ArrayViewConst_<const Function*>(functions), 
-                                coordCopy, ArrayViewConst_<Vec3>(axes), 
+                                nmobilities, ArrayViewConst_<const Function*>(functions),
+                                coordCopy, ArrayViewConst_<Vec3>(axes),
                                 direction);
     }
+
+    /** Override the basis functions for this State. This is an Instance-stage
+    variable: setting it invalidates Stage::Instance and higher, so the State
+    must be re-realized to Position before any kinematic query reflects the
+    new functions. The new array must be of length 6 and each function's
+    argument size and derivative-order requirements must match those of the
+    topology defaults; otherwise an exception is thrown.
+
+    Unlike the constructor, this method does NOT take ownership of the supplied
+    pointers. The caller is responsible for keeping them valid for the lifetime
+    of any State that references them. The axes (Arot, Atrans) and the
+    coordIndices array are NOT overridable per the design intent.
+    @see getFunctions() **/
+    void setFunctions(State& state,
+                      const Array_<const Function*>& functions) const;
+
+    /** Get the basis functions currently in effect for this State. The State
+    must have been realized to Stage::Instance or higher.
+    @see setFunctions() **/
+    const Array_<const Function*>& getFunctions(const State& state) const;
 };
 
 } // namespace SimTK

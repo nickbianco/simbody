@@ -32,6 +32,7 @@
 #include "RigidBodyNodeSpec_SphericalCoords.h"
 #include "RigidBodyNodeSpec_Ball.h"
 #include "RigidBodyNodeSpec_Ellipsoid.h"
+#include "RigidBodyNodeSpec_Translation.h"
 #include "RigidBodyNodeSpec_Free.h"
 #include "RigidBodyNodeSpec_Screw.h"
 #include "RigidBodyNodeSpec_Universal.h"
@@ -46,23 +47,15 @@
 // Note: _Translation is handled separately so we can special case
 // a lone particle for speed if we find one.
 
-// A macro for instantiating rigid body nodes.
+// A macro for instantiating rigid body nodes. The noX_MB / noR_PF template
+// shortcuts that used to skip rotation/translation work when the mobilizer
+// frames were identity at topology are no longer correct: the frames are
+// Instance-stage State variables and may be overridden at runtime via
+// setInboardFrame() / setOutboardFrame(). Always instantiate the
+// general-case <false,false> path so the per-frame computations honor the
+// state-current X_PF and X_BM.
 #define INSTANTIATE(CLASS, ...) \
-    bool noX_MB = (   getDefaultOutboardFrame().p() == 0 \
-                   && getDefaultOutboardFrame().R() == Mat33(1)); \
-    bool noR_PF = (getDefaultInboardFrame().R() == Mat33(1)); \
-    if (noX_MB) { \
-        if (noR_PF) \
-            return new CLASS<true, true> (__VA_ARGS__); \
-        else \
-            return new CLASS<true, false> (__VA_ARGS__); \
-    } \
-    else { \
-        if (noR_PF) \
-            return new CLASS<false, true> (__VA_ARGS__); \
-        else \
-            return new CLASS<false, false> (__VA_ARGS__); \
-    }
+    return new CLASS<false, false> (__VA_ARGS__);
 
     /////////////////////////////////////////////////////////
     // MoblizedBodyImpl::createRigidBodyNode() definitions //
@@ -92,6 +85,19 @@ RigidBodyNode* MobilizedBody::SliderImpl::createRigidBodyNode(
     QIndex&        nextQSlot) const
 {
     INSTANTIATE(RBNodeSlider,
+        getDefaultRigidBodyMassProperties(),
+        getDefaultInboardFrame(),getDefaultOutboardFrame(),
+        isReversed(),
+        nextUSlot,nextUSqSlot,nextQSlot)
+}
+
+
+RigidBodyNode* MobilizedBody::TranslationImpl::createRigidBodyNode(
+    UIndex&        nextUSlot,
+    USquaredIndex& nextUSqSlot,
+    QIndex&        nextQSlot) const
+{
+    INSTANTIATE(RBNodeTranslate,
         getDefaultRigidBodyMassProperties(),
         getDefaultInboardFrame(),getDefaultOutboardFrame(),
         isReversed(),
@@ -269,27 +275,16 @@ RigidBodyNode* MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
         nextUSlot,nextUSqSlot,nextQSlot)
 }
 
+// See the comment on INSTANTIATE above for why the optimization branches
+// were dropped.
 #define INSTANTIATE_CUSTOM(DOF, ...) \
-    if (noX_MB) { \
-        if (noR_PF) \
-            return new RBNodeCustom<DOF, true, true> (__VA_ARGS__); \
-        else \
-            return new RBNodeCustom<DOF, true, false> (__VA_ARGS__); \
-    } \
-    else { \
-        if (noR_PF) \
-            return new RBNodeCustom<DOF, false, true> (__VA_ARGS__); \
-        else \
-            return new RBNodeCustom<DOF, false, false> (__VA_ARGS__); \
-    }
+    return new RBNodeCustom<DOF, false, false> (__VA_ARGS__);
 
 RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(
     UIndex&        nextUSlot,
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    bool noX_MB = (getDefaultOutboardFrame().p() == 0 && getDefaultOutboardFrame().R() == Mat33(1));
-    bool noR_PF = (getDefaultInboardFrame().R() == Mat33(1));
     switch (getImplementation().getImpl().getNU()) {
     case 1:
         INSTANTIATE_CUSTOM(1, getImplementation(), getDefaultRigidBodyMassProperties(),

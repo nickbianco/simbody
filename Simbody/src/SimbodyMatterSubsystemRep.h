@@ -562,56 +562,6 @@ public:
         const Vector_<SpatialVec>& X, 
         Vector&                    JtX) const;
 
-    // Calculate the product J(s)*v where J(s) is the same kinematic Jacobian
-    // described in multiplyBySystemJacobian() but scaled based on a vector of
-    // body scale factors, s, one for each mobilized body in the system.
-    // This is an O(N) operator which can be called once the State is realized
-    // to Stage::Position or higher. Because this is an operator, there is
-    // no effect on the State cache.
-    void multiplyByScaledSystemJacobian(const State&,
-        const Vector_<Vec3>& scales,
-        const Vector&        v,
-        Vector_<SpatialVec>& Jv) const;
-
-    // Calculate the product ~J(s)*X where J(s) is the same partial velocity
-    // Jacobian described in multiplyBySystemJacobianTranspose() but scaled
-    // based on a vector of body scale factors, s, one for each mobilized body
-    // in the system. This is an O(n) operator which can be called after
-    // realizePosition(). Because this is an operator, there is no effect on the
-    // State cache.
-    void multiplyByScaledSystemJacobianTranspose(const State&,
-        const Vector_<Vec3>&       scales,
-        const Vector_<SpatialVec>& F,
-        Vector&                    JtF) const;
-
-    // Calculate the product JP*s where JP = partial(p_GB)/partial(s) is the
-    // position Jacobian wrt body scales mapping body scale factor perturbations
-    // s to translational displacements of body frame origins in Ground.
-    // This is an O(n) operator which can be called once the State is realized
-    // to Stage::Position or higher. Because this is an operator, there is no
-    // effect on the State cache.
-    void multiplyByPositionJacobianWrtBodyScales(const State&,
-        const Vector_<Vec3>& s,
-        Vector_<Vec3>&       JPs) const;
-
-    // Calculate the product ~JP*p where JP = partial(p_GB)/partial(s). ~JP
-    // maps body position perturbations p to scale factor sensitivities via
-    // ~JP*p. This is an O(n) operator which can be called once the State is
-    // realized to Stage::Position or higher. Because this is an operator, there
-    // is no effect on the State cache.
-    void multiplyByPositionJacobianWrtBodyScalesTranspose(const State&,
-        const Vector_<Vec3>& p,
-        Vector_<Vec3>&       JPtp) const;
-
-    // Compute the position of each body's origin in Ground for the given
-    // body scale factors, traversing the kinematic tree base-to-tip. This is
-    // an O(n) operator which can be called once the State is realized to
-    // Stage::Position or higher. Because this is an operator, there is no
-    // effect on the State cache.
-    void calcScaledBodyPositions(const State&,
-        const Vector_<Vec3>& scales,
-        Vector_<Vec3>&       p_GB_scaled) const;
-
     // Given a set of body forces, return the equivalent set of mobilizer torques 
     // IGNORING CONSTRAINTS.
     // Must be in DynamicsStage so that articulated body inertias are available,

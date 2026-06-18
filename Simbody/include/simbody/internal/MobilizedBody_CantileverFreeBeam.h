@@ -137,28 +137,8 @@ you should not attempt to do any dynamics in that configuration.
 [1] Young, W. C., and R. G. Budynas. (2002). Roark's Formulas for Stress and
     Strain (7th Edition). McGraw-Hill.
 
-\section cf_beam_scaling Mobilizer Scaling
-
-The beam length L is a dimension of the parent body measured along the inboard
-mobilizer frame F in the Fz direction. When the parent body is scaled by XYZ
-scale factors \c s_P, the effective scale factor along Fz is
-
-  s_F[2] = ||s_P .* R_PF.col(2)||
-
-where R_PF is the (fixed) orientation of F in P. The scaled beam length is
-L_scaled = L * s_F[2], and all three position components scale proportionally:
-
-  p₀ = 2⁄3 q₁ L_scaled
-
-  p₁ = −2⁄3 q₀ L_scaled
-
-  p₂ = L_scaled − 4⁄15 (q₀² + q₁²) L_scaled
-
-Only the Fz scale factor affects the kinematics: the transverse deflections p₀
-and p₁, while perpendicular to the beam axis, are proportional to the beam
-length and therefore also scale with s_F[2], not with the transverse (Fx, Fy)
-scale factors.
-
+The beam length L is an Instance-stage State variable; see setLength() and
+getLength().
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::CantileverFreeBeam :
         public MobilizedBody {
@@ -203,6 +183,18 @@ public:
     /** Get the default length of the beam as specified during construction or
     via setDefaultLength(). **/
     const Real& getDefaultLength() const;
+
+    /** Override the beam length for this State. This is an Instance-stage
+    variable: setting it invalidates Stage::Instance and higher, so the State
+    must be re-realized to Position before any kinematic query reflects the
+    new length. Length must be strictly positive. The topology default (see
+    setDefaultLength()) is used as the initial value when the State is created.
+    @see setDefaultLength(), getLength() **/
+    void setLength(State& state, const Real& length) const;
+    /** Get the beam length currently in effect for this State. The State must
+    have been realized to Stage::Instance or higher.
+    @see setLength(), getDefaultLength() **/
+    const Real& getLength(const State& state) const;
 
     /** Provide a default orientation for this mobilizer if you don't want to
     start with the identity rotation (that is, alignment of the F and M
