@@ -558,11 +558,50 @@ public:
     // generalized coordinates q. This is an O(n) operator which can be called 
     // after realizePosition(). Because this is an operator, there is no effect
     // on the State cache.
-    void multiplyBySystemJacobianTranspose(const State&, 
-        const Vector_<SpatialVec>& X, 
+    void multiplyBySystemJacobianTranspose(const State&,
+        const Vector_<SpatialVec>& X,
         Vector&                    JtX) const;
 
-    // Given a set of body forces, return the equivalent set of mobilizer torques 
+    // Jacobians of body-origin positions in Ground wrt per-mobilizer
+    // inboard/outboard frame translations. Universal — every mobilizer
+    // contributes via its local R_GP (inboard) or -R_GB (outboard) Jacobian
+    // column. Forward walks rbNodeLevels base-to-tip; transpose walks
+    // tip-to-base accumulating subtree sums, then projects each body's
+    // subtree-sum onto its local Jacobian column. State must be realized
+    // through Stage::Position. Each input/output Vector_<Vec3> is sized to
+    // getNumBodies() and indexed by MobilizedBodyIndex; entry 0 (Ground)
+    // is zero.
+    void multiplyByPositionJacobianWrtInboardFramePositions(const State& s,
+        const Vector_<Vec3>& dp_PF, Vector_<Vec3>& dp_GB) const;
+    void multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State& s,
+        const Vector_<Vec3>& dp_GB, Vector_<Vec3>& dp_PF) const;
+    void multiplyByPositionJacobianWrtOutboardFramePositions(const State& s,
+        const Vector_<Vec3>& dp_BM, Vector_<Vec3>& dp_GB) const;
+    void multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State& s,
+        const Vector_<Vec3>& dp_GB, Vector_<Vec3>& dp_BM) const;
+
+    // Generic, parameter-agnostic helpers used by the per-mobilizer
+    // operators on each derived MobilizedBodyImpl. The caller computes the
+    // parameter-specific local Jacobian on its own; these methods just
+    // propagate a single root contribution through the kinematic tree.
+    //
+    // Forward: walks rbNodeLevels base-to-tip; dp_GB[bi] = dp_GB[parent] +
+    // (bi == rootIdx ? localShift : Vec3(0)). Bodies outside the root's
+    // subtree pick up zero from their parents transitively.
+    //
+    // Transpose: walks rbNodeLevels tip-to-base accumulating subtree sums;
+    // returns subtreeSum[rootIdx]. The caller multiplies by its own
+    // ~J_local to obtain the parameter gradient.
+    void multiplyByPositionJacobianFromMobilizer(const State& s,
+        MobilizedBodyIndex rootIdx, const Vec3& localShift,
+        Vector_<Vec3>& dp_GB) const;
+    Vec3 multiplyByPositionJacobianFromMobilizerTranspose(const State& s,
+        MobilizedBodyIndex rootIdx,
+        const Vector_<Vec3>& dp_GB) const;
+
+    // Given a set of body forces, return the equivalent set of mobilizer torques
     // IGNORING CONSTRAINTS.
     // Must be in DynamicsStage so that articulated body inertias are available,
     // however, velocities are ignored. This operator has NO effect on the state

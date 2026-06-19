@@ -2028,36 +2028,16 @@ void SimbodyMatterSubsystem::calcBiasForFrameJacobian
 //   JACOBIANS WRT INBOARD/OUTBOARD MOBILIZER FRAME POSITIONS
 //==============================================================================
 
-// Forward operators walk MobilizedBodyIndex base-to-tip. The topological
-// ordering MobilizedBodyIndex(parent) < MobilizedBodyIndex(child) means the
-// straight 0..nb-1 sweep visits parents before children.
-//
-// Transpose operators first build per-body subtree sums by walking
-// tip-to-base, then project each body's subtree sum onto its mobilizer's
-// local Jacobian column.
-
 void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtInboardFramePositions(
         const State&         s,
         const Vector_<Vec3>& dp_PF,
         Vector_<Vec3>&       dp_GB) const {
-    const int nb = getNumBodies();
-    SimTK_APIARGCHECK2_ALWAYS(dp_PF.size() == nb,
+    SimTK_APIARGCHECK2_ALWAYS(dp_PF.size() == getNumBodies(),
         "SimbodyMatterSubsystem",
         "multiplyByPositionJacobianWrtInboardFramePositions",
         "dp_PF size %d does not match number of bodies %d.",
-        dp_PF.size(), nb);
-
-    dp_GB.resize(nb);
-    dp_GB[0] = Vec3(0);
-    for (int bi = 1; bi < nb; ++bi) {
-        const MobilizedBodyIndex b(bi);
-        const MobilizedBody& mobod = getMobilizedBody(b);
-        const MobilizedBodyIndex parent =
-            mobod.getParentMobilizedBody().getMobilizedBodyIndex();
-        const Mat33 J = mobod.getImpl()
-                .calcPositionJacobianWrtInboardFramePosition(s);
-        dp_GB[b] = dp_GB[parent] + J * dp_PF[b];
-    }
+        dp_PF.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtInboardFramePositions(s, dp_PF, dp_GB);
 }
 
 void SimbodyMatterSubsystem::
@@ -2065,56 +2045,25 @@ multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
         const State&         s,
         const Vector_<Vec3>& dp_GB,
         Vector_<Vec3>&       dp_PF) const {
-    const int nb = getNumBodies();
-    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == nb,
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
         "SimbodyMatterSubsystem",
         "multiplyByPositionJacobianWrtInboardFramePositionsTranspose",
         "dp_GB size %d does not match number of bodies %d.",
-        dp_GB.size(), nb);
-
-    Vector_<Vec3> subtreeSum(nb);
-    for (int bi = 0; bi < nb; ++bi)
-        subtreeSum[bi] = dp_GB[bi];
-    for (int bi = nb - 1; bi > 0; --bi) {
-        const MobilizedBodyIndex b(bi);
-        const MobilizedBodyIndex parent =
-            getMobilizedBody(b).getParentMobilizedBody()
-                               .getMobilizedBodyIndex();
-        subtreeSum[parent] += subtreeSum[b];
-    }
-
-    dp_PF.resize(nb);
-    dp_PF[0] = Vec3(0);
-    for (int bi = 1; bi < nb; ++bi) {
-        const MobilizedBodyIndex b(bi);
-        const Mat33 J = getMobilizedBody(b).getImpl()
-                .calcPositionJacobianWrtInboardFramePosition(s);
-        dp_PF[b] = ~J * subtreeSum[b];
-    }
+        dp_GB.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+            s, dp_GB, dp_PF);
 }
 
 void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtOutboardFramePositions(
         const State&         s,
         const Vector_<Vec3>& dp_BM,
         Vector_<Vec3>&       dp_GB) const {
-    const int nb = getNumBodies();
-    SimTK_APIARGCHECK2_ALWAYS(dp_BM.size() == nb,
+    SimTK_APIARGCHECK2_ALWAYS(dp_BM.size() == getNumBodies(),
         "SimbodyMatterSubsystem",
         "multiplyByPositionJacobianWrtOutboardFramePositions",
         "dp_BM size %d does not match number of bodies %d.",
-        dp_BM.size(), nb);
-
-    dp_GB.resize(nb);
-    dp_GB[0] = Vec3(0);
-    for (int bi = 1; bi < nb; ++bi) {
-        const MobilizedBodyIndex b(bi);
-        const MobilizedBody& mobod = getMobilizedBody(b);
-        const MobilizedBodyIndex parent =
-            mobod.getParentMobilizedBody().getMobilizedBodyIndex();
-        const Mat33 J = mobod.getImpl()
-                .calcPositionJacobianWrtOutboardFramePosition(s);
-        dp_GB[b] = dp_GB[parent] + J * dp_BM[b];
-    }
+        dp_BM.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtOutboardFramePositions(s, dp_BM, dp_GB);
 }
 
 void SimbodyMatterSubsystem::
@@ -2122,32 +2071,13 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
         const State&         s,
         const Vector_<Vec3>& dp_GB,
         Vector_<Vec3>&       dp_BM) const {
-    const int nb = getNumBodies();
-    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == nb,
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
         "SimbodyMatterSubsystem",
         "multiplyByPositionJacobianWrtOutboardFramePositionsTranspose",
         "dp_GB size %d does not match number of bodies %d.",
-        dp_GB.size(), nb);
-
-    Vector_<Vec3> subtreeSum(nb);
-    for (int bi = 0; bi < nb; ++bi)
-        subtreeSum[bi] = dp_GB[bi];
-    for (int bi = nb - 1; bi > 0; --bi) {
-        const MobilizedBodyIndex b(bi);
-        const MobilizedBodyIndex parent =
-            getMobilizedBody(b).getParentMobilizedBody()
-                               .getMobilizedBodyIndex();
-        subtreeSum[parent] += subtreeSum[b];
-    }
-
-    dp_BM.resize(nb);
-    dp_BM[0] = Vec3(0);
-    for (int bi = 1; bi < nb; ++bi) {
-        const MobilizedBodyIndex b(bi);
-        const Mat33 J = getMobilizedBody(b).getImpl()
-                .calcPositionJacobianWrtOutboardFramePosition(s);
-        dp_BM[b] = ~J * subtreeSum[b];
-    }
+        dp_GB.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+            s, dp_GB, dp_BM);
 }
 
 

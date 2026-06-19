@@ -6361,6 +6361,169 @@ void SimbodyMatterSubsystemRep::multiplyBySystemJacobianTranspose
 
 
 // =============================================================================
+//        JACOBIANS WRT INSTANCE-STAGE MOBILIZER GEOMETRY PARAMETERS
+// =============================================================================
+// Forward operators walk rbNodeLevels base-to-tip: each body's dp_GB is its
+// parent's dp_GB plus a local contribution. For the universal inboard/
+// outboard variants the local contribution is the body's mobilizer's local
+// Jacobian times the body's own parameter delta. For the per-mobilizer
+// variants the local contribution is zero for every body except the root
+// (whose Impl owns the parameter being differentiated); the local shift at
+// the root then propagates unchanged to every descendant through the
+// natural inheritance step (translation-only perturbations don't rotate
+// R_GB, so descendants pick up the same shift as their parent).
+//
+// Transpose operators walk tip-to-base accumulating each body's dp_GB into
+// its parent's slot; the resulting subtree-sum at every body is then
+// projected onto that body's local Jacobian column. The per-mobilizer
+// variants only project at the root and return that scalar/Vec3 directly.
+
+// -----------------------------------------------------------------------------
+// Universal inboard/outboard frame translations.
+// -----------------------------------------------------------------------------
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtInboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_PF,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    dp_GB.resize(nb);
+    dp_GB[0] = Vec3(0);
+    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            const Mat33 J = getMobilizedBody(bi).getImpl()
+                    .calcPositionJacobianWrtInboardFramePosition(s);
+            dp_GB[bi] = dp_GB[parent] + J * dp_PF[bi];
+        }
+    }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_PF) const {
+    const int nb = getNumBodies();
+    Vector_<Vec3> subtreeSum(nb);
+    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
+    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            subtreeSum[parent] += subtreeSum[bi];
+        }
+    }
+    dp_PF.resize(nb);
+    dp_PF[0] = Vec3(0);
+    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi = node.getNodeNum();
+            const Mat33 J = getMobilizedBody(bi).getImpl()
+                    .calcPositionJacobianWrtInboardFramePosition(s);
+            dp_PF[bi] = ~J * subtreeSum[bi];
+        }
+    }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_BM,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    dp_GB.resize(nb);
+    dp_GB[0] = Vec3(0);
+    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            const Mat33 J = getMobilizedBody(bi).getImpl()
+                    .calcPositionJacobianWrtOutboardFramePosition(s);
+            dp_GB[bi] = dp_GB[parent] + J * dp_BM[bi];
+        }
+    }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_BM) const {
+    const int nb = getNumBodies();
+    Vector_<Vec3> subtreeSum(nb);
+    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
+    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            subtreeSum[parent] += subtreeSum[bi];
+        }
+    }
+    dp_BM.resize(nb);
+    dp_BM[0] = Vec3(0);
+    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi = node.getNodeNum();
+            const Mat33 J = getMobilizedBody(bi).getImpl()
+                    .calcPositionJacobianWrtOutboardFramePosition(s);
+            dp_BM[bi] = ~J * subtreeSum[bi];
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Generic per-mobilizer propagation: callers (each derived Impl) compute
+// the parameter-specific local Jacobian on their own. These two helpers do
+// the parameter-agnostic tree walk and contain no per-mobilizer dispatch.
+// -----------------------------------------------------------------------------
+void SimbodyMatterSubsystemRep::multiplyByPositionJacobianFromMobilizer(
+        const State&        s,
+        MobilizedBodyIndex  rootIdx,
+        const Vec3&         localShift,
+        Vector_<Vec3>&      dp_GB) const {
+    const int nb = getNumBodies();
+    dp_GB.resize(nb);
+    dp_GB[0] = Vec3(0);
+    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            dp_GB[bi] = dp_GB[parent] +
+                        (bi == rootIdx ? localShift : Vec3(0));
+        }
+    }
+}
+
+Vec3 SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianFromMobilizerTranspose(
+        const State&         s,
+        MobilizedBodyIndex   rootIdx,
+        const Vector_<Vec3>& dp_GB) const {
+    const int nb = getNumBodies();
+    Vector_<Vec3> subtreeSum(nb);
+    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
+    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
+        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[level][j];
+            const MobilizedBodyIndex bi     = node.getNodeNum();
+            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
+            subtreeSum[parent] += subtreeSum[bi];
+        }
+    }
+    return subtreeSum[rootIdx];
+}
+
+
+// =============================================================================
 //                     CALC TREE EQUIVALENT MOBILITY FORCES
 // =============================================================================
 // This routine does the same thing as the above but accounts for centrifugal

@@ -37,61 +37,6 @@
 
 namespace SimTK {
 
-namespace {
-// Mark inSubtree[b] true iff b == root or b is a descendant of root. Relies on
-// the topological ordering MobilizedBodyIndex(parent) < MobilizedBodyIndex(child).
-static void markSubtree(const SimbodyMatterSubsystem& matter,
-                        MobilizedBodyIndex root,
-                        std::vector<bool>& inSubtree) {
-    const int nb = matter.getNumBodies();
-    inSubtree.assign(nb, false);
-    inSubtree[root] = true;
-    for (int bi = (int)root + 1; bi < nb; ++bi) {
-        MobilizedBodyIndex b(bi);
-        const MobilizedBodyIndex parent = matter.getMobilizedBody(b)
-                .getParentMobilizedBody().getMobilizedBodyIndex();
-        if (inSubtree[parent])
-            inSubtree[bi] = true;
-    }
-}
-
-// Write the same `localShift` into dp_GB[root] and every descendant of root.
-// All other entries are zeroed. Used by all three per-mobilizer forward
-// operators -- because each parameter is a translation, the descendant shift
-// is the same as the root's shift (no rotation perturbation).
-static void writeSubtreeShift(const SimbodyMatterSubsystem& matter,
-                              MobilizedBodyIndex root,
-                              const Vec3& localShift,
-                              Vector_<Vec3>& dp_GB) {
-    const int nb = matter.getNumBodies();
-    std::vector<bool> inSubtree;
-    markSubtree(matter, root, inSubtree);
-    dp_GB.resize(nb);
-    dp_GB = Vec3(0);
-    dp_GB[root] = localShift;
-    for (int bi = (int)root + 1; bi < nb; ++bi) {
-        if (!inSubtree[bi]) continue;
-        const MobilizedBodyIndex parent = matter.getMobilizedBody(MobilizedBodyIndex(bi))
-                .getParentMobilizedBody().getMobilizedBodyIndex();
-        dp_GB[bi] = dp_GB[parent];
-    }
-}
-
-// Sum dp_GB over root + all descendants. Used by all three per-mobilizer
-// transpose operators.
-static Vec3 sumSubtree(const SimbodyMatterSubsystem& matter,
-                       MobilizedBodyIndex root,
-                       const Vector_<Vec3>& dp_GB) {
-    const int nb = matter.getNumBodies();
-    std::vector<bool> inSubtree;
-    markSubtree(matter, root, inSubtree);
-    Vec3 sum(0);
-    for (int bi = (int)root; bi < nb; ++bi)
-        if (inSubtree[bi]) sum += dp_GB[bi];
-    return sum;
-}
-}
-
     ////////////////////
     // MOBILIZED BODY //
     ////////////////////
@@ -2095,17 +2040,12 @@ const Vec3& MobilizedBody::Ellipsoid::getRadii(const State& s) const {
 
 void MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadii(
         const State& s, const Vec3& dRadii, Vector_<Vec3>& dp_GB) const {
-    const Mat33 J_local = getImpl().calcPositionJacobianWrtRadii(s);
-    writeSubtreeShift(getMatterSubsystem(), getMobilizedBodyIndex(),
-                      J_local * dRadii, dp_GB);
+    getImpl().multiplyByPositionJacobianWrtRadii(s, dRadii, dp_GB);
 }
 
 Vec3 MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadiiTranspose(
         const State& s, const Vector_<Vec3>& dp_GB) const {
-    const Mat33 J_local = getImpl().calcPositionJacobianWrtRadii(s);
-    const Vec3 sum = sumSubtree(getMatterSubsystem(),
-                                getMobilizedBodyIndex(), dp_GB);
-    return ~J_local * sum;
+    return getImpl().multiplyByPositionJacobianWrtRadiiTranspose(s, dp_GB);
 }
 
 const Quaternion& MobilizedBody::Ellipsoid::getDefaultQ() const {
@@ -2812,18 +2752,13 @@ MobilizedBody::CantileverFreeBeam::CantileverFreeBeam
 
  void MobilizedBody::CantileverFreeBeam::multiplyByPositionJacobianWrtLength(
          const State& s, Real dLength, Vector_<Vec3>& dp_GB) const {
-     const Vec3 J_local = getImpl().calcPositionJacobianWrtLength(s);
-     writeSubtreeShift(getMatterSubsystem(), getMobilizedBodyIndex(),
-                       J_local * dLength, dp_GB);
+     getImpl().multiplyByPositionJacobianWrtLength(s, dLength, dp_GB);
  }
 
  Real MobilizedBody::CantileverFreeBeam::
  multiplyByPositionJacobianWrtLengthTranspose(
          const State& s, const Vector_<Vec3>& dp_GB) const {
-     const Vec3 J_local = getImpl().calcPositionJacobianWrtLength(s);
-     const Vec3 sum = sumSubtree(getMatterSubsystem(),
-                                 getMobilizedBodyIndex(), dp_GB);
-     return dot(J_local, sum);
+     return getImpl().multiplyByPositionJacobianWrtLengthTranspose(s, dp_GB);
  }
 
  const Vec3& MobilizedBody::CantileverFreeBeam::getDefaultQ() const {
@@ -3355,9 +3290,8 @@ multiplyByPositionJacobianWrtTranslationScale(
         Vector_<Vec3>& dp_GB) const {
     const FunctionBasedImpl& impl =
         dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    const Mat33 J_local = impl.calcPositionJacobianWrtTranslationScale(s);
-    writeSubtreeShift(getMatterSubsystem(), getMobilizedBodyIndex(),
-                      J_local * dTranslationScale, dp_GB);
+    impl.multiplyByPositionJacobianWrtTranslationScale(
+            s, dTranslationScale, dp_GB);
 }
 
 Vec3 MobilizedBody::FunctionBased::
@@ -3365,10 +3299,8 @@ multiplyByPositionJacobianWrtTranslationScaleTranspose(
         const State& s, const Vector_<Vec3>& dp_GB) const {
     const FunctionBasedImpl& impl =
         dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    const Mat33 J_local = impl.calcPositionJacobianWrtTranslationScale(s);
-    const Vec3 sum = sumSubtree(getMatterSubsystem(),
-                                getMobilizedBodyIndex(), dp_GB);
-    return ~J_local * sum;
+    return impl.multiplyByPositionJacobianWrtTranslationScaleTranspose(
+            s, dp_GB);
 }
 
 } // namespace SimTK

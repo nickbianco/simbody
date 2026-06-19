@@ -892,6 +892,21 @@ public:
                      R_GF.col(2) * n[2]);
     }
 
+    void multiplyByPositionJacobianWrtRadii(const State& s,
+            const Vec3& dRadii, Vector_<Vec3>& dp_GB) const {
+        const Vec3 localShift = calcPositionJacobianWrtRadii(s) * dRadii;
+        getMyMatterSubsystemRep().multiplyByPositionJacobianFromMobilizer(
+                s, getMyMobilizedBodyIndex(), localShift, dp_GB);
+    }
+
+    Vec3 multiplyByPositionJacobianWrtRadiiTranspose(const State& s,
+            const Vector_<Vec3>& dp_GB) const {
+        const Vec3 sum = getMyMatterSubsystemRep()
+                .multiplyByPositionJacobianFromMobilizerTranspose(
+                        s, getMyMobilizedBodyIndex(), dp_GB);
+        return ~calcPositionJacobianWrtRadii(s) * sum;
+    }
+
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
@@ -1141,6 +1156,21 @@ public:
                            -(2.0/3.0)*q0,
                            1.0 - (4.0/15.0)*(q0*q0 + q1*q1));
         return R_GF * dpFM_dL;
+    }
+
+    void multiplyByPositionJacobianWrtLength(const State& s,
+            Real dLength, Vector_<Vec3>& dp_GB) const {
+        const Vec3 localShift = calcPositionJacobianWrtLength(s) * dLength;
+        getMyMatterSubsystemRep().multiplyByPositionJacobianFromMobilizer(
+                s, getMyMobilizedBodyIndex(), localShift, dp_GB);
+    }
+
+    Real multiplyByPositionJacobianWrtLengthTranspose(const State& s,
+            const Vector_<Vec3>& dp_GB) const {
+        const Vec3 sum = getMyMatterSubsystemRep()
+                .multiplyByPositionJacobianFromMobilizerTranspose(
+                        s, getMyMobilizedBodyIndex(), dp_GB);
+        return dot(calcPositionJacobianWrtLength(s), sum);
     }
 
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
@@ -1714,6 +1744,26 @@ public:
         return Mat33(R_GF * (sc[0] * UnitVec3::getAs(&Atrans(0,0))),
                      R_GF * (sc[1] * UnitVec3::getAs(&Atrans(0,1))),
                      R_GF * (sc[2] * UnitVec3::getAs(&Atrans(0,2))));
+    }
+
+    void multiplyByPositionJacobianWrtTranslationScale(const State& s,
+            const Vec3& dTransScale, Vector_<Vec3>& dp_GB) const {
+        const CustomImpl& cuImpl = getImpl().getCustomImpl();
+        const Vec3 localShift =
+                calcPositionJacobianWrtTranslationScale(s) * dTransScale;
+        cuImpl.getMyMatterSubsystemRep()
+                .multiplyByPositionJacobianFromMobilizer(
+                        s, cuImpl.getMyMobilizedBodyIndex(),
+                        localShift, dp_GB);
+    }
+
+    Vec3 multiplyByPositionJacobianWrtTranslationScaleTranspose(
+            const State& s, const Vector_<Vec3>& dp_GB) const {
+        const CustomImpl& cuImpl = getImpl().getCustomImpl();
+        const Vec3 sum = cuImpl.getMyMatterSubsystemRep()
+                .multiplyByPositionJacobianFromMobilizerTranspose(
+                        s, cuImpl.getMyMobilizedBodyIndex(), dp_GB);
+        return ~calcPositionJacobianWrtTranslationScale(s) * sum;
     }
 
     void realizePosition(const State& s) const override {
