@@ -198,12 +198,8 @@ public:
 
     // Linearize the inboard- and outboard-frame mobilizer parameters wrt a
     // body-scale perturbation `delta` around unity scales. Returns
-    // d(param)/d(s) * delta. Mobilizer-specific parameters (radii, length,
-    // translation scale) are independent of body scales and are not produced
-    // by this method.
-    //   X_PF.p()[i] = X_PF_default.p()[i] * s[parent][i]
-    //   X_BM.p()[i] = X_BM_default.p()[i] * s[this  ][i]
-    void calcParameterDeltasFromBodyScaleDeltas(
+    // d(param)/d(s) * delta. 
+    void calcMobilizerFrameShiftsFromBodyScaleDelta(
             const State& state,
             const Vector_<Vec3>& delta,
             Vector_<Vec3>& dp_PF, Vector_<Vec3>& dp_BM) const {
@@ -472,7 +468,7 @@ void testMultiplyByPositionJacobianWrtInboardFramePositions() {
     }
 
     Vector_<Vec3> dp_PF, dp_BM;
-    sys.calcParameterDeltasFromBodyScaleDeltas(state, delta, dp_PF, dp_BM);
+    sys.calcMobilizerFrameShiftsFromBodyScaleDelta(state, delta, dp_PF, dp_BM);
 
     Vector_<Vec3> dp_GB_analytic;
     sys.m_matter.multiplyByPositionJacobianWrtInboardFramePositions(
@@ -545,7 +541,7 @@ void testMultiplyByPositionJacobianWrtOutboardFramePositions() {
     }
 
     Vector_<Vec3> dp_PF, dp_BM;
-    sys.calcParameterDeltasFromBodyScaleDeltas(state, delta, dp_PF, dp_BM);
+    sys.calcMobilizerFrameShiftsFromBodyScaleDelta(state, delta, dp_PF, dp_BM);
 
     Vector_<Vec3> dp_GB_analytic;
     sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositions(
