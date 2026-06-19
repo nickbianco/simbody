@@ -582,25 +582,6 @@ public:
         const State& s,
         const Vector_<Vec3>& dp_GB, Vector_<Vec3>& dp_BM) const;
 
-    // Generic, parameter-agnostic helpers used by the per-mobilizer
-    // operators on each derived MobilizedBodyImpl. The caller computes the
-    // parameter-specific local Jacobian on its own; these methods just
-    // propagate a single root contribution through the kinematic tree.
-    //
-    // Forward: walks rbNodeLevels base-to-tip; dp_GB[bi] = dp_GB[parent] +
-    // (bi == rootIdx ? localShift : Vec3(0)). Bodies outside the root's
-    // subtree pick up zero from their parents transitively.
-    //
-    // Transpose: walks rbNodeLevels tip-to-base accumulating subtree sums;
-    // returns subtreeSum[rootIdx]. The caller multiplies by its own
-    // ~J_local to obtain the parameter gradient.
-    void multiplyByPositionJacobianFromMobilizer(const State& s,
-        MobilizedBodyIndex rootIdx, const Vec3& localShift,
-        Vector_<Vec3>& dp_GB) const;
-    Vec3 multiplyByPositionJacobianFromMobilizerTranspose(const State& s,
-        MobilizedBodyIndex rootIdx,
-        const Vector_<Vec3>& dp_GB) const;
-
     // Given a set of body forces, return the equivalent set of mobilizer torques
     // IGNORING CONSTRAINTS.
     // Must be in DynamicsStage so that articulated body inertias are available,

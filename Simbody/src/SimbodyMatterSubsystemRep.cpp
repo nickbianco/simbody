@@ -277,7 +277,7 @@ void SimbodyMatterSubsystemRep::endConstruction(State& s) {
         const MobilizedBodyImpl& mbr = getMobilizedBody(mbx).getImpl();
         const RigidBodyNode& n = mbr.realizeTopology(s,nextUSlot,nextUSqSlot,nextQSlot);
 
-        // Create the computational multibody tree data structures, organized 
+        // Create the computational multibody tree data structures, organized
         // by level.
         const int level = n.getLevel();
         if ((int)rbNodeLevels.size() <= level)
@@ -285,6 +285,13 @@ void SimbodyMatterSubsystemRep::endConstruction(State& s) {
         const int nodeIndexWithinLevel = rbNodeLevels[level].size();
         rbNodeLevels[level].push_back(&n);
         nodeNum2NodeMap.push_back(RigidBodyNodeIndex(level, nodeIndexWithinLevel));
+
+        // Mirror the level structure as a MobilizedBodyIndex array on the
+        // topology cache so MobilizedBodyImpl-side code can walk the tree
+        // without reaching into Rep-private rbNodeLevels.
+        if ((int)topologyCache.mobodLevels.size() <= level)
+            topologyCache.mobodLevels.resize(level + 1);
+        topologyCache.mobodLevels[level].push_back(mbx);
 
         // Count up multibody tree totals.
         const int ndof = n.getDOF();
@@ -6478,50 +6485,6 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
         }
     }
 }
-
-// -----------------------------------------------------------------------------
-// Generic per-mobilizer propagation: callers (each derived Impl) compute
-// the parameter-specific local Jacobian on their own. These two helpers do
-// the parameter-agnostic tree walk and contain no per-mobilizer dispatch.
-// -----------------------------------------------------------------------------
-void SimbodyMatterSubsystemRep::multiplyByPositionJacobianFromMobilizer(
-        const State&        s,
-        MobilizedBodyIndex  rootIdx,
-        const Vec3&         localShift,
-        Vector_<Vec3>&      dp_GB) const {
-    const int nb = getNumBodies();
-    dp_GB.resize(nb);
-    dp_GB[0] = Vec3(0);
-    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            dp_GB[bi] = dp_GB[parent] +
-                        (bi == rootIdx ? localShift : Vec3(0));
-        }
-    }
-}
-
-Vec3 SimbodyMatterSubsystemRep::
-multiplyByPositionJacobianFromMobilizerTranspose(
-        const State&         s,
-        MobilizedBodyIndex   rootIdx,
-        const Vector_<Vec3>& dp_GB) const {
-    const int nb = getNumBodies();
-    Vector_<Vec3> subtreeSum(nb);
-    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
-    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            subtreeSum[parent] += subtreeSum[bi];
-        }
-    }
-    return subtreeSum[rootIdx];
-}
-
 
 // =============================================================================
 //                     CALC TREE EQUIVALENT MOBILITY FORCES

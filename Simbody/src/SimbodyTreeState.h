@@ -127,8 +127,16 @@ public:
         modelingVarsIndex.invalidate();
         modelingCacheIndex.invalidate();
         topoInstanceVarsIndex.invalidate();
+        mobodLevels.clear();
         valid = false;
     }
+
+    // Per-level lists of MobilizedBodyIndex; mobodLevels[level][j] is the
+    // MobilizedBodyIndex of the j-th mobilizer at that tree depth. Parallels
+    // SimbodyMatterSubsystemRep::rbNodeLevels but indexed instead of
+    // pointer-based, so any code with a MobilizedBodyImpl can walk the
+    // kinematic tree without reaching into Rep private members.
+    Array_<Array_<MobilizedBodyIndex>> mobodLevels;
 
     // These are topological objects.
     int nBodies;
