@@ -196,9 +196,8 @@ public:
                              scales[CantileverFreeBeam]));
     }
 
-    // Linearize the inboard- and outboard-frame mobilizer parameters wrt a
-    // body-scale perturbation `delta` around unity scales. Returns
-    // d(param)/d(s) * delta. 
+    // Calculate how mobilizer inboard and outboard frames shift based on
+    // changes in body scale factors.
     void calcMobilizerFrameShiftsFromBodyScaleDelta(
             const State& state,
             const Vector_<Vec3>& delta,
@@ -773,6 +772,165 @@ void testMultiplyByPositionJacobianWrtTranslationScaleTranspose() {
     SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
 }
 
+// Use the transpose of mobilizer parameter Jacobians to assemble the gradient
+// of a position error on a single station offset:
+//
+//   E(x) = (1/2) || p_GS(x) - p_target ||^2
+//
+// where x is a flat variables vector containing the body scales, beam length,
+// ellipsoid radii, and function translation scales.
+//
+// The full analytic gradient is compared element-by-element against an
+// independent finite-difference estimate that perturbs each variable one
+// at a time through the mobilizer parameter setters.
+void testPositionErrorGradientWrtCombinedVariables() {
+
+    // Construct an unscaled pendulum system.
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+    const int nb = sys.m_matter.getNumBodies();
+
+    // Position-error: the station on the end of the cantilever beam mobiilzer
+    // should match the target.
+    const MobilizedBodyIndex targetMobodIndx =
+            sys.m_cantileverFreeBeam.getMobilizedBodyIndex();
+    const Vec3 p_BS(0.1, 0.2, 0.3);
+    const Vec3 p_target(1.0, 2.0, 3.0);
+    auto computeError = [&](const State& s) -> Real {
+        const Transform& X = sys.m_matter.getMobilizedBody(targetMobodIndx)
+                                         .getBodyTransform(s);
+        const Vec3 p_GS = X.p() + X.R() * p_BS;
+        return 0.5 * (p_GS - p_target).normSqr();
+    };
+
+    // Unperturbed system error.
+    const Real E0 = computeError(state);
+
+    // Flat-variables layout.
+    const int idxBodyScales = 0;
+    const int idxLength     = 3 * nb;
+    const int idxRadii      = idxLength + 1;
+    const int idxTransScale = idxRadii  + 3;
+    const int nVars         = idxTransScale + 3;
+
+    // Calculate the analytic gradient using the mobilizer Jacobian methods.
+    // ---------------------------------------------------------------------
+    // Build dE/dp_GB, the derivative of the position error cost with respect 
+    // to body positions expressed in ground. The only non-zero element is the 
+    // slot associated with the cantilever free beam mobilizer.
+    Vector_<Vec3> dE_dp_GB(nb, Vec3(0));
+    const Transform& X = sys.m_matter.getMobilizedBody(targetMobodIndx)
+                                    .getBodyTransform(state);
+    const Vec3 p_GS = X.p() + X.R() * p_BS;
+    dE_dp_GB[targetMobodIndx] = p_GS - p_target;
+
+    // Per-mobilizer frame-translation gradients. Chain rule with dE/dp_GB.
+    Vector_<Vec3> dE_dp_PF, dE_dp_BM;
+    sys.m_matter.multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+            state, dE_dp_GB, dE_dp_PF);
+    sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+            state, dE_dp_GB, dE_dp_BM);
+
+    // Per-mobilizer rigid-body parameter gradients. Chain rule with dE/dp_GB.
+    const Real dE_dLength = sys.m_cantileverFreeBeam
+            .multiplyByPositionJacobianWrtLengthTranspose(state, dE_dp_GB);
+    const Vec3 dE_dRadii = sys.m_ellipsoid
+            .multiplyByPositionJacobianWrtRadiiTranspose(state, dE_dp_GB);
+    const Vec3 dE_dTransScale = sys.m_functionBased
+            .multiplyByPositionJacobianWrtTranslationScaleTranspose(
+                    state, dE_dp_GB);
+
+    // Body-scale gradients. Use chaing rule to compute dE_dscales from dE_dp_PF 
+    // and dE_dp_BM.
+    Vector dE_dscales(3 * nb, 0.0);
+    const MobilizedBody mobs[4] = { sys.m_pin, sys.m_ellipsoid,
+                                    sys.m_functionBased,
+                                    sys.m_cantileverFreeBeam };
+    for (int m = 0; m < 4; ++m) {
+        const int parentIdx = (int)mobs[m].getParentMobilizedBody()
+                                          .getMobilizedBodyIndex();
+        const int thisIdx   = (int)mobs[m].getMobilizedBodyIndex();
+        const Transform X_PF_state = mobs[m].getInboardFrame(state);
+        const Transform X_BM_state = mobs[m].getOutboardFrame(state);
+        for (int i = 0; i < 3; ++i) {
+            dE_dscales[parentIdx*3 + i] +=
+                    dE_dp_PF[thisIdx][i] * X_PF_state.p()[i];
+            dE_dscales[thisIdx*3 + i]   +=
+                    dE_dp_BM[thisIdx][i] * X_BM_state.p()[i];
+        }
+    }
+
+    // Assemble the flat analytic gradient vector.
+    Vector grad_analytic(nVars, 0.0);
+    for (int i = 0; i < 3*nb; ++i) {
+        grad_analytic[idxBodyScales + i] = dE_dscales[i];
+    }
+    grad_analytic[idxLength] = dE_dLength;
+    for (int i = 0; i < 3; ++i) {
+        grad_analytic[idxRadii      + i] = dE_dRadii[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        grad_analytic[idxTransScale + i] = dE_dTransScale[i];
+    }
+
+    // Calculate the gradient via finite differences.
+    // ----------------------------------------------
+    Vector grad_fd(nVars, 0.0);
+    const Real h   = 1e-5;
+    const Real tol = 1e-4;
+
+    // Body scales: perturb the scale factors and update the inboard and 
+    // outboard frames using setParametersFromScales().
+    for (int k = 0; k < nb; ++k) {
+        for (int axis = 0; axis < 3; ++axis) {
+            State pert = state;
+            Vector_<Vec3> scales = getUnityScales();
+            scales[k][axis] += h;
+            sys.setParametersFromScales(pert, scales);
+            sys.m_system.realize(pert, Stage::Position);
+            grad_fd[idxBodyScales + k*3 + axis] =
+                    (computeError(pert) - E0) / h;
+        }
+    }
+
+    // CantileverFreeBeam length.
+    {
+        State pert = state;
+        sys.m_cantileverFreeBeam.setLength(pert,
+                sys.m_cantileverFreeBeam.getLength(pert) + h);
+        sys.m_system.realize(pert, Stage::Position);
+        grad_fd[idxLength] = (computeError(pert) - E0) / h;
+    }
+
+    // Ellipsoid radii.
+    for (int i = 0; i < 3; ++i) {
+        State pert = state;
+        Vec3 r = sys.m_ellipsoid.getRadii(pert);
+        r[i] += h;
+        sys.m_ellipsoid.setRadii(pert, r);
+        sys.m_system.realize(pert, Stage::Position);
+        grad_fd[idxRadii + i] = (computeError(pert) - E0) / h;
+    }
+
+    // FunctionBased translation scale.
+    for (int i = 0; i < 3; ++i) {
+        State pert = state;
+        Vec3 t = sys.m_functionBased.getTranslationScale(pert);
+        t[i] += h;
+        sys.m_functionBased.setTranslationScale(pert, t);
+        sys.m_system.realize(pert, Stage::Position);
+        grad_fd[idxTransScale + i] = (computeError(pert) - E0) / h;
+    }
+
+    // Compare analytic and finite-differenced gradients.
+    // --------------------------------------------------
+    for (int i = 0; i < nVars; ++i) {
+        SimTK_TEST_EQ_TOL(grad_analytic[i], grad_fd[i], tol);
+    }
+}
+
 
 int main() {
     SimTK_START_TEST("TestScaledSystemJacobian");
@@ -793,5 +951,6 @@ int main() {
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtTranslationScale);
         SimTK_SUBTEST(
             testMultiplyByPositionJacobianWrtTranslationScaleTranspose);
+        SimTK_SUBTEST(testPositionErrorGradientWrtCombinedVariables);
     SimTK_END_TEST();
 }
