@@ -196,6 +196,32 @@ public:
     @see setLength(), getDefaultLength() **/
     const Real& getLength(const State& state) const;
 
+    /** Compute dp_GB = J_L(state) * dLength, where J_L[i] =
+    d(p_GB[i])/d(L) for this CantileverFreeBeam mobilizer. The local Jacobian
+    column is R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)); the
+    resulting body shift is applied to this mobilizer's body and propagated to
+    every descendant body, with zero for every other body in the system.
+
+    @param[in]  state    Realized through Stage::Position.
+    @param[in]  dLength  Perturbation of the beam length L.
+    @param[out] dp_GB    Per-body shift in Ground, indexed by
+                         MobilizedBodyIndex. Resized to the system's body
+                         count and zeroed before accumulation. **/
+    void multiplyByPositionJacobianWrtLength(const State& state,
+                                             Real dLength,
+                                             Vector_<Vec3>& dp_GB) const;
+
+    /** Compute dLength = ~J_L(state) * dp_GB. Sums dp_GB over this body and
+    all descendants, then projects onto the local Jacobian column.
+
+    @param[in]  state  Realized through Stage::Position.
+    @param[in]  dp_GB  Per-body perturbation-like vector, indexed by
+                       MobilizedBodyIndex.
+    @return            dot(R_GF * J_L_local, subtree-sum of dp_GB). **/
+    Real multiplyByPositionJacobianWrtLengthTranspose(
+            const State& state,
+            const Vector_<Vec3>& dp_GB) const;
+
     /** Provide a default orientation for this mobilizer if you don't want to
     start with the identity rotation (that is, alignment of the F and M
     frames). This is the orientation the mobilizer will have in the default

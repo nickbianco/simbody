@@ -300,6 +300,19 @@ public:
         const SBTreePositionCache& pc = getMyMatterSubsystemRep().getTreePositionCache(s);
         return getMyRigidBodyNode().getX_FM(pc);
     }
+
+    // d(p_GB)/d(p_PF) = R_GP. Reads only the position cache.
+    Mat33 calcPositionJacobianWrtInboardFramePosition(const State& s) const {
+        const SBTreePositionCache& pc =
+            getMyMatterSubsystemRep().getTreePositionCache(s);
+        return getMyRigidBodyNode().getX_GP(pc).R().asMat33();
+    }
+    // d(p_GB)/d(p_BM) = -R_GB, since X_MB.p = -R_MB * p_BM and R_GM * R_MB = R_GB.
+    Mat33 calcPositionJacobianWrtOutboardFramePosition(const State& s) const {
+        const SBTreePositionCache& pc =
+            getMyMatterSubsystemRep().getTreePositionCache(s);
+        return -getMyRigidBodyNode().getX_GB(pc).R().asMat33();
+    }
     const SpatialVec& getMobilizerVelocity(const State& s) const {
         const SBTreeVelocityCache& vc = getMyMatterSubsystemRep().getTreeVelocityCache(s);
         return getMyRigidBodyNode().getV_FM(vc);
@@ -864,6 +877,21 @@ public:
                 radiiIndex)).get();
     }
 
+    // d(p_GB)/d(r) = R_GF * diag(n), where n = R_FM.col(2) is the M-frame
+    // z-axis expressed in F (the ellipsoid surface normal at the current q).
+    // p_FM = (r[0]*n[0], r[1]*n[1], r[2]*n[2]), so the F-frame Jacobian
+    // is diag(n); rotating to Ground gives the columns of R_GF scaled by n.
+    Mat33 calcPositionJacobianWrtRadii(const State& s) const {
+        const SBTreePositionCache& pc =
+            getMyMatterSubsystemRep().getTreePositionCache(s);
+        const RigidBodyNode& node = getMyRigidBodyNode();
+        const Rotation R_GF = node.getX_GP(pc).R() * node.getX_PF(pc).R();
+        const Vec3 n = node.getX_FM(pc).R().col(2);
+        return Mat33(R_GF.col(0) * n[0],
+                     R_GF.col(1) * n[1],
+                     R_GF.col(2) * n[2]);
+    }
+
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
@@ -1097,6 +1125,22 @@ public:
             s.getDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
                 lengthIndex)).get();
+    }
+
+    // d(p_GB)/d(L) = R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)).
+    // Derives from p_FM = (q1*(2/3)L, -q0*(2/3)L, L - (4/15)L(q0^2 + q1^2))
+    // by holding q fixed and differentiating wrt L.
+    Vec3 calcPositionJacobianWrtLength(const State& s) const {
+        const SBTreePositionCache& pc =
+            getMyMatterSubsystemRep().getTreePositionCache(s);
+        const RigidBodyNode& node = getMyRigidBodyNode();
+        const Rotation R_GF = node.getX_GP(pc).R() * node.getX_PF(pc).R();
+        const Vec3& q = Vec3::getAs(&s.getQ()[node.getQIndex()]);
+        const Real q0 = q[0], q1 = q[1];
+        const Vec3 dpFM_dL((2.0/3.0)*q1,
+                           -(2.0/3.0)*q0,
+                           1.0 - (4.0/15.0)*(q0*q0 + q1*q1));
+        return R_GF * dpFM_dL;
     }
 
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
@@ -1640,6 +1684,36 @@ public:
         Value<Vec3>::updDowncast(
             s.updDiscreteVariable(subsystem, translationScaleIndex)).upd() =
                 tScale;
+    }
+
+    // d(p_GB)/d(tScale) = R_GF * Atrans * diag(sc[3], sc[4], sc[5]), where
+    // sc[3..5] are the three translation function outputs evaluated at the
+    // current q. Reuses the same q-to-function-output mapping that
+    // calcMobilizerTransformFromQ uses for p_FM.
+    Mat33 calcPositionJacobianWrtTranslationScale(const State& s) const {
+        const SBTreePositionCache& pc = getImpl().getCustomImpl()
+                        .getMyMatterSubsystemRep().getTreePositionCache(s);
+        const RigidBodyNode& node = getImpl().getCustomImpl().getMyRigidBodyNode();
+        const Rotation R_GF = node.getX_GP(pc).R() * node.getX_PF(pc).R();
+
+        // Evaluate the three translation functions at the current q.
+        Vector q = getQ(s);
+        Vec3 sc;
+        for (int i = 0; i < 3; ++i) {
+            const int fIdx = i + 3;
+            const int nc = coordIndices[fIdx].size();
+            Vector fcoords(nc);
+            for (int j = 0; j < nc; ++j)
+                fcoords[j] = q[coordIndices[fIdx][j]];
+            sc[i] = functions[fIdx]->calcValue(fcoords);
+        }
+
+        // p_FM = Σi tScale[i] * sc[i] * Atrans.col(i).
+        // d(p_FM)/d(tScale[i]) = sc[i] * Atrans.col(i).
+        // So d(p_FM)/d(tScale) = Atrans * diag(sc), and in Ground:
+        return Mat33(R_GF * (sc[0] * UnitVec3::getAs(&Atrans(0,0))),
+                     R_GF * (sc[1] * UnitVec3::getAs(&Atrans(0,1))),
+                     R_GF * (sc[2] * UnitVec3::getAs(&Atrans(0,2))));
     }
 
     void realizePosition(const State& s) const override {

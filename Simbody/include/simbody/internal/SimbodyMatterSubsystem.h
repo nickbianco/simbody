@@ -1227,6 +1227,89 @@ SpatialVec calcBiasForFrameJacobian(const State&         state,
 /**@}**/
 
 //==============================================================================
+/** @name        Jacobians wrt inboard/outboard mobilizer frame positions
+
+These two operator pairs compute the sensitivity of every body's origin
+in Ground to a small perturbation of the per-mobilizer inboard (X_PF) or
+outboard (X_BM) frame translation. Both are universal — every mobilizer
+type owns these parameters. The current X_PF and X_BM values are read
+from the State (which may already override the topology defaults via
+`MobilizedBody::setInboardFrame`/`setOutboardFrame`); the caller supplies
+only the perturbation deltas, indexed by `MobilizedBodyIndex`.
+
+Each per-mobilizer rigid-body parameter — Ellipsoid radii,
+CantileverFreeBeam length, FunctionBased translation-output scale — has
+its own forward/transpose operator pair on the corresponding derived
+`MobilizedBody` class. **/
+/**@{**/
+
+/** Compute dp_GB = J_pPF(state) * dp_PF, where J_pPF[i,k] =
+d(p_GB[i])/d(p_PF[k]) is the Ground-frame position Jacobian of every body
+origin with respect to every inboard-frame translation. Walks the tree
+base-to-tip; result for body b is its parent's result plus R_GP[b] *
+dp_PF[b].
+
+@param[in]  state  Realized through Stage::Position.
+@param[in]  dp_PF  Per-mobilizer perturbation of X_PF.p(), expressed in
+                   P-frame components. Size must equal `getNumBodies()`.
+                   The entry at index 0 (Ground) is ignored.
+@param[out] dp_GB  Resulting body-origin perturbations in Ground. Resized
+                   to `getNumBodies()` if needed; `dp_GB[0]` is always
+                   zero. **/
+void multiplyByPositionJacobianWrtInboardFramePositions(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_PF,
+        Vector_<Vec3>&                    dp_GB) const;
+
+/** Compute dp_PF = ~J_pPF(state) * dp_GB. Walks the tree tip-to-base
+accumulating subtree sums; for each mobilizer on body b, dp_PF[b] =
+~R_GP[b] * (subtree-sum at b).
+
+@param[in]  state  Realized through Stage::Position.
+@param[in]  dp_GB  Body-origin perturbation-like vector indexed by
+                   MobilizedBodyIndex; `dp_GB[0]` is ignored.
+@param[out] dp_PF  Per-mobilizer projection. Resized to `getNumBodies()`
+                   and zeroed before accumulation; the entry at index 0
+                   (Ground) remains zero. **/
+void multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_GB,
+        Vector_<Vec3>&                    dp_PF) const;
+
+/** Compute dp_GB = J_pBM(state) * dp_BM, where J_pBM[i,k] =
+d(p_GB[i])/d(p_BM[k]). Walks the tree base-to-tip; result for body b is
+its parent's result plus (-R_GB[b]) * dp_BM[b].
+
+@param[in]  state  Realized through Stage::Position.
+@param[in]  dp_BM  Per-mobilizer perturbation of X_BM.p(), expressed in
+                   B-frame components. Size must equal `getNumBodies()`.
+                   The entry at index 0 is ignored.
+@param[out] dp_GB  Resulting body-origin perturbations in Ground. Resized
+                   to `getNumBodies()` if needed; `dp_GB[0]` is always
+                   zero. **/
+void multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_BM,
+        Vector_<Vec3>&                    dp_GB) const;
+
+/** Compute dp_BM = ~J_pBM(state) * dp_GB. Walks the tree tip-to-base
+accumulating subtree sums; for each mobilizer on body b, dp_BM[b] =
+-~R_GB[b] * (subtree-sum at b).
+
+@param[in]  state  Realized through Stage::Position.
+@param[in]  dp_GB  Body-origin perturbation-like vector indexed by
+                   MobilizedBodyIndex; `dp_GB[0]` is ignored.
+@param[out] dp_BM  Per-mobilizer projection. Resized to `getNumBodies()`
+                   and zeroed before accumulation; the entry at index 0
+                   (Ground) remains zero. **/
+void multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_GB,
+        Vector_<Vec3>&                    dp_BM) const;
+
+/**@}**/
+
+//==============================================================================
 /** @name               System matrix manipulation
 The documentation for the SimbodyMatterSubsystem describes the system equations
 in matrix notion, although internal computations are generally matrix-free.

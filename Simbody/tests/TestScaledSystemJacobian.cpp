@@ -21,30 +21,15 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
-// Sanity-checks the State-parameterized mobilizer geometry against
-// constructor-baked geometry across a chain of mobilizers. Each subtest
-// builds two PendulumSystems: a "scaled" one whose mobilizer parameters
-// are baked in at construction (via XYZ body scale factors that flow into
-// X_PF translation, X_BM translation, Ellipsoid radii, FunctionBased
-// translation function slopes, and CantileverFreeBeam length) and an
-// "unscaled" one (built with unity scale factors) whose Instance-stage
-// State variables are then overridden via the new setters
-// (setInboardFrame, setOutboardFrame, setRadii, setTranslationScale,
-// setLength) to reproduce the same effective geometry. The same
-// (unscaled) Jacobian operator is then run on both systems and the
-// outputs must match — that's the contract this test is checking.
-
 #include "SimTKsimbody.h"
 
 using namespace SimTK;
 
-
 ////////////////
 // MOBILIZERS //
-///////////////
+////////////////
 
-// Scale only the translational component of a Transform; leave the rotation
-// alone. Used to fold body-scale factors into mobilizer-frame placements.
+// Scale only the translational component of a Transform.
 Transform scaleTranslation(const Transform& X, const Vec3& scales) {
     Transform result = X;
     result.updP() = X.p().elementwiseMultiply(scales);
@@ -63,31 +48,12 @@ MobilizedBody::Pin addPinMobilizer(
                               scaleTranslation(X_BM, s_B));
 }
 
-// Compute the effective per-axis scale factor on the F frame given parent
-// body scales s_P expressed in the parent frame P, projecting onto each F
-// axis via the (unscaled) rotation R_PF.
-//   s_F[i] = ||s_P ⊙ R_PF.col(i)||,  i = 0,1,2
-// This is the natural mapping from body-frame XYZ scales into F-frame
-// translation scales when X_PF.R() is non-identity.
-Vec3 scaledParentInF(const Transform& X_PF, const Vec3& s_P) {
-    Vec3 s_F;
-    for (int i = 0; i < 3; ++i) {
-        const Vec3 f_i = Vec3(X_PF.R().col(i));
-        s_F[i] = s_P.elementwiseMultiply(f_i).norm();
-    }
-    return s_F;
-}
-
-// Ellipsoid mobilizer. The unscaled radii are baked here; under scaling
-// each radius is multiplied by the projected parent scale on that F axis.
+// Ellipsoid mobilizer.
 const Vec3 ellipsoidRadii(0.1, 0.2, 0.3);
-
 MobilizedBody::Ellipsoid addEllipsoidMobilizer(
         MobilizedBody& parent,
         const Transform& X_PF, const Vec3& s_P,
         const Transform& X_BM, const Vec3& s_B) {
-    const Vec3 s_F = scaledParentInF(X_PF, s_P);
-    const Vec3 radiiScaled = ellipsoidRadii.elementwiseMultiply(s_F);
     Body::Rigid body(MassProperties(1.0, Vec3(0),
                      UnitInertia::ellipsoid(ellipsoidRadii)));
     body.addDecoration(Transform(), DecorativeSphere(0.1));
@@ -95,7 +61,7 @@ MobilizedBody::Ellipsoid addEllipsoidMobilizer(
                                     scaleTranslation(X_PF, s_P),
                                     body,
                                     scaleTranslation(X_BM, s_B),
-                                    radiiScaled);
+                                    ellipsoidRadii);
 }
 
 // Function-based mobilizer.
@@ -126,17 +92,14 @@ MobilizedBody::FunctionBased addFunctionBasedMobilizer(
         Vec3(0,    0,      1)    // translation axis 2
     };
 
-    // Rotation functions stay unit-slope; translation functions get the
-    // projected parent scale baked into their slopes. Unity scales produce
-    // unit-slope translation functions, which is what the unscaled system
-    // wants.
-    const Vec3 s_F = scaledParentInF(X_PF, s_P);
+    // All six functions use unit slope. The State-overridable
+    // translationScale is an independent mobilizer parameter and is not
+    // driven by body scales.
     std::vector<std::vector<int>> coordIndices;
     std::vector<const Function*> functions;
     for (int i = 0; i < 6; ++i) {
-        const Real slope = (i < 3) ? Real(1.0) : s_F[i-3];
         coordIndices.push_back({i});
-        functions.push_back(new LinearFunction(slope));
+        functions.push_back(new LinearFunction(1.0));
     }
     Body::Rigid body(MassProperties(1.0, Vec3(0), UnitInertia(1)));
     return MobilizedBody::FunctionBased(parent,
@@ -146,23 +109,19 @@ MobilizedBody::FunctionBased addFunctionBasedMobilizer(
                                         6, functions, coordIndices, axes);
 }
 
-// Cantilever-free beam mobilizer. The unscaled length is baked here; the
-// scaled length is folded along the F-z component of the parent scales.
+// Cantilever-free beam mobilizer. 
 const Real cantileverFreeBeamLength = 1.23;
-
 MobilizedBody::CantileverFreeBeam addCantileverFreeBeamMobilizer(
         MobilizedBody& parent,
         const Transform& X_PF, const Vec3& s_P,
         const Transform& X_BM, const Vec3& s_B) {
-    const Vec3 s_F = scaledParentInF(X_PF, s_P);
-    const Real lengthScaled = cantileverFreeBeamLength * s_F[2];
     Body::Rigid body(MassProperties(1.0, Vec3(0), UnitInertia(1)));
     return MobilizedBody::CantileverFreeBeam(
                 parent,
                 scaleTranslation(X_PF, s_P),
                 body,
                 scaleTranslation(X_BM, s_B),
-                lengthScaled);
+                cantileverFreeBeamLength);
 }
 
 /////////////////////
@@ -170,13 +129,10 @@ MobilizedBody::CantileverFreeBeam addCantileverFreeBeamMobilizer(
 /////////////////////
 
 // A chain of bodies connected by one each of Pin, Ellipsoid, FunctionBased,
-// and CantileverFreeBeam mobilizers. The constructor bakes a per-body Vec3
-// of XYZ scale factors into the mobilizer parameters. Passing unity scales
-// yields the unscaled reference geometry; passing non-trivial scales yields
-// a geometrically distinct ("scaled") system. The applyScalesToState method
-// goes the other direction: given an unscaled-baked system, it applies the
-// equivalent scale via Instance-stage State overrides so the resulting
-// kinematics match the directly-baked scaled system bit-for-bit.
+// and CantileverFreeBeam mobilizers. The constructor takes of set of per-body
+// XYZ scale factors and converts them into mobilizer parameters: the inboard 
+// and outboard frames, ellipsoid radii, beam length, and function translation
+// scales.
 class PendulumSystem {
 public:
     enum MobilizerType {Ground=0, Pin=1, Ellipsoid=2, FunctionBased=3,
@@ -212,53 +168,64 @@ public:
         }
     }
 
-    // Override each mobilizer's Instance-stage State so that an
-    // unity-scale-baked PendulumSystem reproduces the kinematics of one
-    // constructed directly with the given scales. The system must have
-    // been built with unity scales for this mapping to be correct.
-    //
-    // For every mobilizer:
-    //   X_PF.p() is scaled by the parent-body XYZ scale (s_P)
-    //   X_BM.p() is scaled by this body's XYZ scale (s_B)
-    // Mobilizer-specific:
-    //   Ellipsoid radii are scaled by the projected parent scale in F
-    //   FunctionBased translation outputs are scaled the same way
-    //   CantileverFreeBeam length is scaled by the F-z parent-scale projection
-    void applyScalesToState(State& state,
-                            const Vector_<Vec3>& scales) const {
-        // Pin: X_PF, X_BM only.
+    // Override every mobilizer's inboard and outboard frame for this State
+    // based on a set of per-body XYZ scale factors. Mobilizer-specific
+    // parameters (radii, length, translation scale) are independent of body
+    // scales and are left at their topology defaults.
+    void setParametersFromScales(State& state,
+                                 const Vector_<Vec3>& scales) const {
         m_pin.setInboardFrame(state,
             scaleTranslation(X_PF[Pin], scales[Ground]));
         m_pin.setOutboardFrame(state,
             scaleTranslation(X_BM[Pin], scales[Pin]));
 
-        // Ellipsoid: X_PF, X_BM, radii.
         m_ellipsoid.setInboardFrame(state,
             scaleTranslation(X_PF[Ellipsoid], scales[Pin]));
         m_ellipsoid.setOutboardFrame(state,
             scaleTranslation(X_BM[Ellipsoid], scales[Ellipsoid]));
-        const Vec3 s_F_ell = scaledParentInF(X_PF[Ellipsoid], scales[Pin]);
-        m_ellipsoid.setRadii(state,
-            ellipsoidRadii.elementwiseMultiply(s_F_ell));
 
-        // FunctionBased: X_PF, X_BM, translation-output scale.
         m_functionBased.setInboardFrame(state,
             scaleTranslation(X_PF[FunctionBased], scales[Ellipsoid]));
         m_functionBased.setOutboardFrame(state,
             scaleTranslation(X_BM[FunctionBased], scales[FunctionBased]));
-        m_functionBased.setTranslationScale(state,
-            scaledParentInF(X_PF[FunctionBased], scales[Ellipsoid]));
 
-        // CantileverFreeBeam: X_PF, X_BM, length.
         m_cantileverFreeBeam.setInboardFrame(state,
             scaleTranslation(X_PF[CantileverFreeBeam], scales[FunctionBased]));
         m_cantileverFreeBeam.setOutboardFrame(state,
             scaleTranslation(X_BM[CantileverFreeBeam],
                              scales[CantileverFreeBeam]));
-        const Vec3 s_F_cfb =
-            scaledParentInF(X_PF[CantileverFreeBeam], scales[FunctionBased]);
-        m_cantileverFreeBeam.setLength(state,
-            cantileverFreeBeamLength * s_F_cfb[2]);
+    }
+
+    // Linearize the inboard- and outboard-frame mobilizer parameters wrt a
+    // body-scale perturbation `delta` around unity scales. Returns
+    // d(param)/d(s) * delta. Mobilizer-specific parameters (radii, length,
+    // translation scale) are independent of body scales and are not produced
+    // by this method.
+    //   X_PF.p()[i] = X_PF_default.p()[i] * s[parent][i]
+    //   X_BM.p()[i] = X_BM_default.p()[i] * s[this  ][i]
+    void calcParameterDeltasFromBodyScaleDeltas(
+            const State& state,
+            const Vector_<Vec3>& delta,
+            Vector_<Vec3>& dp_PF, Vector_<Vec3>& dp_BM) const {
+        const int nb = m_matter.getNumBodies();
+        dp_PF.resize(nb); dp_PF = Vec3(0);
+        dp_BM.resize(nb); dp_BM = Vec3(0);
+
+        const MobilizedBody mobs[4] = { m_pin, m_ellipsoid,
+                                        m_functionBased,
+                                        m_cantileverFreeBeam };
+        for (int m = 0; m < 4; ++m) {
+            const int parentIdx = (int)mobs[m].getParentMobilizedBody()
+                                              .getMobilizedBodyIndex();
+            const int thisIdx   = (int)mobs[m].getMobilizedBodyIndex();
+            const Transform X_PF_state = mobs[m].getInboardFrame(state);
+            const Transform X_BM_state = mobs[m].getOutboardFrame(state);
+
+            for (int i = 0; i < 3; ++i)
+                dp_PF[thisIdx][i] = X_PF_state.p()[i] * delta[parentIdx][i];
+            for (int i = 0; i < 3; ++i)
+                dp_BM[thisIdx][i] = X_BM_state.p()[i] * delta[thisIdx][i];
+        }
     }
 
     MultibodySystem        m_system;
@@ -266,8 +233,6 @@ public:
     GeneralForceSubsystem  m_forces;
     Force::Gravity         m_gravity;
 
-    // Typed mobilizer handles so applyScalesToState can reach the
-    // mobilizer-specific setters.
     MobilizedBody::Pin                m_pin;
     MobilizedBody::Ellipsoid          m_ellipsoid;
     MobilizedBody::FunctionBased      m_functionBased;
@@ -312,6 +277,10 @@ private:
                   Vec3(-0.16, 0.17, -0.18))};
 };
 
+/////////////
+// HELPERS //
+/////////////
+
 Vector_<Vec3> getScales() {
     Vector_<Vec3> scales(5);
     scales[PendulumSystem::Ground]             = Vec3(1.0);
@@ -327,9 +296,6 @@ Vector_<Vec3> getUnityScales() {
     return scales;
 }
 
-// Build the unscaled and scaled PendulumSystems and bring them to the same
-// effective geometry — the unscaled one via applyScalesToState, the scaled
-// one via constructor-baked scales. Used by every subtest below.
 struct ScaledFixture {
     Vector_<Vec3> scales = getScales();
     PendulumSystem unscaledSystem{getUnityScales()};
@@ -340,7 +306,7 @@ struct ScaledFixture {
     ScaledFixture() {
         unscaledState = unscaledSystem.m_system.realizeTopology();
         unscaledSystem.loadDefaultState(unscaledState);
-        unscaledSystem.applyScalesToState(unscaledState, scales);
+        unscaledSystem.setParametersFromScales(unscaledState, scales);
         unscaledSystem.m_system.realize(unscaledState, Stage::Position);
 
         scaledState = scaledSystem.m_system.realizeTopology();
@@ -348,6 +314,10 @@ struct ScaledFixture {
         scaledSystem.m_system.realize(scaledState, Stage::Position);
     }
 };
+
+///////////
+// TESTS //
+///////////
 
 // Verify J*u for both systems matches.
 void testMultiplyByScaledSystemJacobian() {
@@ -454,356 +424,378 @@ void testMultiplyByScaledStationAndFrameJacobians() {
     }
 }
 
-// // Verify JP = d(p_GB)/d(s) via finite differences.
-// void testMultiplyByPositionJacobianWrtBodyScales() {
+void testScaledStationPosition() {
+    ScaledFixture f;
+    const int nb = f.unscaledSystem.m_matter.getNumBodies();
 
-//     // Unscaled system.
-//     Vector_<Vec3> unityScales = getUnityScales();
-//     PendulumSystem system(unityScales);
-//     State state = system.m_system.realizeTopology();
-//     system.loadDefaultState(state);
-//     system.m_system.realize(state, Stage::Position);
+    Array_<MobilizedBodyIndex> bodies;
+    Array_<Vec3> stationsInB;
+    for (int b = 1; b < nb; ++b) {
+        bodies.push_back(MobilizedBodyIndex(b));
+        stationsInB.push_back(Vec3(0.1*b, 0.2*b, 0.3*b));
+    }
+    const int nt = (int)bodies.size();
 
-//     // Compare the analytic scale Jacobian against finite differences of the
-//     // body origins in ground, which are directly affected by the scale factors.
-//     const int nb = system.m_matter.getNumBodies();
-//     const Real h = 1e-5;
-//     for (int b = 0; b < nb; ++b) {
-//         for (int j = 0; j < 3; ++j) {
-//             Vector_<Vec3> s(nb, Vec3(0));
-//             s[b][j] = 1.0;
+    for (int task = 0; task < nt; ++task) {
+        const MobilizedBodyIndex mobodx = bodies[task];
+        const Vec3& p_BS = stationsInB[task];
 
-//             // Analytic position Jacobian.
-//             Vector_<Vec3> JPs_analytic;
-//             system.m_matter.multiplyByPositionJacobianWrtBodyScales(
-//                 state, s, JPs_analytic);
+        const Transform& X_unscaled =
+            f.unscaledSystem.m_matter.getMobilizedBody(mobodx)
+                            .getBodyTransform(f.unscaledState);
+        const Vec3 p_GS_unscaled = X_unscaled.p() + X_unscaled.R() * p_BS;
 
-//             // Scale Jacobian via finite differences.
-//             Vector_<Vec3> scales_pert = unityScales;
-//             scales_pert[b][j] += h;
-//             PendulumSystem pertSystem(scales_pert);
-//             State pertState = pertSystem.m_system.realizeTopology();
-//             pertSystem.loadDefaultState(pertState);
-//             pertSystem.m_system.realize(pertState, Stage::Position);
+        const Transform& X_scaled =
+            f.scaledSystem.m_matter.getMobilizedBody(mobodx)
+                          .getBodyTransform(f.scaledState);
+        const Vec3 p_GS_scaled = X_scaled.p() + X_scaled.R() * p_BS;
 
-//             for (int ib = 0; ib < nb; ++ib) {
-//                 const Vec3 p0 = system.m_matter.getMobilizedBody(
-//                         MobilizedBodyIndex(ib)).getBodyTransform(state).p();
-//                 const Vec3 p_pert = pertSystem.m_matter.getMobilizedBody(
-//                         MobilizedBodyIndex(ib)).getBodyTransform(pertState).p();
-//                 SimTK_TEST_EQ_TOL(JPs_analytic[ib], (p_pert - p0) / h, 1e-4);
-//             }
-//         }
-//     }
-// }
+        SimTK_TEST_EQ_TOL(p_GS_unscaled, p_GS_scaled, 1e-10);
+    }
+}
 
-// // Verify ds = ~JP*dp via finite differences: build JP explicitly column by
-// // column, then compute ~JP*dp as a matrix-vector product and compare against
-// // multiplyByPositionJacobianWrtBodyScalesTranspose.
-// void testMultiplyByPositionJacobianWrtBodyScalesTranspose() {
+// Forward inboard-frame: compare operator output against finite differences
+// applied via setInboardFrame on every mobilizer simultaneously.
+void testMultiplyByPositionJacobianWrtInboardFramePositions() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//     // Unscaled system.
-//     Vector_<Vec3> unityScales = getUnityScales();
-//     PendulumSystem system(unityScales);
-//     State state = system.m_system.realizeTopology();
-//     system.loadDefaultState(state);
-//     system.m_system.realize(state, Stage::Position);
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+    const Real tol = 1e-4;
 
-//     const int nb = system.m_matter.getNumBodies();
-//     const Real h = 1e-5;
+    Vector_<Vec3> delta(nb);
+    for (int b = 0; b < nb; ++b) {
+        delta[b] = Vec3(0.5*(b+1), -0.3*(b+1), 0.7*(b+1));
+    }
 
-//     // Unperturbed body-origin positions in ground.
-//     Vector_<Vec3> p_B_0(nb);
-//     for (int b = 0; b < nb; ++b) {
-//         p_B_0[b] = system.m_matter.getMobilizedBody(
-//                 MobilizedBodyIndex(b)).getBodyTransform(state).p();
-//     }
+    Vector_<Vec3> dp_PF, dp_BM;
+    sys.calcParameterDeltasFromBodyScaleDeltas(state, delta, dp_PF, dp_BM);
 
-//     // Build JP via finite differences.
-//     Matrix K(3*nb, 3*nb, 0.0);
-//     for (int jb = 0; jb < nb; ++jb) {
-//         for (int js = 0; js < 3; ++js) {
+    Vector_<Vec3> dp_GB_analytic;
+    sys.m_matter.multiplyByPositionJacobianWrtInboardFramePositions(
+            state, dp_PF, dp_GB_analytic);
 
-//             // For this body and scale factor, perturb the system.
-//             Vector_<Vec3> perturbScales = unityScales;
-//             perturbScales[jb][js] += h;
-//             PendulumSystem perturbSystem(perturbScales);
-//             State pertState = perturbSystem.m_system.realizeTopology();
-//             perturbSystem.loadDefaultState(pertState);
-//             perturbSystem.m_system.realize(pertState, Stage::Position);
+    State pert = state;
+    MobilizedBody mobs[4] = { sys.m_pin, sys.m_ellipsoid,
+                              sys.m_functionBased, sys.m_cantileverFreeBeam };
+    for (int m = 0; m < 4; ++m) {
+        const MobilizedBodyIndex bIdx = mobs[m].getMobilizedBodyIndex();
+        Transform X_PF = mobs[m].getInboardFrame(pert);
+        X_PF.updP() += h * dp_PF[bIdx];
+        mobs[m].setInboardFrame(pert, X_PF);
+    }
+    sys.m_system.realize(pert, Stage::Position);
 
-//             // Compute the perturbed body origin positions in ground and fill in
-//             // the appropriate entries of JP.
-//             for (int ib = 0; ib < nb; ++ib) {
-//                 const Vec3 p_B_pert = perturbSystem.m_matter.getMobilizedBody(
-//                         MobilizedBodyIndex(ib)).getBodyTransform(pertState).p();
-//                 for (int is = 0; is < 3; ++is) {
-//                     K[ib*3 + is][jb*3 + js] =
-//                         (p_B_pert[is] - p_B_0[ib][is]) / h;
-//                 }
-//             }
-//         }
-//     }
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB_analytic[ib], (p1 - p0) / h, tol);
+    }
+}
 
-//     // Input vector dp.
-//     Vector_<Vec3> dp(nb);
-//     for (int b = 0; b < nb; ++b) {
-//         dp[b] = Vec3(0.1*(b+1), -0.2*(b+1), 0.3*(b+1));
-//     }
+// Transpose inboard-frame: verify <dp_GB, J * dp_PF> = <dp_PF, ~J * dp_GB>.
+void testMultiplyByPositionJacobianWrtInboardFramePositionsTranspose() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//     // Flattened dp.
-//     Vector dp_flat(3*nb);
-//     for (int b = 0; b < nb; ++b) {
-//         for (int i = 0; i < 3; ++i) {
-//             dp_flat[b*3 + i] = dp[b][i];
-//         }
-//     }
+    const int nb = sys.m_matter.getNumBodies();
 
-//     // Compute ~JP * dp via the explicit finite-difference matrix.
-//     const Vector JPtp_fd = ~K * dp_flat;
+    Vector_<Vec3> dp_PF(nb), dp_GB_in(nb);
+    for (int b = 0; b < nb; ++b) {
+        dp_PF[b]    = Vec3( 0.1*(b+1), -0.2*(b+1),  0.3*(b+1));
+        dp_GB_in[b] = Vec3(-0.5*(b+1),  0.7*(b+1), -0.9*(b+1));
+    }
+    dp_PF[0] = Vec3(0);  dp_GB_in[0] = Vec3(0);
 
-//     // Compute ~JP * dp via the analytic operator.
-//     Vector_<Vec3> JPtp_analytic;
-//     system.m_matter.multiplyByPositionJacobianWrtBodyScalesTranspose(
-//         state, dp, JPtp_analytic);
+    Vector_<Vec3> J_dp_PF, JT_dp_GB;
+    sys.m_matter.multiplyByPositionJacobianWrtInboardFramePositions(
+            state, dp_PF, J_dp_PF);
+    sys.m_matter.multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+            state, dp_GB_in, JT_dp_GB);
 
-//     // Compare.
-//     for (int b = 0; b < nb; ++b) {
-//         for (int i = 0; i < 3; ++i) {
-//             SimTK_TEST_EQ_TOL(JPtp_analytic[b][i], JPtp_fd[b*3 + i], 1e-4);
-//         }
-//     }
-// }
+    Real lhs = 0, rhs = 0;
+    for (int b = 0; b < nb; ++b) {
+        lhs += dot(dp_GB_in[b], J_dp_PF[b]);
+        rhs += dot(dp_PF[b],    JT_dp_GB[b]);
+    }
+    SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
+}
 
-// // Verify SimbodyMatterSubsystem::multiplyByStationJacobianWrtBodyScales via
-// // finite differences.
-// void testMultiplyByStationJacobianWrtBodyScales() {
+// Forward outboard-frame.
+void testMultiplyByPositionJacobianWrtOutboardFramePositions() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//     // Unscaled system.
-//     Vector_<Vec3> unityScales = getUnityScales();
-//     PendulumSystem system(unityScales);
-//     State state = system.m_system.realizeTopology();
-//     system.loadDefaultState(state);
-//     system.m_system.realize(state, Stage::Position);
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+    const Real tol = 1e-4;
 
-//     const int nb = system.m_matter.getNumBodies();
-//     const Real h = 1e-5;
+    Vector_<Vec3> delta(nb);
+    for (int b = 0; b < nb; ++b) {
+        delta[b] = Vec3(0.5*(b+1), -0.3*(b+1), 0.7*(b+1));
+    }
 
-//     // Use a non-trivial station offset on each body.
-//     Array_<MobilizedBodyIndex> bodies;
-//     Array_<Vec3> stationsInB;
-//     for (int b = 1; b < nb; ++b) {
-//         bodies.push_back(MobilizedBodyIndex(b));
-//         stationsInB.push_back(Vec3(0.1*b, 0.2*b, 0.3*b));
-//     }
-//     const int nt = (int)bodies.size();
+    Vector_<Vec3> dp_PF, dp_BM;
+    sys.calcParameterDeltasFromBodyScaleDeltas(state, delta, dp_PF, dp_BM);
 
-//     // Compare the analytic station Jacobian against finite differences of the
-//     // body origins in ground, which are directly affected by the scale factors.
-//     for (int b = 0; b < nb; ++b) {
-//         for (int j = 0; j < 3; ++j) {
-//             Vector_<Vec3> s(nb, Vec3(0));
-//             s[b][j] = 1.0;
+    Vector_<Vec3> dp_GB_analytic;
+    sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositions(
+            state, dp_BM, dp_GB_analytic);
 
-//             // Analytic station Jacobian.
-//             Vector_<Vec3> JSs;
-//             system.m_matter.multiplyByStationJacobianWrtBodyScales(
-//                     state, bodies, stationsInB, s, JSs);
+    State pert = state;
+    MobilizedBody mobs[4] = { sys.m_pin, sys.m_ellipsoid,
+                              sys.m_functionBased, sys.m_cantileverFreeBeam };
+    for (int m = 0; m < 4; ++m) {
+        const MobilizedBodyIndex bIdx = mobs[m].getMobilizedBodyIndex();
+        Transform X_BM = mobs[m].getOutboardFrame(pert);
+        X_BM.updP() += h * dp_BM[bIdx];
+        mobs[m].setOutboardFrame(pert, X_BM);
+    }
+    sys.m_system.realize(pert, Stage::Position);
 
-//             // Create a new system perturbed in the scale factor for this body
-//             // and compute the perturbed
-//             Vector_<Vec3> perturbScales = unityScales;
-//             perturbScales[b][j] += h;
-//             PendulumSystem perturbSystem(perturbScales);
-//             State perturbState = perturbSystem.m_system.realizeTopology();
-//             perturbSystem.loadDefaultState(perturbState);
-//             perturbSystem.m_system.realize(perturbState, Stage::Position);
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB_analytic[ib], (p1 - p0) / h, tol);
+    }
+}
 
-//             // For each station task, compute the perturbed station position in
-//             // ground and finite-difference Jacobian and compare against the
-//             // analytic Jacobian.
-//             for (int task = 0; task < nt; ++task) {
-//                 const MobilizedBodyIndex mobodx = bodies[task];
-//                 const Vec3& p_BS = stationsInB[task];
+// Transpose outboard-frame.
+void testMultiplyByPositionJacobianWrtOutboardFramePositionsTranspose() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//                 // Unscaled station in ground: p_GB + R_GB * (p_BS ⊙ s0)
-//                 const Transform& X0 = system.m_matter.getMobilizedBody(mobodx)
-//                                                      .getBodyTransform(state);
-//                 const Vec3 p_GS0 = X0.p() + X0.R() * p_BS;
+    const int nb = sys.m_matter.getNumBodies();
 
-//                 // Perturbed station in ground:
-//                 // p_GB_pert + R_GB * (p_BS ⊙ s_pert)
-//                 const Transform& Xp =
-//                     perturbSystem.m_matter.getMobilizedBody(mobodx)
-//                                           .getBodyTransform(perturbState);
-//                 const Vec3 p_GS_pert = Xp.p() +
-//                     Xp.R() * p_BS.elementwiseMultiply(perturbScales[mobodx]);
+    Vector_<Vec3> dp_BM(nb), dp_GB_in(nb);
+    for (int b = 0; b < nb; ++b) {
+        dp_BM[b]    = Vec3( 0.2*(b+1), -0.4*(b+1),  0.6*(b+1));
+        dp_GB_in[b] = Vec3(-0.3*(b+1),  0.9*(b+1), -0.5*(b+1));
+    }
+    dp_BM[0] = Vec3(0);  dp_GB_in[0] = Vec3(0);
 
-//                 // Finite-difference Jacobian: (p_GS_pert - p_GS0) / h.
-//                 const Vec3 JSs_fd = (p_GS_pert - p_GS0) / h;
+    Vector_<Vec3> J_dp_BM, JT_dp_GB;
+    sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositions(
+            state, dp_BM, J_dp_BM);
+    sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+            state, dp_GB_in, JT_dp_GB);
 
-//                 // Compare against the analytic Jacobian.
-//                 SimTK_TEST_EQ_TOL(JSs[task], JSs_fd, 1e-4);
-//             }
-//         }
-//     }
-// }
+    Real lhs = 0, rhs = 0;
+    for (int b = 0; b < nb; ++b) {
+        lhs += dot(dp_GB_in[b], J_dp_BM[b]);
+        rhs += dot(dp_BM[b],    JT_dp_GB[b]);
+    }
+    SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
+}
 
+// Forward Ellipsoid radii.
+void testMultiplyByPositionJacobianWrtRadii() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-// // Verify JStp = ~JS*p_GS via finite differences: build JS explicitly column
-// // by column, then compute ~JS*p_GS as a matrix-vector product and compare
-// // against multiplyByStationJacobianWrtBodyScalesTranspose.
-// void testMultiplyByStationJacobianWrtBodyScalesTranspose() {
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+    const Real tol = 1e-4;
 
-//     // Unscaled system.
-//     Vector_<Vec3> unityScales = getUnityScales();
-//     PendulumSystem system(unityScales);
-//     State state = system.m_system.realizeTopology();
-//     system.loadDefaultState(state);
-//     system.m_system.realize(state, Stage::Position);
+    const Vec3 dr(0.13, -0.21, 0.34);
 
-//     const int nb = system.m_matter.getNumBodies();
-//     const Real h = 1e-5;
+    Vector_<Vec3> dp_GB_analytic;
+    sys.m_ellipsoid.multiplyByPositionJacobianWrtRadii(
+            state, dr, dp_GB_analytic);
 
-//     // Use a non-trivial station offset on each non-ground body.
-//     Array_<MobilizedBodyIndex> bodies;
-//     Array_<Vec3> stationsInB;
-//     for (int b = 1; b < nb; ++b) {
-//         bodies.push_back(MobilizedBodyIndex(b));
-//         stationsInB.push_back(Vec3(0.1*b, 0.2*b, 0.3*b));
-//     }
-//     const int nt = (int)bodies.size();
+    State pert = state;
+    sys.m_ellipsoid.setRadii(pert, sys.m_ellipsoid.getRadii(pert) + h * dr);
+    sys.m_system.realize(pert, Stage::Position);
 
-//     // Unperturbed station positions in ground.
-//     Vector_<Vec3> p_GS0(nt);
-//     for (int task = 0; task < nt; ++task) {
-//         const MobilizedBodyIndex mobodx = bodies[task];
-//         const Vec3& p_BS = stationsInB[task];
-//         const Transform& X0 = system.m_matter.getMobilizedBody(mobodx)
-//                                              .getBodyTransform(state);
-//         p_GS0[task] = X0.p() + X0.R() * p_BS;
-//     }
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB_analytic[ib], (p1 - p0) / h, tol);
+    }
+}
 
-//     // Build JS via finite differences. JS is (nt*3) x (nb*3): rows are
-//     // station position components, columns are scale factor components.
-//     Matrix KS(3*nt, 3*nb, 0.0);
-//     for (int jb = 0; jb < nb; ++jb) {
-//         for (int js = 0; js < 3; ++js) {
-//             Vector_<Vec3> perturbScales = unityScales;
-//             perturbScales[jb][js] += h;
-//             PendulumSystem perturbSystem(perturbScales);
-//             State perturbState = perturbSystem.m_system.realizeTopology();
-//             perturbSystem.loadDefaultState(perturbState);
-//             perturbSystem.m_system.realize(perturbState, Stage::Position);
+// Transpose Ellipsoid radii.
+void testMultiplyByPositionJacobianWrtRadiiTranspose() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//             for (int task = 0; task < nt; ++task) {
-//                 const MobilizedBodyIndex mobodx = bodies[task];
-//                 const Vec3& p_BS = stationsInB[task];
-//                 const Transform& Xp = perturbSystem.m_matter
-//                     .getMobilizedBody(mobodx).getBodyTransform(perturbState);
-//                 // Include the contribution from the station offset, which also
-//                 // scales with the body.
-//                 const Vec3 p_GS_pert = Xp.p() +
-//                     Xp.R() * p_BS.elementwiseMultiply(perturbScales[mobodx]);
-//                 for (int is = 0; is < 3; ++is) {
-//                     KS[task*3 + is][jb*3 + js] =
-//                         (p_GS_pert[is] - p_GS0[task][is]) / h;
-//                 }
-//             }
-//         }
-//     }
+    const int nb = sys.m_matter.getNumBodies();
 
-//     // Input station force vector p_GS.
-//     Vector_<Vec3> p_GS(nt);
-//     for (int task = 0; task < nt; ++task) {
-//         p_GS[task] = Vec3(0.1*(task+1), -0.2*(task+1), 0.3*(task+1));
-//     }
+    const Vec3 dr(0.13, -0.21, 0.34);
+    Vector_<Vec3> dp_GB_in(nb);
+    for (int b = 0; b < nb; ++b)
+        dp_GB_in[b] = Vec3(0.1*(b+1), -0.3*(b+1), 0.5*(b+1));
+    dp_GB_in[0] = Vec3(0);
 
-//     // Flattened p_GS for the matrix-vector product.
-//     Vector dp_flat(3*nt);
-//     for (int task = 0; task < nt; ++task) {
-//         for (int i = 0; i < 3; ++i) {
-//             dp_flat[task*3 + i] = p_GS[task][i];
-//         }
-//     }
+    Vector_<Vec3> J_dr;
+    sys.m_ellipsoid.multiplyByPositionJacobianWrtRadii(state, dr, J_dr);
+    const Vec3 JT_dp_GB =
+        sys.m_ellipsoid.multiplyByPositionJacobianWrtRadiiTranspose(
+                state, dp_GB_in);
 
-//     // Compute ~KS * p_GS via the explicit finite-difference matrix.
-//     const Vector JStp_fd = ~KS * dp_flat;
+    Real lhs = 0;
+    for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dr[b]);
+    const Real rhs = dot(dr, JT_dp_GB);
+    SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
+}
 
-//     // Compute ~KS * p_GS via the analytic operator.
-//     Vector_<Vec3> JStp_analytic;
-//     system.m_matter.multiplyByStationJacobianWrtBodyScalesTranspose(
-//             state, bodies, stationsInB, p_GS, JStp_analytic);
+// Forward CantileverFreeBeam length.
+void testMultiplyByPositionJacobianWrtLength() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//     // Compare.
-//     for (int b = 0; b < nb; ++b) {
-//         for (int i = 0; i < 3; ++i) {
-//             SimTK_TEST_EQ_TOL(JStp_analytic[b][i], JStp_fd[b*3 + i], 1e-4);
-//         }
-//     }
-// }
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+    const Real tol = 1e-4;
 
-// // Verify calcScaledStationPosition against a directly-built scaled system.
-// // The unscaled state is realized at s=1; applying bodyScales via the Jacobian
-// // should match the station positions obtained by building
-// // PendulumSystem(bodyScales).
-// void testScaledStationPosition() {
+    const Real dL = 0.42;
 
-//     // Unscaled system.
-//     Vector_<Vec3> unityScales = getUnityScales();
-//     PendulumSystem system(unityScales);
-//     State state = system.m_system.realizeTopology();
-//     system.loadDefaultState(state);
-//     system.m_system.realize(state, Stage::Position);
-//     const int nb = system.m_matter.getNumBodies();
+    Vector_<Vec3> dp_GB_analytic;
+    sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLength(
+            state, dL, dp_GB_analytic);
 
-//     // Use a non-trivial station offset on each body.
-//     Array_<MobilizedBodyIndex> bodies;
-//     Array_<Vec3> stationsInB;
-//     for (int b = 1; b < nb; ++b) {
-//         bodies.push_back(MobilizedBodyIndex(b));
-//         stationsInB.push_back(Vec3(0.1*b, 0.2*b, 0.3*b));
-//     }
-//     const int nt = (int)bodies.size();
+    State pert = state;
+    sys.m_cantileverFreeBeam.setLength(pert,
+            sys.m_cantileverFreeBeam.getLength(pert) + h * dL);
+    sys.m_system.realize(pert, Stage::Position);
 
-//     // Non-trivial scale factors.
-//     Vector_<Vec3> bodyScales = getScales();
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB_analytic[ib], (p1 - p0) / h, tol);
+    }
+}
 
-//     // Calculate the scaled station positions in ground using the operator with
-//     // the unscaled system.
-//     Vector_<Vec3> p_GS;
-//     system.m_matter.calcScaledStationPosition(
-//             state, bodyScales, bodies, stationsInB, p_GS);
+// Transpose CantileverFreeBeam length.
+void testMultiplyByPositionJacobianWrtLengthTranspose() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
 
-//     // Build a new system with the scale factors already applied.
-//     PendulumSystem scaledSystem(bodyScales);
-//     State scaledState = scaledSystem.m_system.realizeTopology();
-//     scaledSystem.loadDefaultState(scaledState);
-//     scaledSystem.m_system.realize(scaledState, Stage::Position);
+    const int nb = sys.m_matter.getNumBodies();
 
-//     // Check that the station positions in the scaled system match the result
-//     // from calcScaledStationPosition on the unscaled system.
-//     for (int task = 0; task < nt; ++task) {
-//         const MobilizedBodyIndex mobodx = bodies[task];
-//         const Vec3& p_BS = stationsInB[task];
-//         const Transform& X = scaledSystem.m_matter.getMobilizedBody(
-//                 mobodx).getBodyTransform(scaledState);
-//         // In the scaled system the station offset also scales with the body.
-//         const Vec3 p_GS_ref = X.p() +
-//             X.R() * p_BS.elementwiseMultiply(bodyScales[mobodx]);
-//         SimTK_TEST_EQ_TOL(p_GS[task], p_GS_ref, 1e-10);
-//     }
-// }
+    const Real dL = 0.42;
+    Vector_<Vec3> dp_GB_in(nb);
+    for (int b = 0; b < nb; ++b)
+        dp_GB_in[b] = Vec3(0.2*(b+1), -0.1*(b+1), 0.4*(b+1));
+    dp_GB_in[0] = Vec3(0);
+
+    Vector_<Vec3> J_dL;
+    sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLength(
+            state, dL, J_dL);
+    const Real JT_dp_GB =
+        sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLengthTranspose(
+                state, dp_GB_in);
+
+    Real lhs = 0;
+    for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dL[b]);
+    const Real rhs = dL * JT_dp_GB;
+    SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
+}
+
+// Forward FunctionBased translation scale.
+void testMultiplyByPositionJacobianWrtTranslationScale() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+    const Real tol = 1e-4;
+
+    const Vec3 dt(0.17, -0.29, 0.41);
+
+    Vector_<Vec3> dp_GB_analytic;
+    sys.m_functionBased.multiplyByPositionJacobianWrtTranslationScale(
+            state, dt, dp_GB_analytic);
+
+    State pert = state;
+    sys.m_functionBased.setTranslationScale(pert,
+            sys.m_functionBased.getTranslationScale(pert) + h * dt);
+    sys.m_system.realize(pert, Stage::Position);
+
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB_analytic[ib], (p1 - p0) / h, tol);
+    }
+}
+
+// Transpose FunctionBased translation scale.
+void testMultiplyByPositionJacobianWrtTranslationScaleTranspose() {
+    PendulumSystem sys(getUnityScales());
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+
+    const Vec3 dt(0.17, -0.29, 0.41);
+    Vector_<Vec3> dp_GB_in(nb);
+    for (int b = 0; b < nb; ++b)
+        dp_GB_in[b] = Vec3(-0.2*(b+1), 0.5*(b+1), -0.4*(b+1));
+    dp_GB_in[0] = Vec3(0);
+
+    Vector_<Vec3> J_dt;
+    sys.m_functionBased.multiplyByPositionJacobianWrtTranslationScale(
+            state, dt, J_dt);
+    const Vec3 JT_dp_GB =
+        sys.m_functionBased
+           .multiplyByPositionJacobianWrtTranslationScaleTranspose(state,
+                                                                   dp_GB_in);
+
+    Real lhs = 0;
+    for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dt[b]);
+    const Real rhs = dot(dt, JT_dp_GB);
+    SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
+}
+
 
 int main() {
     SimTK_START_TEST("TestScaledSystemJacobian");
         SimTK_SUBTEST(testMultiplyByScaledSystemJacobian);
         SimTK_SUBTEST(testMultiplyByScaledSystemJacobianTranspose);
         SimTK_SUBTEST(testMultiplyByScaledStationAndFrameJacobians);
-        // SimTK_SUBTEST(testMultiplyByPositionJacobianWrtBodyScales);
-        // SimTK_SUBTEST(testMultiplyByPositionJacobianWrtBodyScalesTranspose);
-        // SimTK_SUBTEST(testMultiplyByStationJacobianWrtBodyScales);
-        // SimTK_SUBTEST(testMultiplyByStationJacobianWrtBodyScalesTranspose);
-        // SimTK_SUBTEST(testScaledStationPosition);
+        SimTK_SUBTEST(testScaledStationPosition);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtInboardFramePositions);
+        SimTK_SUBTEST(
+            testMultiplyByPositionJacobianWrtInboardFramePositionsTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtOutboardFramePositions);
+        SimTK_SUBTEST(
+            testMultiplyByPositionJacobianWrtOutboardFramePositionsTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadii);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadiiTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtLength);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtLengthTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtTranslationScale);
+        SimTK_SUBTEST(
+            testMultiplyByPositionJacobianWrtTranslationScaleTranspose);
     SimTK_END_TEST();
 }

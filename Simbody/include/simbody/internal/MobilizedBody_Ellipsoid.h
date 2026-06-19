@@ -99,6 +99,32 @@ public:
     @see setRadii(), getDefaultRadii() **/
     const Vec3& getRadii(const State& state) const;
 
+    /** Compute dp_GB = J_r(state) * dRadii, where J_r[i] =
+    d(p_GB[i])/d(radii) for this Ellipsoid mobilizer. The local Jacobian column
+    is R_GF * diag(R_FM.col(2)); the resulting body shift is applied to this
+    mobilizer's body and propagated through R_GP * R_PB chains to every
+    descendant body, with zero for every other body in the system.
+
+    @param[in]  state   Realized through Stage::Position.
+    @param[in]  dRadii  Perturbation of the three semi-axis radii.
+    @param[out] dp_GB   Per-body shift in Ground, indexed by
+                        MobilizedBodyIndex. Resized to the system's body count
+                        and zeroed before accumulation. **/
+    void multiplyByPositionJacobianWrtRadii(const State& state,
+                                            const Vec3& dRadii,
+                                            Vector_<Vec3>& dp_GB) const;
+
+    /** Compute dRadii = ~J_r(state) * dp_GB. Sums dp_GB over this body and
+    all descendants, then projects onto the local Jacobian column.
+
+    @param[in]  state  Realized through Stage::Position.
+    @param[in]  dp_GB  Per-body perturbation-like vector, indexed by
+                       MobilizedBodyIndex.
+    @return            ~(R_GF * diag(R_FM.col(2))) * (subtree-sum of dp_GB). **/
+    Vec3 multiplyByPositionJacobianWrtRadiiTranspose(
+            const State& state,
+            const Vector_<Vec3>& dp_GB) const;
+
 
     /** Provide a default orientation for this mobilizer if you don't want to
     start with the identity rotation (that is, alignment of the F and M 
