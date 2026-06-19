@@ -157,40 +157,6 @@ such that a point P whose location is measured from F's origin Fo and expressed
 in F by position vector p_FP (or more explicitly p_FoP) is remeasured from frame
 A's origin Ao and reexpressed in A via p_AP = X_AF*p_FP, where p_AP==p_AoP.
 
-<h3>State-parameterized geometry</h3>
-
-Several mobilizer geometric properties live on the State as Instance-stage
-variables. This lets you perturb the geometry of an existing System and
-recompute kinematics (Jacobians, body positions, body velocities) on the
-modified State without rebuilding the System. The most common use is
-computing how the system Jacobian, station Jacobian, or frame Jacobian
-varies with a small change in geometry — for example, in inverse-kinematic
-calibration or in optimization over mobilizer parameters.
-
-The mobilizer frames are universally State-parameterizable:
-  - setInboardFrame(state, X_PF) / getInboardFrame(state) — frame F on the
-    parent body P
-  - setOutboardFrame(state, X_BM) / getOutboardFrame(state) — frame M on
-    this body B
-
-Each setDefault*Frame()/getDefault*Frame() sets the topology-time default;
-each State carries the live value, initialized from the topology default
-when the State is created.
-
-Several derived mobilizers expose additional state-parameterizable geometry:
-  - MobilizedBody::Ellipsoid::setRadii(state, Vec3) — semi-axis dimensions
-  - MobilizedBody::CantileverFreeBeam::setLength(state, Real) — beam length
-  - MobilizedBody::FunctionBased::setTranslationScale(state, Vec3) — per-axis
-    scale factors applied to the three translation function outputs before
-    they are combined into p_FM via Atrans. The basis functions themselves
-    remain topology-time only.
-
-Contract: any of these setters writes a Stage::Instance discrete variable,
-which automatically invalidates Stage::Instance and above. Before any
-subsequent kinematic query (Jacobian operator, getBodyTransform, etc.) the
-State must be re-realized to the stage that query requires (typically
-Stage::Position).
-
 <h3>Theory</h3>
 For the mathematical and computational theory behind Simbody's mobilizers, see
   - the <a href="https://simtk.org/docman/view.php/47/1536/Seth-2010-ShermanEastmanDelp-MinimalJointFormulationForBiomechanisms-NonlinearDyn-v62-p291.pdf">
@@ -479,18 +445,19 @@ MobilizedBody object itself. The State must have been realized to
 Stage::Instance or higher. **/
 const Transform& getOutboardFrame(const State& state) const;    // X_BM
 
-/** Override the location and orientation of the inboard (parent) mobilizer
-frame F, fixed to this mobilizer's parent body P, in the given State. This is
-an Instance-stage variable: setting it invalidates Stage::Instance and higher,
-so the State must be re-realized to Position before any kinematic queries.
-The topology default (see setDefaultInboardFrame()) is used as the initial
-value when the State is created.
+/** Set the location and orientation of the inboard (parent) mobilizer frame F, 
+fixed to this mobilizer's parent body P, in the given State. Calling this method
+invalidates Stage::Instance and higher. The topology default (i.e., from 
+setDefaultInboardFrame()) is used as the initial value when the State is 
+created.
 @see setDefaultInboardFrame(), getInboardFrame() **/
-void setInboardFrame (State& state, const Transform& X_PF) const;
-/** Override the location and orientation of the outboard mobilizer frame M,
-fixed to this body B, in the given State. This is an Instance-stage variable;
-see setInboardFrame() for the realization semantics.
-@see setDefaultOutboardFrame(), getOutboardFrame() **/
+void setInboardFrame(State& state, const Transform& X_PF) const;
+/** Set the location and orientation of the outboard (child) mobilizer frame M, 
+fixed to this mobilizer's child body B, in the given State. Calling this method
+invalidates Stage::Instance and higher. The topology default (i.e., from 
+setDefaultOutboardFrame()) is used as the initial value when the State is 
+created.
+@see setDefaultInboardFrame(), getInboardFrame() **/
 void setOutboardFrame(State& state, const Transform& X_BM) const;
 
 // End of State Access - Bodies
