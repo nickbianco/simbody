@@ -1229,18 +1229,6 @@ SpatialVec calcBiasForFrameJacobian(const State&         state,
 //==============================================================================
 /** @name        Jacobians wrt inboard/outboard mobilizer frame positions
 
-These two operator pairs compute the sensitivity of every body's origin
-in Ground to a small perturbation of the per-mobilizer inboard (X_PF) or
-outboard (X_BM) frame translation. Both are universal — every mobilizer
-type owns these parameters. The current X_PF and X_BM values are read
-from the State (which may already override the topology defaults via
-`MobilizedBody::setInboardFrame`/`setOutboardFrame`); the caller supplies
-only the perturbation deltas, indexed by `MobilizedBodyIndex`.
-
-Each per-mobilizer rigid-body parameter — Ellipsoid radii,
-CantileverFreeBeam length, FunctionBased translation-output scale — has
-its own forward/transpose operator pair on the corresponding derived
-`MobilizedBody` class. **/
 /**@{**/
 
 /** Compute dp_GB = J_pPF(state) * dp_PF, where J_pPF[i,k] =
