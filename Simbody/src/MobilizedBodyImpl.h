@@ -301,19 +301,6 @@ public:
         return getMyRigidBodyNode().getX_FM(pc);
     }
 
-    // d(p_GB)/d(p_PF) = R_GP. Reads only the position cache.
-    Mat33 calcPositionJacobianWrtInboardFramePosition(const State& s) const {
-        const SBTreePositionCache& pc =
-            getMyMatterSubsystemRep().getTreePositionCache(s);
-        return getMyRigidBodyNode().getX_GP(pc).R().asMat33();
-    }
-    // d(p_GB)/d(p_BM) = -R_GB, since X_MB.p = -R_MB * p_BM and R_GM * R_MB = R_GB.
-    Mat33 calcPositionJacobianWrtOutboardFramePosition(const State& s) const {
-        const SBTreePositionCache& pc =
-            getMyMatterSubsystemRep().getTreePositionCache(s);
-        return -getMyRigidBodyNode().getX_GB(pc).R().asMat33();
-    }
-
     // Walks the kinematic tree base-to-tip via the topology cache:
     //   dp_GB[bi] = dp_GB[parent] +
     //               (bi == myMobilizedBodyIndex ? localShift : Vec3(0)).

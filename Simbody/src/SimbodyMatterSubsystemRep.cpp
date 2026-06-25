@@ -6399,11 +6399,12 @@ multiplyByPositionJacobianWrtInboardFramePositions(
     for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
         for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            const Mat33 J = getMobilizedBody(bi).getImpl()
-                    .calcPositionJacobianWrtInboardFramePosition(s);
-            dp_GB[bi] = dp_GB[parent] + J * dp_PF[bi];
+            const MobilizedBodyIndex bix = node.getNodeNum();
+            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
+            // p_GB = p_GP(in G) + p_PF(in P) + p_FM(in F) + p_MB(in B)
+            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*p_MB
+            const Rotation& R_GP = getMobilizedBody(pix).getBodyRotation(s);
+            dp_GB[bi] = dp_GB[parent] + R_GP * dp_PF[bi];
         }
     }
 }
@@ -6419,9 +6420,9 @@ multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
     for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
         for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            subtreeSum[parent] += subtreeSum[bi];
+            const MobilizedBodyIndex bix = node.getNodeNum();
+            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
+            subtreeSum[pix] += subtreeSum[bix];
         }
     }
     dp_PF.resize(nb);
@@ -6429,10 +6430,10 @@ multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
     for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
         for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi = node.getNodeNum();
-            const Mat33 J = getMobilizedBody(bi).getImpl()
-                    .calcPositionJacobianWrtInboardFramePosition(s);
-            dp_PF[bi] = ~J * subtreeSum[bi];
+            const MobilizedBodyIndex bix = node.getNodeNum();
+            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
+            const Rotation& R_GP = getMobilizedBody(pix).getBodyRotation(s);
+            dp_PF[bix] = ~R_GP * subtreeSum[bix];
         }
     }
 }
@@ -6448,11 +6449,13 @@ multiplyByPositionJacobianWrtOutboardFramePositions(
     for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
         for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            const Mat33 J = getMobilizedBody(bi).getImpl()
-                    .calcPositionJacobianWrtOutboardFramePosition(s);
-            dp_GB[bi] = dp_GB[parent] + J * dp_BM[bi];
+            const MobilizedBodyIndex bix = node.getNodeNum();
+            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
+            const Rotation& R_GB = getMobilizedBody(bix).getBodyRotation(s);
+            // p_GB = p_GP(in G) + p_PF(in P) + p_FM(in F) + p_MB(in B)
+            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*p_MB
+            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*(-p_BM)
+            dp_GB[bi] = dp_GB[parent] + (-R_GB) * dp_BM[bi];
         }
     }
 }
@@ -6479,9 +6482,8 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
         for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[level][j];
             const MobilizedBodyIndex bi = node.getNodeNum();
-            const Mat33 J = getMobilizedBody(bi).getImpl()
-                    .calcPositionJacobianWrtOutboardFramePosition(s);
-            dp_BM[bi] = ~J * subtreeSum[bi];
+            const Rotation& R_GB = getMobilizedBody(bix).getBodyRotation(s);
+            dp_BM[bi] = ~(-R_GB) * subtreeSum[bi];
         }
     }
 }
