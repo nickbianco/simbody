@@ -503,12 +503,56 @@ virtual void multiplyBySystemJacobian(
     "multiplyBySystemJacobian"); }
 
 virtual void multiplyBySystemJacobianTranspose(
-    const SBTreePositionCache&  pc, 
+    const SBTreePositionCache&  pc,
     SpatialVec*                 zTmp,
     const SpatialVec*           X, 
     Real*                       JtX) const
   { SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
     "multiplyBySystemJacobianTranspose"); }
+
+virtual void multiplyByPositionJacobianWrtInboardFramePosition(
+    const SBTreePositionCache&  pc,
+    const Vec3*                 dp_PF,
+    Vec3*                       dp_GB) const
+  {
+    dp_GB[nodeNum] = dp_GB[parent->getNodeNum()] +
+                     getX_GP(pc).R() * dp_PF[nodeNum];
+  }
+
+virtual void multiplyByPositionJacobianWrtInboardFramePositionTranspose(
+    const SBTreePositionCache&  pc,
+    Vec3*                       zTmp,
+    const Vec3*                 dp_GB,
+    Vec3*                       dp_PF) const
+  {
+    Vec3& sum = zTmp[nodeNum];
+    sum = dp_GB[nodeNum];
+    for (unsigned i = 0; i < children.size(); ++i)
+        sum += zTmp[children[i]->getNodeNum()];
+    dp_PF[nodeNum] = ~getX_GP(pc).R() * sum;
+  }
+
+virtual void multiplyByPositionJacobianWrtOutboardFramePosition(
+    const SBTreePositionCache&  pc,
+    const Vec3*                 dp_BM,
+    Vec3*                       dp_GB) const
+  {
+    dp_GB[nodeNum] = dp_GB[parent->getNodeNum()] -
+                     getX_GB(pc).R() * dp_BM[nodeNum];
+  }
+
+virtual void multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
+    const SBTreePositionCache&  pc,
+    Vec3*                       zTmp,
+    const Vec3*                 dp_GB,
+    Vec3*                       dp_BM) const
+  {
+    Vec3& sum = zTmp[nodeNum];
+    sum = dp_GB[nodeNum];
+    for (unsigned i = 0; i < children.size(); ++i)
+        sum += zTmp[children[i]->getNodeNum()];
+    dp_BM[nodeNum] = -(~getX_GB(pc).R() * sum);
+  }
 
 virtual void calcEquivalentJointForces(
     const SBTreePositionCache&  pc,

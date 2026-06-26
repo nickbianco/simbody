@@ -6368,45 +6368,28 @@ void SimbodyMatterSubsystemRep::multiplyBySystemJacobianTranspose
 
 
 // =============================================================================
-//        JACOBIANS WRT INSTANCE-STAGE MOBILIZER GEOMETRY PARAMETERS
+//             JACOBIANS WRT MOBILIZER INBOARD AND OUTBOARD FRAMES
 // =============================================================================
-// Forward operators walk rbNodeLevels base-to-tip: each body's dp_GB is its
-// parent's dp_GB plus a local contribution. For the universal inboard/
-// outboard variants the local contribution is the body's mobilizer's local
-// Jacobian times the body's own parameter delta. For the per-mobilizer
-// variants the local contribution is zero for every body except the root
-// (whose Impl owns the parameter being differentiated); the local shift at
-// the root then propagates unchanged to every descendant through the
-// natural inheritance step (translation-only perturbations don't rotate
-// R_GB, so descendants pick up the same shift as their parent).
-//
-// Transpose operators walk tip-to-base accumulating each body's dp_GB into
-// its parent's slot; the resulting subtree-sum at every body is then
-// projected onto that body's local Jacobian column. The per-mobilizer
-// variants only project at the root and return that scalar/Vec3 directly.
-
-// -----------------------------------------------------------------------------
-// Universal inboard/outboard frame translations.
-// -----------------------------------------------------------------------------
 void SimbodyMatterSubsystemRep::
 multiplyByPositionJacobianWrtInboardFramePositions(
         const State&         s,
         const Vector_<Vec3>& dp_PF,
         Vector_<Vec3>&       dp_GB) const {
     const int nb = getNumBodies();
+    assert(dp_PF.size() == nb);
     dp_GB.resize(nb);
-    dp_GB[0] = Vec3(0);
-    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bix = node.getNodeNum();
-            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
-            // p_GB = p_GP(in G) + p_PF(in P) + p_FM(in F) + p_MB(in B)
-            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*p_MB
-            const Rotation& R_GP = getMobilizedBody(pix).getBodyRotation(s);
-            dp_GB[bi] = dp_GB[parent] + R_GP * dp_PF[bi];
+    assert(dp_PF.hasContiguousData() && dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_PFPtr = dp_PF.size() ? &dp_PF[0] : nullptr;
+    Vec3*       dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    for (int i = 0; i < (int)rbNodeLevels.size(); ++i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtInboardFramePosition(
+                    pc, dp_PFPtr, dp_GBPtr);
         }
-    }
 }
 
 void SimbodyMatterSubsystemRep::
@@ -6415,27 +6398,22 @@ multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
         const Vector_<Vec3>& dp_GB,
         Vector_<Vec3>&       dp_PF) const {
     const int nb = getNumBodies();
-    Vector_<Vec3> subtreeSum(nb);
-    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
-    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bix = node.getNodeNum();
-            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
-            subtreeSum[pix] += subtreeSum[bix];
-        }
-    }
+    assert(dp_GB.size() == nb);
     dp_PF.resize(nb);
-    dp_PF[0] = Vec3(0);
-    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bix = node.getNodeNum();
-            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
-            const Rotation& R_GP = getMobilizedBody(pix).getBodyRotation(s);
-            dp_PF[bix] = ~R_GP * subtreeSum[bix];
+    assert(dp_GB.hasContiguousData() && dp_PF.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vector_<Vec3> zTemp(nb); subtreeSum.setToZero();
+    const Vec3* dp_GBPtr      = dp_GB.size()      ? &dp_GB[0]      : nullptr;
+    Vec3*       dp_PFPtr      = dp_PF.size()      ? &dp_PF[0]      : nullptr;
+    Vec3*       subtreeSumPtr = subtreeSum.size() ? &subtreeSum[0] : nullptr;
+
+    for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtInboardFramePositionTranspose(
+                    pc, subtreeSumPtr, dp_GBPtr, dp_PFPtr);
         }
-    }
 }
 
 void SimbodyMatterSubsystemRep::
@@ -6444,20 +6422,20 @@ multiplyByPositionJacobianWrtOutboardFramePositions(
         const Vector_<Vec3>& dp_BM,
         Vector_<Vec3>&       dp_GB) const {
     const int nb = getNumBodies();
+    assert(dp_BM.size() == nb);
     dp_GB.resize(nb);
-    dp_GB[0] = Vec3(0);
-    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bix = node.getNodeNum();
-            const MobilizedBodyIndex pix = node.getParent()->getNodeNum();
-            const Rotation& R_GB = getMobilizedBody(bix).getBodyRotation(s);
-            // p_GB = p_GP(in G) + p_PF(in P) + p_FM(in F) + p_MB(in B)
-            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*p_MB
-            //      = p_GP + R_GP*p_PF + R_GF*p_FM + R_GB*(-p_BM)
-            dp_GB[bi] = dp_GB[parent] + (-R_GB) * dp_BM[bi];
+    assert(dp_BM.hasContiguousData() && dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_BMPtr = dp_BM.size() ? &dp_BM[0] : nullptr;
+    Vec3*       dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    for (int i = 0; i < (int)rbNodeLevels.size(); ++i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtOutboardFramePosition(
+                    pc, dp_BMPtr, dp_GBPtr);
         }
-    }
 }
 
 void SimbodyMatterSubsystemRep::
@@ -6466,27 +6444,25 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
         const Vector_<Vec3>& dp_GB,
         Vector_<Vec3>&       dp_BM) const {
     const int nb = getNumBodies();
-    Vector_<Vec3> subtreeSum(nb);
-    for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
-    for (int level = (int)rbNodeLevels.size() - 1; level > 0; --level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi     = node.getNodeNum();
-            const MobilizedBodyIndex parent = node.getParent()->getNodeNum();
-            subtreeSum[parent] += subtreeSum[bi];
-        }
-    }
+    assert(dp_GB.size() == nb);
     dp_BM.resize(nb);
-    dp_BM[0] = Vec3(0);
-    for (int level = 1; level < (int)rbNodeLevels.size(); ++level) {
-        for (int j = 0; j < (int)rbNodeLevels[level].size(); ++j) {
-            const RigidBodyNode& node = *rbNodeLevels[level][j];
-            const MobilizedBodyIndex bi = node.getNodeNum();
-            const Rotation& R_GB = getMobilizedBody(bix).getBodyRotation(s);
-            dp_BM[bi] = ~(-R_GB) * subtreeSum[bi];
+    assert(dp_GB.hasContiguousData() && dp_BM.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vector_<Vec3> subtreeSum(nb); subtreeSum.setToZero();
+    const Vec3* dp_GBPtr      = dp_GB.size()      ? &dp_GB[0]      : nullptr;
+    Vec3*       dp_BMPtr      = dp_BM.size()      ? &dp_BM[0]      : nullptr;
+    Vec3*       subtreeSumPtr = subtreeSum.size() ? &subtreeSum[0] : nullptr;
+
+    for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
+                    pc, subtreeSumPtr, dp_GBPtr, dp_BMPtr);
         }
-    }
 }
+
+//.............JACOBIANS WRT MOBILIZER INBOARD AND OUTBOARD FRAMES..............
 
 // =============================================================================
 //                     CALC TREE EQUIVALENT MOBILITY FORCES

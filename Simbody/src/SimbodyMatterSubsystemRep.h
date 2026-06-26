@@ -562,25 +562,24 @@ public:
         const Vector_<SpatialVec>& X,
         Vector&                    JtX) const;
 
-    // Jacobians of body-origin positions in Ground wrt per-mobilizer
-    // inboard/outboard frame translations. Universal — every mobilizer
-    // contributes via its local R_GP (inboard) or -R_GB (outboard) Jacobian
-    // column. Forward walks rbNodeLevels base-to-tip; transpose walks
-    // tip-to-base accumulating subtree sums, then projects each body's
-    // subtree-sum onto its local Jacobian column. State must be realized
-    // through Stage::Position. Each input/output Vector_<Vec3> is sized to
-    // getNumBodies() and indexed by MobilizedBodyIndex; entry 0 (Ground)
-    // is zero.
     void multiplyByPositionJacobianWrtInboardFramePositions(const State& s,
-        const Vector_<Vec3>& dp_PF, Vector_<Vec3>& dp_GB) const;
+        const Vector_<Vec3>& dp_PF,
+        Vector_<Vec3>&       dp_GB) const;
+
     void multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
-        const State& s,
-        const Vector_<Vec3>& dp_GB, Vector_<Vec3>& dp_PF) const;
-    void multiplyByPositionJacobianWrtOutboardFramePositions(const State& s,
-        const Vector_<Vec3>& dp_BM, Vector_<Vec3>& dp_GB) const;
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_PF) const;
+
+    void multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_BM,
+        Vector_<Vec3>&       dp_GB) const;
+
     void multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
-        const State& s,
-        const Vector_<Vec3>& dp_GB, Vector_<Vec3>& dp_BM) const;
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_BM) const;
 
     // Given a set of body forces, return the equivalent set of mobilizer torques
     // IGNORING CONSTRAINTS.
