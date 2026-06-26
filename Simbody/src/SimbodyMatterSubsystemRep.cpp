@@ -6403,16 +6403,16 @@ multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
     assert(dp_GB.hasContiguousData() && dp_PF.hasContiguousData());
 
     const SBTreePositionCache& pc = getTreePositionCache(s);
-    Vector_<Vec3> zTemp(nb); subtreeSum.setToZero();
-    const Vec3* dp_GBPtr      = dp_GB.size()      ? &dp_GB[0]      : nullptr;
-    Vec3*       dp_PFPtr      = dp_PF.size()      ? &dp_PF[0]      : nullptr;
-    Vec3*       subtreeSumPtr = subtreeSum.size() ? &subtreeSum[0] : nullptr;
+    Vector_<Vec3> zTemp(nb); zTemp.setToZero();
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    Vec3*       dp_PFPtr = dp_PF.size() ? &dp_PF[0] : nullptr;
+    Vec3*       zTempPtr = zTemp.size() ? &zTemp[0] : nullptr;
 
     for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
         for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[i][j];
             node.multiplyByPositionJacobianWrtInboardFramePositionTranspose(
-                    pc, subtreeSumPtr, dp_GBPtr, dp_PFPtr);
+                    pc, zTempPtr, dp_GBPtr, dp_PFPtr);
         }
 }
 
@@ -6449,16 +6449,16 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
     assert(dp_GB.hasContiguousData() && dp_BM.hasContiguousData());
 
     const SBTreePositionCache& pc = getTreePositionCache(s);
-    Vector_<Vec3> subtreeSum(nb); subtreeSum.setToZero();
-    const Vec3* dp_GBPtr      = dp_GB.size()      ? &dp_GB[0]      : nullptr;
-    Vec3*       dp_BMPtr      = dp_BM.size()      ? &dp_BM[0]      : nullptr;
-    Vec3*       subtreeSumPtr = subtreeSum.size() ? &subtreeSum[0] : nullptr;
+    Vector_<Vec3> zTemp(nb); zTemp.setToZero();
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    Vec3*       dp_BMPtr = dp_BM.size() ? &dp_BM[0] : nullptr;
+    Vec3*       zTempPtr = zTemp.size() ? &zTemp[0] : nullptr;
 
     for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
         for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
             const RigidBodyNode& node = *rbNodeLevels[i][j];
             node.multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
-                    pc, subtreeSumPtr, dp_GBPtr, dp_BMPtr);
+                    pc, zTempPtr, dp_GBPtr, dp_BMPtr);
         }
 }
 

@@ -384,6 +384,15 @@ public:
         dp_BM[0] = Vec3(0);
     }
 
+    // Ground forward override: no parent, so just zero our slot. The
+    // transpose default works as-is (no parent dependence).
+    void multiplyByPositionJacobianFromMobilizer(
+        const SBTreePositionCache&,
+        MobilizedBodyIndex, const Vec3&, Vec3* dp_GB) const override
+    {
+        dp_GB[0] = Vec3(0);
+    }
+
     void calcEquivalentJointForces(
         const SBTreePositionCache&  pc,
         const SBTreeVelocityCache&,

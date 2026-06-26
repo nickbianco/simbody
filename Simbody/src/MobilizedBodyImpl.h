@@ -301,60 +301,49 @@ public:
         return getMyRigidBodyNode().getX_FM(pc);
     }
 
-    // Walks the kinematic tree base-to-tip via the topology cache:
-    //   dp_GB[bi] = dp_GB[parent] +
-    //               (bi == myMobilizedBodyIndex ? localShift : Vec3(0)).
-    // Used by per-mobilizer position-Jacobian operators on derived *Impl
-    // classes (Ellipsoid radii, CantileverFreeBeam length, FunctionBased
-    // translation-output scale). The shift propagates unchanged to every
-    // descendant because all parameters under consideration are pure
-    // translations and so do not rotate R_GB.
     void multiplyByPositionJacobianFromMobilizer(const State& s,
             const Vec3& localShift, Vector_<Vec3>& dp_GB) const {
         const SimbodyMatterSubsystemRep& matterRep = getMyMatterSubsystemRep();
-        const Array_<Array_<MobilizedBodyIndex>>& levels =
-                matterRep.getMatterTopologyCache().mobodLevels;
-        const MobilizedBodyIndex rootIdx = myMobilizedBodyIndex;
         const int nb = matterRep.getNumBodies();
         dp_GB.resize(nb);
-        dp_GB[0] = Vec3(0);
-        for (int level = 1; level < (int)levels.size(); ++level) {
-            for (int j = 0; j < (int)levels[level].size(); ++j) {
-                const MobilizedBodyIndex bi = levels[level][j];
-                const MobilizedBodyIndex parent =
-                        matterRep.getMobilizedBody(bi)
-                                 .getParentMobilizedBody()
-                                 .getMobilizedBodyIndex();
-                dp_GB[bi] = dp_GB[parent] +
-                            (bi == rootIdx ? localShift : Vec3(0));
+        assert(dp_GB.hasContiguousData());
+
+        const SBTreePositionCache& pc = matterRep.getTreePositionCache(s);
+        const Array_<Array_<MobilizedBodyIndex>>& levels =
+                matterRep.getMatterTopologyCache().mobodLevels;
+        Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+        for (int i = 0; i < (int)levels.size(); ++i)
+            for (int j = 0; j < (int)levels[i].size(); ++j) {
+                const RigidBodyNode& node =
+                        matterRep.getRigidBodyNode(levels[i][j]);
+                node.multiplyByPositionJacobianFromMobilizer(
+                        pc, myMobilizedBodyIndex, localShift, dp_GBPtr);
             }
-        }
     }
 
-    // Walks the kinematic tree tip-to-base accumulating per-body subtree
-    // sums; returns subtreeSum at this mobilizer's index. Used by per-
-    // mobilizer position-Jacobian transpose operators; caller multiplies
-    // the returned subtree-sum by ~J_local to obtain the parameter
-    // gradient.
     Vec3 multiplyByPositionJacobianFromMobilizerTranspose(const State& s,
             const Vector_<Vec3>& dp_GB) const {
         const SimbodyMatterSubsystemRep& matterRep = getMyMatterSubsystemRep();
+        const int nb = matterRep.getNumBodies();
+        assert(dp_GB.size() == nb);
+        assert(dp_GB.hasContiguousData());
+
+        const SBTreePositionCache& pc = matterRep.getTreePositionCache(s);
         const Array_<Array_<MobilizedBodyIndex>>& levels =
                 matterRep.getMatterTopologyCache().mobodLevels;
-        const int nb = matterRep.getNumBodies();
-        Vector_<Vec3> subtreeSum(nb);
-        for (int bi = 0; bi < nb; ++bi) subtreeSum[bi] = dp_GB[bi];
-        for (int level = (int)levels.size() - 1; level > 0; --level) {
-            for (int j = 0; j < (int)levels[level].size(); ++j) {
-                const MobilizedBodyIndex bi = levels[level][j];
-                const MobilizedBodyIndex parent =
-                        matterRep.getMobilizedBody(bi)
-                                 .getParentMobilizedBody()
-                                 .getMobilizedBodyIndex();
-                subtreeSum[parent] += subtreeSum[bi];
+        Vector_<Vec3> zTmp(nb); zTmp.setToZero();
+        const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+        Vec3*       zTmpPtr  = zTmp.size()  ? &zTmp[0]  : nullptr;
+
+        for (int i = (int)levels.size() - 1; i >= 0; --i)
+            for (int j = 0; j < (int)levels[i].size(); ++j) {
+                const RigidBodyNode& node =
+                        matterRep.getRigidBodyNode(levels[i][j]);
+                node.multiplyByPositionJacobianFromMobilizerTranspose(
+                        pc, zTmpPtr, dp_GBPtr);
             }
-        }
-        return subtreeSum[myMobilizedBodyIndex];
+        return zTmp[myMobilizedBodyIndex];
     }
     const SpatialVec& getMobilizerVelocity(const State& s) const {
         const SBTreeVelocityCache& vc = getMyMatterSubsystemRep().getTreeVelocityCache(s);

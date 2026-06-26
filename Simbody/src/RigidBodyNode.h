@@ -554,6 +554,37 @@ virtual void multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
     dp_BM[nodeNum] = -(~getX_GB(pc).R() * sum);
   }
 
+// Per-node forward step for the per-mobilizer (root-based) position-
+// Jacobian propagation. Reads the parent body's already-written dp_GB
+// and writes this body's slot:
+//   dp_GB[me] = dp_GB[parent] + (me == rootIdx ? localShift : Vec3(0)).
+// Default impl works for any non-Ground node; RBGroundBody overrides to
+// write dp_GB[0] = Vec3(0).
+virtual void multiplyByPositionJacobianFromMobilizer(
+    const SBTreePositionCache&  pc,
+    MobilizedBodyIndex          rootIdx,
+    const Vec3&                 localShift,
+    Vec3*                       dp_GB) const
+  {
+    dp_GB[nodeNum] = dp_GB[parent->getNodeNum()] +
+                     (nodeNum == rootIdx ? localShift : Vec3(0));
+  }
+
+// Per-node tip-to-base accumulation step for the per-mobilizer transpose:
+//   zTmp[me] = dp_GB[me] + sum(zTmp[children]).
+// Default impl works for any node, including Ground (no parent
+// dependence), so no override is needed.
+virtual void multiplyByPositionJacobianFromMobilizerTranspose(
+    const SBTreePositionCache&  pc,
+    Vec3*                       zTmp,
+    const Vec3*                 dp_GB) const
+  {
+    Vec3& sum = zTmp[nodeNum];
+    sum = dp_GB[nodeNum];
+    for (unsigned i = 0; i < children.size(); ++i)
+        sum += zTmp[children[i]->getNodeNum()];
+  }
+
 virtual void calcEquivalentJointForces(
     const SBTreePositionCache&  pc,
     const SBTreeVelocityCache&  vc,
