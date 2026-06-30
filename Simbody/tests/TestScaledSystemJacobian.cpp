@@ -609,9 +609,11 @@ void testMultiplyByPositionJacobianWrtRadii() {
 
     const Vec3 dr(0.13, -0.21, 0.34);
 
+    const Mat33 J = sys.m_ellipsoid.calcPositionJacobianWrtRadii(state);
     Vector_<Vec3> dp_GB_analytic;
-    sys.m_ellipsoid.multiplyByPositionJacobianWrtRadii(
-            state, dr, dp_GB_analytic);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_ellipsoid.getMobilizedBodyIndex(),
+            J * dr, dp_GB_analytic);
 
     State pert = state;
     sys.m_ellipsoid.setRadii(pert, sys.m_ellipsoid.getRadii(pert) + h * dr);
@@ -641,11 +643,16 @@ void testMultiplyByPositionJacobianWrtRadiiTranspose() {
         dp_GB_in[b] = Vec3(0.1*(b+1), -0.3*(b+1), 0.5*(b+1));
     dp_GB_in[0] = Vec3(0);
 
+    const Mat33 J = sys.m_ellipsoid.calcPositionJacobianWrtRadii(state);
     Vector_<Vec3> J_dr;
-    sys.m_ellipsoid.multiplyByPositionJacobianWrtRadii(state, dr, J_dr);
-    const Vec3 JT_dp_GB =
-        sys.m_ellipsoid.multiplyByPositionJacobianWrtRadiiTranspose(
-                state, dp_GB_in);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_ellipsoid.getMobilizedBodyIndex(),
+            J * dr, J_dr);
+    const Vec3 sum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state, sys.m_ellipsoid.getMobilizedBodyIndex(),
+                    dp_GB_in);
+    const Vec3 JT_dp_GB = ~J * sum;
 
     Real lhs = 0;
     for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dr[b]);
@@ -666,9 +673,11 @@ void testMultiplyByPositionJacobianWrtLength() {
 
     const Real dL = 0.42;
 
+    const Vec3 J = sys.m_cantileverFreeBeam.calcPositionJacobianWrtLength(state);
     Vector_<Vec3> dp_GB_analytic;
-    sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLength(
-            state, dL, dp_GB_analytic);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_cantileverFreeBeam.getMobilizedBodyIndex(),
+            J * dL, dp_GB_analytic);
 
     State pert = state;
     sys.m_cantileverFreeBeam.setLength(pert,
@@ -699,12 +708,17 @@ void testMultiplyByPositionJacobianWrtLengthTranspose() {
         dp_GB_in[b] = Vec3(0.2*(b+1), -0.1*(b+1), 0.4*(b+1));
     dp_GB_in[0] = Vec3(0);
 
+    const Vec3 J = sys.m_cantileverFreeBeam.calcPositionJacobianWrtLength(state);
     Vector_<Vec3> J_dL;
-    sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLength(
-            state, dL, J_dL);
-    const Real JT_dp_GB =
-        sys.m_cantileverFreeBeam.multiplyByPositionJacobianWrtLengthTranspose(
-                state, dp_GB_in);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_cantileverFreeBeam.getMobilizedBodyIndex(),
+            J * dL, J_dL);
+    const Vec3 sum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state,
+                    sys.m_cantileverFreeBeam.getMobilizedBodyIndex(),
+                    dp_GB_in);
+    const Real JT_dp_GB = dot(J, sum);
 
     Real lhs = 0;
     for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dL[b]);
@@ -725,9 +739,12 @@ void testMultiplyByPositionJacobianWrtTranslationScale() {
 
     const Vec3 dt(0.17, -0.29, 0.41);
 
+    const Mat33 J =
+        sys.m_functionBased.calcPositionJacobianWrtTranslationScale(state);
     Vector_<Vec3> dp_GB_analytic;
-    sys.m_functionBased.multiplyByPositionJacobianWrtTranslationScale(
-            state, dt, dp_GB_analytic);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_functionBased.getMobilizedBodyIndex(),
+            J * dt, dp_GB_analytic);
 
     State pert = state;
     sys.m_functionBased.setTranslationScale(pert,
@@ -758,13 +775,17 @@ void testMultiplyByPositionJacobianWrtTranslationScaleTranspose() {
         dp_GB_in[b] = Vec3(-0.2*(b+1), 0.5*(b+1), -0.4*(b+1));
     dp_GB_in[0] = Vec3(0);
 
+    const Mat33 J =
+        sys.m_functionBased.calcPositionJacobianWrtTranslationScale(state);
     Vector_<Vec3> J_dt;
-    sys.m_functionBased.multiplyByPositionJacobianWrtTranslationScale(
-            state, dt, J_dt);
-    const Vec3 JT_dp_GB =
-        sys.m_functionBased
-           .multiplyByPositionJacobianWrtTranslationScaleTranspose(state,
-                                                                   dp_GB_in);
+    sys.m_matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, sys.m_functionBased.getMobilizedBodyIndex(),
+            J * dt, J_dt);
+    const Vec3 sum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state, sys.m_functionBased.getMobilizedBodyIndex(),
+                    dp_GB_in);
+    const Vec3 JT_dp_GB = ~J * sum;
 
     Real lhs = 0;
     for (int b = 0; b < nb; ++b) lhs += dot(dp_GB_in[b], J_dt[b]);
@@ -833,14 +854,32 @@ void testPositionErrorGradientWrtCombinedVariables() {
     sys.m_matter.multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
             state, dE_dp_GB, dE_dp_BM);
 
-    // Per-mobilizer rigid-body parameter gradients. Chain rule with dE/dp_GB.
-    const Real dE_dLength = sys.m_cantileverFreeBeam
-            .multiplyByPositionJacobianWrtLengthTranspose(state, dE_dp_GB);
-    const Vec3 dE_dRadii = sys.m_ellipsoid
-            .multiplyByPositionJacobianWrtRadiiTranspose(state, dE_dp_GB);
-    const Vec3 dE_dTransScale = sys.m_functionBased
-            .multiplyByPositionJacobianWrtTranslationScaleTranspose(
-                    state, dE_dp_GB);
+    // Per-mobilizer rigid-body parameter gradients. Compose the matter-
+    // subsystem subtree-sum operator with each mobilizer's local
+    // Jacobian column:  dE/dParam = ~J_local * subtree-sum(dE/dp_GB).
+    const Vec3 cfbSum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state,
+                    sys.m_cantileverFreeBeam.getMobilizedBodyIndex(),
+                    dE_dp_GB);
+    const Real dE_dLength = dot(
+            sys.m_cantileverFreeBeam.calcPositionJacobianWrtLength(state),
+            cfbSum);
+
+    const Vec3 ellSum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state, sys.m_ellipsoid.getMobilizedBodyIndex(),
+                    dE_dp_GB);
+    const Vec3 dE_dRadii =
+            ~sys.m_ellipsoid.calcPositionJacobianWrtRadii(state) * ellSum;
+
+    const Vec3 fbSum = sys.m_matter
+            .multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+                    state, sys.m_functionBased.getMobilizedBodyIndex(),
+                    dE_dp_GB);
+    const Vec3 dE_dTransScale =
+            ~sys.m_functionBased.calcPositionJacobianWrtTranslationScale(state)
+            * fbSum;
 
     // Body-scale gradients. Use chaing rule to compute dE_dscales from dE_dp_PF 
     // and dE_dp_BM.

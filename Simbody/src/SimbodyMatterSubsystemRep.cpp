@@ -286,13 +286,6 @@ void SimbodyMatterSubsystemRep::endConstruction(State& s) {
         rbNodeLevels[level].push_back(&n);
         nodeNum2NodeMap.push_back(RigidBodyNodeIndex(level, nodeIndexWithinLevel));
 
-        // Mirror the level structure as a MobilizedBodyIndex array on the
-        // topology cache so MobilizedBodyImpl-side code can walk the tree
-        // without reaching into Rep-private rbNodeLevels.
-        if ((int)topologyCache.mobodLevels.size() <= level)
-            topologyCache.mobodLevels.resize(level + 1);
-        topologyCache.mobodLevels[level].push_back(mbx);
-
         // Count up multibody tree totals.
         const int ndof = n.getDOF();
         DOFTotal += ndof; SqDOFTotal += ndof*ndof;
@@ -6463,6 +6456,50 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
 }
 
 //.............JACOBIANS WRT MOBILIZER INBOARD AND OUTBOARD FRAMES..............
+
+
+// =============================================================================
+//       JACOBIAN WRT MOBILIZER GROUND-FRAME TRANSLATION (single mobilizer)
+// =============================================================================
+// Forward: propagate a Ground-frame translation shift from one mobilizer
+// through its kinematic subtree. Implemented as a thin dispatch through
+// the existing RigidBodyNode::applyPositionShift virtual.
+//
+// Transpose: return the subtree-sum of dp_GB at mobodIdx via the
+// existing RigidBodyNode::computeSubtreeSum virtual.
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    dp_GB.resize(nb);
+    dp_GB = Vec3(0);
+    assert(dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    getRigidBodyNode(mobodIdx).applyPositionShift(pc, localShift, dp_GBPtr);
+}
+
+Vec3 SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const {
+    const int nb = getNumBodies();
+    assert(dp_GB.size() == nb);
+    assert(dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    return getRigidBodyNode(mobodIdx).computeSubtreeSum(pc, dp_GBPtr);
+}
+
+//...........JACOBIAN WRT MOBILIZER GROUND-FRAME TRANSLATION..............
 
 // =============================================================================
 //                     CALC TREE EQUIVALENT MOBILITY FORCES

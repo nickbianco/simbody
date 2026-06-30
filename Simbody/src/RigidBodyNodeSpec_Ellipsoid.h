@@ -97,6 +97,17 @@ const Vec3& getRadii(const SBStateDigest& sbs) const {
     return impl.getRadii(sbs.getState());
 }
 
+// d(p_GB)/d(r) = R_GF * diag(n), where n = R_FM.col(2) is the M-frame
+// z-axis (ellipsoid surface normal) expressed in F. Used by
+// MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadii{,Transpose}.
+Mat33 calcPositionJacobianWrtRadii(const SBTreePositionCache& pc) const {
+    const Rotation R_GF = this->getX_GP(pc).R() * this->getX_PF(pc).R();
+    const Vec3 n = this->getX_FM(pc).R().col(2);
+    return Mat33(R_GF.col(0) * n[0],
+                 R_GF.col(1) * n[1],
+                 R_GF.col(2) * n[2]);
+}
+
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
                        Vector& q) const 
 {

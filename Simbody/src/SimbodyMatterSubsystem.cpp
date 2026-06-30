@@ -2080,6 +2080,41 @@ multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
             s, dp_GB, dp_BM);
 }
 
+void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(
+        mobodIdx.isValid() && mobodIdx < getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslation",
+        "mobodIdx %d is not a valid MobilizedBodyIndex (system has %d bodies).",
+        (int)mobodIdx, getNumBodies());
+    getRep().multiplyByPositionJacobianWrtMobilizerTranslation(
+            s, mobodIdx, localShift, dp_GB);
+}
+
+Vec3 SimbodyMatterSubsystem::
+multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(
+        mobodIdx.isValid() && mobodIdx < getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslationTranspose",
+        "mobodIdx %d is not a valid MobilizedBodyIndex (system has %d bodies).",
+        (int)mobodIdx, getNumBodies());
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslationTranspose",
+        "dp_GB size %d does not match number of bodies %d.",
+        dp_GB.size(), getNumBodies());
+    return getRep().multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+            s, mobodIdx, dp_GB);
+}
+
 
 //==============================================================================
 //                              MISC OPERATORS

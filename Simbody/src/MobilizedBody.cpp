@@ -34,6 +34,9 @@
 
 #include "MobilizedBodyImpl.h"
 #include "SimbodyMatterSubsystemRep.h"
+#include "RigidBodyNode.h"
+#include "RigidBodyNodeSpec_Ellipsoid.h"
+#include "RigidBodyNodeSpec_CantileverFreeBeam.h"
 
 namespace SimTK {
 
@@ -2038,14 +2041,16 @@ const Vec3& MobilizedBody::Ellipsoid::getRadii(const State& s) const {
     return getImpl().getRadii(s);
 }
 
-void MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadii(
-        const State& s, const Vec3& dRadii, Vector_<Vec3>& dp_GB) const {
-    getImpl().multiplyByPositionJacobianWrtRadii(s, dRadii, dp_GB);
-}
-
-Vec3 MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadiiTranspose(
-        const State& s, const Vector_<Vec3>& dp_GB) const {
-    return getImpl().multiplyByPositionJacobianWrtRadiiTranspose(s, dp_GB);
+Mat33 MobilizedBody::Ellipsoid::calcPositionJacobianWrtRadii(
+        const State& s) const {
+    const EllipsoidImpl& impl = getImpl();
+    const SBTreePositionCache& pc =
+        impl.getMyMatterSubsystemRep().getTreePositionCache(s);
+    // Safe by construction: EllipsoidImpl::createRigidBodyNode always
+    // returns an RBNodeEllipsoid.
+    const RBNodeEllipsoid& rbnE =
+        static_cast<const RBNodeEllipsoid&>(impl.getMyRigidBodyNode());
+    return rbnE.calcPositionJacobianWrtRadii(pc);
 }
 
 const Quaternion& MobilizedBody::Ellipsoid::getDefaultQ() const {
@@ -2750,16 +2755,17 @@ MobilizedBody::CantileverFreeBeam::CantileverFreeBeam
      return getImpl().getLength(s);
  }
 
- void MobilizedBody::CantileverFreeBeam::multiplyByPositionJacobianWrtLength(
-         const State& s, Real dLength, Vector_<Vec3>& dp_GB) const {
-     getImpl().multiplyByPositionJacobianWrtLength(s, dLength, dp_GB);
- }
-
- Real MobilizedBody::CantileverFreeBeam::
- multiplyByPositionJacobianWrtLengthTranspose(
-         const State& s, const Vector_<Vec3>& dp_GB) const {
-     return getImpl().multiplyByPositionJacobianWrtLengthTranspose(s, dp_GB);
- }
+Vec3 MobilizedBody::CantileverFreeBeam::calcPositionJacobianWrtLength(
+        const State& s) const {
+    const CantileverFreeBeamImpl& impl = getImpl();
+    const SBTreePositionCache& pc =
+        impl.getMyMatterSubsystemRep().getTreePositionCache(s);
+    // Safe by construction: CantileverFreeBeamImpl::createRigidBodyNode
+    // always returns an RBNodeCantileverFreeBeam.
+    const RBNodeCantileverFreeBeam& rbnC =
+        static_cast<const RBNodeCantileverFreeBeam&>(impl.getMyRigidBodyNode());
+    return rbnC.calcPositionJacobianWrtLength(pc, getQ(s));
+}
 
  const Vec3& MobilizedBody::CantileverFreeBeam::getDefaultQ() const {
      return getImpl().defaultQ;
@@ -3284,23 +3290,13 @@ getTranslationScale(const State& state) const {
     return impl.getTranslationScale(state);
 }
 
-void MobilizedBody::FunctionBased::
-multiplyByPositionJacobianWrtTranslationScale(
-        const State& s, const Vec3& dTranslationScale,
-        Vector_<Vec3>& dp_GB) const {
-    const FunctionBasedImpl& impl =
-        dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    impl.multiplyByPositionJacobianWrtTranslationScale(
-            s, dTranslationScale, dp_GB);
-}
-
-Vec3 MobilizedBody::FunctionBased::
-multiplyByPositionJacobianWrtTranslationScaleTranspose(
-        const State& s, const Vector_<Vec3>& dp_GB) const {
-    const FunctionBasedImpl& impl =
-        dynamic_cast<const FunctionBasedImpl&>(getImplementation());
-    return impl.multiplyByPositionJacobianWrtTranslationScaleTranspose(
-            s, dp_GB);
+Mat33 MobilizedBody::FunctionBased::calcPositionJacobianWrtTranslationScale(
+        const State& s) const {
+    // Safe by construction: MobilizedBody::FunctionBased always wraps a
+    // FunctionBasedImpl (a Custom::Implementation subclass).
+    const FunctionBasedImpl& fbImpl =
+        static_cast<const FunctionBasedImpl&>(getImplementation());
+    return fbImpl.calcPositionJacobianWrtTranslationScale(s);
 }
 
 } // namespace SimTK

@@ -581,6 +581,22 @@ public:
         const Vector_<Vec3>& dp_GB,
         Vector_<Vec3>&       dp_BM) const;
 
+    // Propagate a Ground-frame translation shift at one mobilizer
+    // through its kinematic subtree. Implemented as a thin dispatch
+    // through the existing RigidBodyNode::applyPositionShift virtual.
+    void multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const;
+
+    // Transpose: return the subtree-sum of dp_GB at mobodIdx via the
+    // existing RigidBodyNode::computeSubtreeSum virtual.
+    Vec3 multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const;
+
     // Given a set of body forces, return the equivalent set of mobilizer torques
     // IGNORING CONSTRAINTS.
     // Must be in DynamicsStage so that articulated body inertias are available,

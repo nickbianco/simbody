@@ -184,43 +184,27 @@ public:
     via setDefaultLength(). **/
     const Real& getDefaultLength() const;
 
-    /** Override the beam length for this State. This is an Instance-stage
-    variable: setting it invalidates Stage::Instance and higher, so the State
-    must be re-realized to Position before any kinematic query reflects the
-    new length. Length must be strictly positive. The topology default (see
-    setDefaultLength()) is used as the initial value when the State is created.
-    @see setDefaultLength(), getLength() **/
     void setLength(State& state, const Real& length) const;
-    /** Get the beam length currently in effect for this State. The State must
-    have been realized to Stage::Instance or higher.
-    @see setLength(), getDefaultLength() **/
     const Real& getLength(const State& state) const;
 
-    /** Compute dp_GB = J_L(state) * dLength, where J_L[i] =
-    d(p_GB[i])/d(L) for this CantileverFreeBeam mobilizer. The local Jacobian
-    column is R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)); the
-    resulting body shift is applied to this mobilizer's body and propagated to
-    every descendant body, with zero for every other body in the system.
+    /** Return d(p_GB)/d(L), the local Ground-frame position Jacobian
+    column of this CantileverFreeBeam's body origin with respect to the
+    beam length L. The formula is
+    R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)) evaluated at the
+    current State (which must be realized through Stage::Position).
 
-    @param[in]  state    Realized through Stage::Position.
-    @param[in]  dLength  Perturbation of the beam length L.
-    @param[out] dp_GB    Per-body shift in Ground, indexed by
-                         MobilizedBodyIndex. Resized to the system's body
-                         count and zeroed before accumulation. **/
-    void multiplyByPositionJacobianWrtLength(const State& state,
-                                             Real dLength,
-                                             Vector_<Vec3>& dp_GB) const;
+    Compose with `SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation`
+    to build a system-level position Jacobian product:
+    \code
+    const Vec3 J = cfb.calcPositionJacobianWrtLength(state);
+    matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, cfb.getMobilizedBodyIndex(), J * dL, dp_GB);
+    \endcode
 
-    /** Compute dLength = ~J_L(state) * dp_GB. Sums dp_GB over this body and
-    all descendants, then projects onto the local Jacobian column.
-
-    @param[in]  state  Realized through Stage::Position.
-    @param[in]  dp_GB  Per-body perturbation-like vector, indexed by
-                       MobilizedBodyIndex.
-    @return            dot(R_GF * J_L_local, subtree-sum of dp_GB). **/
-    Real multiplyByPositionJacobianWrtLengthTranspose(
-            const State& state,
-            const Vector_<Vec3>& dp_GB) const;
+    For the transpose path, pair with
+    `multiplyByPositionJacobianWrtMobilizerTranslationTranspose` and
+    project the returned subtree sum via `dot(J, sum)`. **/
+    Vec3 calcPositionJacobianWrtLength(const State& state) const;
 
     /** Provide a default orientation for this mobilizer if you don't want to
     start with the identity rotation (that is, alignment of the F and M

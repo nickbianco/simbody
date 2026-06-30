@@ -554,35 +554,37 @@ virtual void multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
     dp_BM[nodeNum] = -(~getX_GB(pc).R() * sum);
   }
 
-// Per-node forward step for the per-mobilizer (root-based) position-
-// Jacobian propagation. Reads the parent body's already-written dp_GB
-// and writes this body's slot:
-//   dp_GB[me] = dp_GB[parent] + (me == rootIdx ? localShift : Vec3(0)).
-// Default impl works for any non-Ground node; RBGroundBody overrides to
-// write dp_GB[0] = Vec3(0).
-virtual void multiplyByPositionJacobianFromMobilizer(
+// Recursively writes `localShift` into dp_GB[me] and dp_GB at every
+// descendant of this node. The caller is responsible for first sizing
+// and zeroing dp_GB across all bodies; this method only touches this
+// node's subtree, leaving non-descendant slots alone. Used by the
+// per-mobilizer position-Jacobian forward operators (Ellipsoid radii,
+// CantileverFreeBeam length, FunctionBased translation scale) on
+// derived MobilizedBody handles, where the caller supplies the local
+// Ground-frame shift induced by the parameter perturbation.
+virtual void applyPositionShift(
     const SBTreePositionCache&  pc,
-    MobilizedBodyIndex          rootIdx,
     const Vec3&                 localShift,
     Vec3*                       dp_GB) const
   {
-    dp_GB[nodeNum] = dp_GB[parent->getNodeNum()] +
-                     (nodeNum == rootIdx ? localShift : Vec3(0));
+    dp_GB[nodeNum] = localShift;
+    for (unsigned i = 0; i < children.size(); ++i)
+        children[i]->applyPositionShift(pc, localShift, dp_GB);
   }
 
-// Per-node tip-to-base accumulation step for the per-mobilizer transpose:
-//   zTmp[me] = dp_GB[me] + sum(zTmp[children]).
-// Default impl works for any node, including Ground (no parent
-// dependence), so no override is needed.
-virtual void multiplyByPositionJacobianFromMobilizerTranspose(
+// Recursively returns dp_GB[me] + sum over descendants of dp_GB[descendant].
+// Used by the per-mobilizer position-Jacobian transpose operators on
+// derived MobilizedBody handles, where the returned subtree sum is then
+// projected onto the local Jacobian column to obtain the parameter
+// gradient.
+virtual Vec3 computeSubtreeSum(
     const SBTreePositionCache&  pc,
-    Vec3*                       zTmp,
     const Vec3*                 dp_GB) const
   {
-    Vec3& sum = zTmp[nodeNum];
-    sum = dp_GB[nodeNum];
+    Vec3 sum = dp_GB[nodeNum];
     for (unsigned i = 0; i < children.size(); ++i)
-        sum += zTmp[children[i]->getNodeNum()];
+        sum += children[i]->computeSubtreeSum(pc, dp_GB);
+    return sum;
   }
 
 virtual void calcEquivalentJointForces(

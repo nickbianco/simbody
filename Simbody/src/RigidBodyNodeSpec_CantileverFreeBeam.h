@@ -90,6 +90,23 @@ const Real& getLength(const SBStateDigest& sbs) const {
     return impl.getLength(sbs.getState());
 }
 
+// d(p_GB)/d(L) = R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)),
+// derived by holding q fixed and differentiating
+//   p_FM = (q1*(2/3)L, -q0*(2/3)L, L - (4/15)L*(q0^2 + q1^2))
+// wrt L. The 3-vector `q` is this mobilizer's three generalized
+// coordinates (the public MobilizedBody method fetches it from the
+// State and passes it in here). Used by
+// MobilizedBody::CantileverFreeBeam::multiplyByPositionJacobianWrtLength{,Transpose}.
+Vec3 calcPositionJacobianWrtLength(const SBTreePositionCache& pc,
+                                   const Vec3& q) const {
+    const Rotation R_GF = this->getX_GP(pc).R() * this->getX_PF(pc).R();
+    const Real q0 = q[0], q1 = q[1];
+    const Vec3 dpFM_dL((2.0 / 3.0) * q1,
+                       -(2.0 / 3.0) * q0,
+                       1.0 - (4.0 / 15.0) * (q0 * q0 + q1 * q1));
+    return R_GF * dpFM_dL;
+}
+
     // Implementations of virtual methods.
 
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,

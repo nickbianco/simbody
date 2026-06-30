@@ -301,50 +301,6 @@ public:
         return getMyRigidBodyNode().getX_FM(pc);
     }
 
-    void multiplyByPositionJacobianFromMobilizer(const State& s,
-            const Vec3& localShift, Vector_<Vec3>& dp_GB) const {
-        const SimbodyMatterSubsystemRep& matterRep = getMyMatterSubsystemRep();
-        const int nb = matterRep.getNumBodies();
-        dp_GB.resize(nb);
-        assert(dp_GB.hasContiguousData());
-
-        const SBTreePositionCache& pc = matterRep.getTreePositionCache(s);
-        const Array_<Array_<MobilizedBodyIndex>>& levels =
-                matterRep.getMatterTopologyCache().mobodLevels;
-        Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
-
-        for (int i = 0; i < (int)levels.size(); ++i)
-            for (int j = 0; j < (int)levels[i].size(); ++j) {
-                const RigidBodyNode& node =
-                        matterRep.getRigidBodyNode(levels[i][j]);
-                node.multiplyByPositionJacobianFromMobilizer(
-                        pc, myMobilizedBodyIndex, localShift, dp_GBPtr);
-            }
-    }
-
-    Vec3 multiplyByPositionJacobianFromMobilizerTranspose(const State& s,
-            const Vector_<Vec3>& dp_GB) const {
-        const SimbodyMatterSubsystemRep& matterRep = getMyMatterSubsystemRep();
-        const int nb = matterRep.getNumBodies();
-        assert(dp_GB.size() == nb);
-        assert(dp_GB.hasContiguousData());
-
-        const SBTreePositionCache& pc = matterRep.getTreePositionCache(s);
-        const Array_<Array_<MobilizedBodyIndex>>& levels =
-                matterRep.getMatterTopologyCache().mobodLevels;
-        Vector_<Vec3> zTmp(nb); zTmp.setToZero();
-        const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
-        Vec3*       zTmpPtr  = zTmp.size()  ? &zTmp[0]  : nullptr;
-
-        for (int i = (int)levels.size() - 1; i >= 0; --i)
-            for (int j = 0; j < (int)levels[i].size(); ++j) {
-                const RigidBodyNode& node =
-                        matterRep.getRigidBodyNode(levels[i][j]);
-                node.multiplyByPositionJacobianFromMobilizerTranspose(
-                        pc, zTmpPtr, dp_GBPtr);
-            }
-        return zTmp[myMobilizedBodyIndex];
-    }
     const SpatialVec& getMobilizerVelocity(const State& s) const {
         const SBTreeVelocityCache& vc = getMyMatterSubsystemRep().getTreeVelocityCache(s);
         return getMyRigidBodyNode().getV_FM(vc);
@@ -909,34 +865,6 @@ public:
                 radiiIndex)).get();
     }
 
-    // d(p_GB)/d(r) = R_GF * diag(n), where n = R_FM.col(2) is the M-frame
-    // z-axis expressed in F (the ellipsoid surface normal at the current q).
-    // p_FM = (r[0]*n[0], r[1]*n[1], r[2]*n[2]), so the F-frame Jacobian
-    // is diag(n); rotating to Ground gives the columns of R_GF scaled by n.
-    Mat33 calcPositionJacobianWrtRadii(const State& s) const {
-        const SBTreePositionCache& pc =
-            getMyMatterSubsystemRep().getTreePositionCache(s);
-        const RigidBodyNode& node = getMyRigidBodyNode();
-        const Rotation R_GF = node.getX_GP(pc).R() * node.getX_PF(pc).R();
-        const Vec3 n = node.getX_FM(pc).R().col(2);
-        return Mat33(R_GF.col(0) * n[0],
-                     R_GF.col(1) * n[1],
-                     R_GF.col(2) * n[2]);
-    }
-
-    void multiplyByPositionJacobianWrtRadii(const State& s,
-            const Vec3& dRadii, Vector_<Vec3>& dp_GB) const {
-        const Vec3 localShift = calcPositionJacobianWrtRadii(s) * dRadii;
-        multiplyByPositionJacobianFromMobilizer(s, localShift, dp_GB);
-    }
-
-    Vec3 multiplyByPositionJacobianWrtRadiiTranspose(const State& s,
-            const Vector_<Vec3>& dp_GB) const {
-        const Vec3 sum =
-                multiplyByPositionJacobianFromMobilizerTranspose(s, dp_GB);
-        return ~calcPositionJacobianWrtRadii(s) * sum;
-    }
-
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
@@ -1170,35 +1098,6 @@ public:
             s.getDiscreteVariable(
                 getMyMatterSubsystemRep().getMySubsystemIndex(),
                 lengthIndex)).get();
-    }
-
-    // d(p_GB)/d(L) = R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)).
-    // Derives from p_FM = (q1*(2/3)L, -q0*(2/3)L, L - (4/15)L(q0^2 + q1^2))
-    // by holding q fixed and differentiating wrt L.
-    Vec3 calcPositionJacobianWrtLength(const State& s) const {
-        const SBTreePositionCache& pc =
-            getMyMatterSubsystemRep().getTreePositionCache(s);
-        const RigidBodyNode& node = getMyRigidBodyNode();
-        const Rotation R_GF = node.getX_GP(pc).R() * node.getX_PF(pc).R();
-        const Vec3& q = Vec3::getAs(&s.getQ()[node.getQIndex()]);
-        const Real q0 = q[0], q1 = q[1];
-        const Vec3 dpFM_dL((2.0/3.0)*q1,
-                           -(2.0/3.0)*q0,
-                           1.0 - (4.0/15.0)*(q0*q0 + q1*q1));
-        return R_GF * dpFM_dL;
-    }
-
-    void multiplyByPositionJacobianWrtLength(const State& s,
-            Real dLength, Vector_<Vec3>& dp_GB) const {
-        const Vec3 localShift = calcPositionJacobianWrtLength(s) * dLength;
-        multiplyByPositionJacobianFromMobilizer(s, localShift, dp_GB);
-    }
-
-    Real multiplyByPositionJacobianWrtLengthTranspose(const State& s,
-            const Vector_<Vec3>& dp_GB) const {
-        const Vec3 sum =
-                multiplyByPositionJacobianFromMobilizerTranspose(s, dp_GB);
-        return dot(calcPositionJacobianWrtLength(s), sum);
     }
 
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
@@ -1772,22 +1671,6 @@ public:
         return Mat33(R_GF * (sc[0] * UnitVec3::getAs(&Atrans(0,0))),
                      R_GF * (sc[1] * UnitVec3::getAs(&Atrans(0,1))),
                      R_GF * (sc[2] * UnitVec3::getAs(&Atrans(0,2))));
-    }
-
-    void multiplyByPositionJacobianWrtTranslationScale(const State& s,
-            const Vec3& dTransScale, Vector_<Vec3>& dp_GB) const {
-        const CustomImpl& cuImpl = getImpl().getCustomImpl();
-        const Vec3 localShift =
-                calcPositionJacobianWrtTranslationScale(s) * dTransScale;
-        cuImpl.multiplyByPositionJacobianFromMobilizer(s, localShift, dp_GB);
-    }
-
-    Vec3 multiplyByPositionJacobianWrtTranslationScaleTranspose(
-            const State& s, const Vector_<Vec3>& dp_GB) const {
-        const CustomImpl& cuImpl = getImpl().getCustomImpl();
-        const Vec3 sum = cuImpl.multiplyByPositionJacobianFromMobilizerTranspose(
-                s, dp_GB);
-        return ~calcPositionJacobianWrtTranslationScale(s) * sum;
     }
 
     void realizePosition(const State& s) const override {

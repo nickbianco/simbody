@@ -208,36 +208,25 @@ public:
     @see setTranslationScale() **/
     const Vec3& getTranslationScale(const State& state) const;
 
-    /** Compute dp_GB = J_t(state) * dTranslationScale, where J_t[i] =
-    d(p_GB[i])/d(tScale) for this FunctionBased mobilizer. The local Jacobian
-    column is R_GF * Atrans * diag(sc[3], sc[4], sc[5]), where sc[3..5] are
-    the three translation function values at the current q; the resulting body
-    shift is applied to this mobilizer's body and propagated to every
-    descendant body, with zero for every other body in the system.
+    /** Return d(p_GB)/d(tScale), the local Ground-frame position Jacobian
+    column of this FunctionBased mobilizer's body origin with respect to
+    its per-axis translation-output scale tScale (size 3). The formula is
+    R_GF * Atrans * diag(sc[3], sc[4], sc[5]), where sc[3..5] are the
+    three translation function values at the current q; evaluated at the
+    current State (which must be realized through Stage::Position).
 
-    @param[in]  state              Realized through Stage::Position.
-    @param[in]  dTranslationScale  Perturbation of the per-axis translation
-                                   output scale tScale (size 3).
-    @param[out] dp_GB              Per-body shift in Ground, indexed by
-                                   MobilizedBodyIndex. Resized to the
-                                   system's body count and zeroed before
-                                   accumulation. **/
-    void multiplyByPositionJacobianWrtTranslationScale(
-            const State& state,
-            const Vec3& dTranslationScale,
-            Vector_<Vec3>& dp_GB) const;
+    Compose with `SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation`
+    to build a system-level position Jacobian product:
+    \code
+    const Mat33 J = fb.calcPositionJacobianWrtTranslationScale(state);
+    matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, fb.getMobilizedBodyIndex(), J * dt, dp_GB);
+    \endcode
 
-    /** Compute dTranslationScale = ~J_t(state) * dp_GB. Sums dp_GB over this
-    body and all descendants, then projects onto the local Jacobian column.
-
-    @param[in]  state  Realized through Stage::Position.
-    @param[in]  dp_GB  Per-body perturbation-like vector, indexed by
-                       MobilizedBodyIndex.
-    @return            ~(R_GF * Atrans * diag(sc[3..5])) * (subtree-sum of
-                       dp_GB). **/
-    Vec3 multiplyByPositionJacobianWrtTranslationScaleTranspose(
-            const State& state,
-            const Vector_<Vec3>& dp_GB) const;
+    For the transpose path, pair with
+    `multiplyByPositionJacobianWrtMobilizerTranslationTranspose` and
+    project the returned subtree sum via `~J * sum`. **/
+    Mat33 calcPositionJacobianWrtTranslationScale(const State& state) const;
 };
 
 } // namespace SimTK
