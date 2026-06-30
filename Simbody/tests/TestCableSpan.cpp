@@ -1204,6 +1204,152 @@ void testRobustInitialPath()
         expectedLength);
 }
 
+/** CableSpan warm start test.
+
+We first test that, when the warm start is disabled, that the path produces the
+same solution at the same point when separated by an intermediate solution.
+Second, we test that disabling warm start increases the number of solver
+iterations. **/
+void testUseWarmStart()
+{
+    const bool show = false;
+
+    // Create the system.
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    CableSubsystem cables(system);
+
+    // Sphere obstacle radius.
+    const Real radius = 1.;
+
+    // The angle the cable makes w.r.t. the straight line connecting the
+    // attachment points.
+    const Real angle = 45. / 180. * Pi;
+
+    // A dummy body. The cable end points are attached to a translating body.
+    Body::Rigid aBody(MassProperties(1., Vec3(0), Inertia(1)));
+    MobilizedBody::Translation aMovingBody(
+        matter.Ground(),
+        Vec3(0.),
+        aBody,
+        Transform());
+
+    // Construct a new cable wrapping a sphere fixed in Ground.
+    CableSpan cable(
+        cables,
+        aMovingBody,
+        Vec3{radius * tan(angle / 2.), radius, 0.},
+        aMovingBody,
+        Vec3{radius * tan(angle / 2.), -radius, 0.});
+
+    // Add sphere obstacle, with the initial contact point hint chosen far from
+    // the optimal (shortest) path so that solving from the hint takes several
+    // iterations.
+    cable.addObstacle(
+        matter.Ground(),
+        Transform(),
+        std::shared_ptr<ContactGeometry>(new ContactGeometry::Sphere(radius)),
+        Vec3(-radius, 0., 1e-1));
+
+    // Configure the solver.
+    cable.setCurveSegmentAccuracy(1e-12);
+    cable.setSmoothnessTolerance(1e-8);
+    cable.setSolverMaxIterations(100);
+
+    // Visualization.
+    system.setUseUniformBackground(true); // no ground plane in display
+    std::unique_ptr<Visualizer> viz(show ? new Visualizer(system) : nullptr);
+    if (viz) {
+        viz->setShowFrameNumber(true);
+        viz->addDecorationGenerator(new CableDecorator(system, cable));
+    }
+
+    // Initialize the system and state.
+    system.realizeTopology();
+    const CableSpanObstacleIndex obsIx(0);
+
+    // A helper function to translate the moving body to a desired `q`,
+    // calculate a path solution, and return the path length and initial contact
+    // point.
+    auto solveStep = [&](State& s, const Vec3& q, Real& length) -> Vec3
+    {
+        aMovingBody.setQToFitTranslation(s, q);
+        system.realize(s, Stage::Report);
+        if (viz) {
+            viz->report(s);
+        }
+        SimTK_ASSERT_ALWAYS(
+            cable.isInContactWithObstacle(s, obsIx),
+            "testUseWarmStart: cable expected to be in contact with obstacle");
+        length = cable.calcLength(s);
+        const Vec3 initialPoint_G  =
+            cable.calcCurveSegmentInitialFrenetFrame(s, obsIx).p();
+        s.autoUpdateDiscreteVariables();
+        return initialPoint_G;
+    };
+
+    // Test the warm start accessors.
+    cable.setUseWarmStart(false);
+    SimTK_ASSERT_ALWAYS(
+        !cable.getUseWarmStart(),
+        "testUseWarmStart: getUseWarmStart() should return false");
+
+    // When warm start is disabled, test that solving at a point `qA`
+    // immediately before and after a point `qB` produce a path with the same
+    // length and initial curve point.
+    const Vec3 qA(0.0, 0.0, 0.0);
+    const Vec3 qB(0.2, -0.15, 0.25);
+    {
+        State s = system.getDefaultState();
+
+        Real lA0, lB, lA1;
+        const Vec3 pA0 = solveStep(s, qA, lA0);
+        solveStep(s, qB, lB);
+        const Vec3 pA1 = solveStep(s, qA, lA1);
+
+        SimTK_ASSERT2_ALWAYS(
+            std::abs(lA1 - lA0) < 1e-6,
+            "testUseWarmStart: with warm start disabled, revisiting a "
+            "configuration produced a different cable length (%.12f vs %.12f)",
+            lA0,
+            lA1);
+        SimTK_ASSERT1_ALWAYS(
+            (pA1 - pA0).norm() < 1e-6,
+            "testUseWarmStart: with warm start disabled, revisiting a "
+            "configuration produced a different initial point (error %e)",
+            (pA1 - pA0).norm());
+    }
+
+    // Test that the CableSpan solver takes more iterations when warm starts are
+    // disabled.
+    auto iterationsForSecondStep = [&](bool useWarmStart) -> int
+    {
+        cable.setUseWarmStart(useWarmStart);
+        State s = system.getDefaultState();
+
+        // Solve the path at point `qB`.
+        Real length;
+        solveStep(s, qB, length);
+
+        // Now solve the path at point `qA`, and record the number of solver
+        // iterations.
+        aMovingBody.setQToFitTranslation(s, qA);
+        system.realize(s, Stage::Report);
+        return cable.getNumSolverIterations(s);
+    };
+
+    const int iterationsWithWarmStart    = iterationsForSecondStep(true);
+    const int iterationsWithoutWarmStart = iterationsForSecondStep(false);
+
+    SimTK_ASSERT2_ALWAYS(
+        iterationsWithWarmStart < iterationsWithoutWarmStart,
+        "testUseWarmStart: enabling the warm start (%i iterations) did not "
+        "reduce the solver iterations versus restarting from the hint (%i "
+        "iterations)",
+        iterationsWithWarmStart,
+        iterationsWithoutWarmStart);
+}
+
 int main()
 {
     testSimpleCable();
@@ -1213,4 +1359,5 @@ int main()
     testAllSurfaceKinds(true);  // Test length derivative.
     testSolverOptimum();
     testRobustInitialPath();
+    testUseWarmStart();
 }

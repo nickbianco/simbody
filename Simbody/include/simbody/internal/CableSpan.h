@@ -304,26 +304,6 @@ public:
     **/
     UnitVec3 calcOriginTangentDirection(const State& state) const;
 
-    /** Calculate the unit force exerted by the cable at the cable origin (in
-    ground frame). The force is applied tangent to the cable span pointing
-    towards the termination, i.e., the same direction as returned by
-    calcOriginTangentDirection(). The effect of a tensile force applied to the
-    cable can be obtained by multiplying the returned unit force by the cable
-    tension. State must be realized to Stage::Position.
-    @param state State of the system.
-    @param[out] unitForce_G The resulting unit spatial force in ground frame.
-    **/
-    void calcOriginUnitForce(
-        const State& state,
-        SpatialVec& unitForce_G) const;
-
-    /** Calculate the cable span tangent direction at the termination. The
-    direction points along the path from the origin towards the termination.
-    State must be realized to Stage::Position.
-    @param state State of the system.
-    **/
-    UnitVec3 calcTerminationTangentDirection(const State& state) const;
-
     /** Calculate the unit force exerted by the cable at the cable termination
     (in ground frame). The force is applied tangent to the cable span pointing
     towards the origin, i.e., the opposite of the direction returned by
@@ -510,6 +490,18 @@ public:
 
     /** Set the algorithm used to compute the optimal path. **/
     void setAlgorithm(CableSpanAlgorithm algorithm);
+
+    /** Whether the solver uses the previously computed path as a warm
+    start to compute the next path solution. When true (the default), each path
+    computation is seeded with the previous optimal path, which is typically
+    much faster. When false, the path is always recomputed from each obstacle's
+    initial contact-point hint (see addObstacle and setObstacleContactPointHint)
+    every time the State is realized to Stage::Position. **/
+    bool getUseWarmStart() const;
+
+    /** Set whether the solver uses the previously computed path as a warm
+    start to compute the next path solution. **/
+    void setUseWarmStart(bool useWarmStart);
 
     ///@}
 
@@ -700,26 +692,6 @@ public:
     UnitVec3 calcViaPointOutgoingTangentDirection(
         const State& state,
         CableSpanViaPointIndex ix) const;
-
-    ///@}
-
-    /** @name Cache invalidation */
-    ///@{
-
-    /** Invalidate the cached path solution for this cable span, forcing a full
-    recomputation the next time the State is realized to Stage::Position.
-    State must have been realized to at least Stage::Topology.
-    @param state The State whose cache entries are to be invalidated. **/
-    void invalidatePositionCache(const State& state) const;
-
-    /** Reset the warm-start for each obstacle's curve segment to the initial
-    contact point hint. The warm-start is the previous curve segment solution
-    used to initialize the path solver. Calling this method discards the
-    previous solution; the solver will restart from the initial contact point
-    hints set for each obstacle. State must have been realized to at least
-    Stage::Topology.
-    @param state The State whose warm-start data is to be reset. **/
-    void resetWarmStart(State& state) const;
 
     ///@}
 

@@ -481,6 +481,10 @@ struct CableSpanParameters final : IntegratorTolerances {
     Real solverMaxStepSize = 10. / 180. * Pi;
     // The algorithm used to compute the optimal path.
     CableSpanAlgorithm algorithm = CableSpanAlgorithm::MinimumLength;
+    // Whether the solver uses the previously computed path as a warm start to
+    // compute the next path solution. When false, the path is always recomputed
+    // from each obstacle's initial contact-point hint.
+    bool useWarmStart = true;
 };
 
 } // namespace
@@ -710,21 +714,19 @@ public:
         getSubsystem().markCacheValueNotRealized(state, m_indexDataPos);
     }
 
-    void resetWarmStart(State& state) const
-    {
-        const CurveSegmentData::Instance dataInst = computeInitialInstanceData();
-        updPrevDataInst(state) = dataInst;
-        updDataInst(state) = dataInst;
-        getSubsystem().markDiscreteVarUpdateValueRealized(state, m_indexDataInst);
-    }
-
     const CurveSegmentData::Instance& getDataInst(const State& state) const
     {
         const CableSubsystem& subsystem = getSubsystem();
         if (!subsystem.isDiscreteVarUpdateValueRealized(
                 state,
                 m_indexDataInst)) {
-            updDataInst(state) = getPrevDataInst(state);
+            // If using a warm start, set the update value (i.e., the current
+            // path) using the previous path solution. Otherwise, when warm
+            // starts are disabled, always generate a fresh instance data object
+            // from the contact hint.
+            updDataInst(state) = getUseWarmStart()
+                                     ? getPrevDataInst(state)
+                                     : computeInitialInstanceData();
             subsystem.markDiscreteVarUpdateValueRealized(
                 state,
                 m_indexDataInst);
@@ -743,12 +745,6 @@ public:
     {
         return Value<CurveSegmentData::Instance>::downcast(
             getSubsystem().getDiscreteVariable(state, m_indexDataInst));
-    }
-
-    CurveSegmentData::Instance& updPrevDataInst(State& state) const
-    {
-        return Value<CurveSegmentData::Instance>::updDowncast(
-            getSubsystem().updDiscreteVariable(state, m_indexDataInst));
     }
 
     const CurveSegmentData::Position& getDataPos(const State& state) const
@@ -862,6 +858,8 @@ public:
     }
 
     const IntegratorTolerances& getIntegratorTolerances() const;
+
+    bool getUseWarmStart() const;
 
     //--------------------------------------------------------------------------
     // Utility functions.
@@ -1836,22 +1834,6 @@ public:
         }
     }
 
-    void invalidatePositionCache(const State& state) const
-    {
-        getSubsystem().markCacheValueNotRealized(state, m_indexDataPos);
-        getSubsystem().markCacheValueNotRealized(state, m_indexDataVel);
-        for (const CurveSegment& segment : m_curveSegments) {
-            segment.invalidatePosEntry(state);
-        }
-    }
-
-    void resetWarmStart(State& state) const
-    {
-        for (const CurveSegment& segment : m_curveSegments) {
-            segment.resetWarmStart(state);
-        }
-    }
-
     void realizeModel(State& state) const
     {
         // No choices at the moment.
@@ -2553,6 +2535,11 @@ private:
 const IntegratorTolerances& CurveSegment::getIntegratorTolerances() const
 {
     return getCable().getParameters();
+}
+
+bool CurveSegment::getUseWarmStart() const
+{
+    return getCable().getParameters().useWarmStart;
 }
 
 ObstacleIndex CurveSegment::findPrevObstacleInContactWithCable(
@@ -4804,6 +4791,16 @@ void CableSpan::setAlgorithm(CableSpanAlgorithm algorithm)
     updImpl().updParameters().algorithm = algorithm;
 }
 
+bool CableSpan::getUseWarmStart() const
+{
+    return getImpl().getParameters().useWarmStart;
+}
+
+void CableSpan::setUseWarmStart(bool useWarmStart)
+{
+    updImpl().updParameters().useWarmStart = useWarmStart;
+}
+
 Real CableSpan::calcLength(const State& s) const
 {
     return getImpl().getDataPos(s).cableLength;
@@ -4909,14 +4906,4 @@ UnitVec3 CableSpan::calcViaPointOutgoingTangentDirection(
     getImpl().realizePosition(state);
     const CableSpanData::Position& dataPos = getImpl().getDataPos(state);
     return dataPos.viaPointOutTangents_G[ix];
-}
-
-void CableSpan::invalidatePositionCache(const State& state) const
-{
-    getImpl().invalidatePositionCache(state);
-}
-
-void CableSpan::resetWarmStart(State& state) const
-{
-    getImpl().resetWarmStart(state);
 }
