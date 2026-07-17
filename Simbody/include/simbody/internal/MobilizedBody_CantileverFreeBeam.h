@@ -137,6 +137,8 @@ you should not attempt to do any dynamics in that configuration.
 [1] Young, W. C., and R. G. Budynas. (2002). Roark's Formulas for Stress and
     Strain (7th Edition). McGraw-Hill.
 
+The beam length L is an Instance-stage State variable; see setLength() and
+getLength().
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::CantileverFreeBeam :
         public MobilizedBody {
@@ -181,6 +183,28 @@ public:
     /** Get the default length of the beam as specified during construction or
     via setDefaultLength(). **/
     const Real& getDefaultLength() const;
+
+    void setLength(State& state, const Real& length) const;
+    const Real& getLength(const State& state) const;
+
+    /** Return d(p_GB)/d(L), the local Ground-frame position Jacobian
+    column of this CantileverFreeBeam's body origin with respect to the
+    beam length L. The formula is
+    R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)) evaluated at the
+    current State (which must be realized through Stage::Position).
+
+    Compose with `SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation`
+    to build a system-level position Jacobian product:
+    \code
+    const Vec3 J = cfb.calcPositionJacobianWrtLength(state);
+    matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, cfb.getMobilizedBodyIndex(), J * dL, dp_GB);
+    \endcode
+
+    For the transpose path, pair with
+    `multiplyByPositionJacobianWrtMobilizerTranslationTranspose` and
+    project the returned subtree sum via `dot(J, sum)`. **/
+    Vec3 calcPositionJacobianWrtLength(const State& state) const;
 
     /** Provide a default orientation for this mobilizer if you don't want to
     start with the identity rotation (that is, alignment of the F and M

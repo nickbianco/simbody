@@ -31,6 +31,7 @@
 #include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+#include "MobilizedBodyImpl.h" // need MobilizedBody::CantileverFreeBeamImpl
 
     // CANTILEVER FREE BEAM //
 
@@ -60,16 +61,13 @@
 // +/-90 degrees.
 
 class RBNodeCantileverFreeBeam : public RigidBodyNodeSpec<3, false> {
-    Real length;  // length of the beam
-    Real deflectionCoefficient;
-    Real displacementCoefficient;
 public:
 
 typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "cantilever free beam"; }
 
-RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
-                         const Real&           length,
+RBNodeCantileverFreeBeam(const MobilizedBody::CantileverFreeBeamImpl& impl,
+                         const MassProperties& mProps_B,
                          bool                  isReversed,
                          UIndex&               nextUSlot,
                          USquaredIndex&        nextUSqSlot,
@@ -79,20 +77,31 @@ RBNodeCantileverFreeBeam(const MassProperties& mProps_B,
         RigidBodyNode::QDotIsAlwaysTheSameAsU,
         RigidBodyNode::QuaternionIsNeverUsed,
         isReversed),
-    length(length)
+    impl(impl)
 {
-    // Multiplying this term by the beam deflection angle gives the beam
-    // deflection, which is the absolute value of the beam's end point position
-    // in the Fx and Fy directions. This coefficient may also be used to
-    // calculate the beam deflection speed.
-    deflectionCoefficient = (2.0 / 3.0) * length;
-
-    // Multiplying this term by the beam deflection angle squared gives the beam
-    // displacement, which can be subtracted from the beam length to give the
-    // Fz-position of the beam's endpoint.
-    displacementCoefficient = (4.0 / 15.0) * length;
-
     this->updateSlots(nextUSlot, nextUSqSlot, nextQSlot);
+}
+
+const Real& getLength(const SBStateDigest& sbs) const {
+    return impl.getLength(sbs.getState());
+}
+
+// d(p_GB)/d(L) = R_GF * ((2/3)q1, -(2/3)q0, 1 - (4/15)(q0^2 + q1^2)),
+// derived by holding q fixed and differentiating
+//   p_FM = (q1*(2/3)L, -q0*(2/3)L, L - (4/15)L*(q0^2 + q1^2))
+// wrt L. The 3-vector `q` is this mobilizer's three generalized
+// coordinates (the public MobilizedBody method fetches it from the
+// State and passes it in here). Used by
+// MobilizedBody::CantileverFreeBeam::multiplyByPositionJacobianWrtLength{,Transpose}.
+Vec3 calcPositionJacobianWrtLength(const SBInstanceVars&      iv,
+                                   const SBTreePositionCache& pc,
+                                   const Vec3&                q) const {
+    const Rotation R_GF = this->getX_GP(pc).R() * this->getX_PF(iv).R();
+    const Real q0 = q[0], q1 = q[1];
+    const Vec3 dpFM_dL((2.0 / 3.0) * q1,
+                       -(2.0 / 3.0) * q0,
+                       1.0 - (4.0 / 15.0) * (q0 * q0 + q1 * q1));
+    return R_GF * dpFM_dL;
 }
 
     // Implementations of virtual methods.
@@ -151,17 +160,20 @@ void setUToFitLinearVelocityImpl(const SBStateDigest& sbs, const Vector& q,
 {
     Real q0 = this->fromQ(q)[0];
     Real q1 = this->fromQ(q)[1];
+    const Real& L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
     Matrix m(3, 2, 0.0);
 
     // The y-component of qdot induces a positive Fx speed.
-    m(0, 1) = deflectionCoefficient;
+    m(0, 1) = dC;
 
     // The x-component of qdot induces a negative Fy speed.
-    m(1, 0) = -deflectionCoefficient;
+    m(1, 0) = -dC;
 
     // The x- and y-components of qdot induce a negative Fz speed.
-    m(2, 0) = -2.0*displacementCoefficient * q0;
-    m(2, 1) = -2.0*displacementCoefficient * q1;
+    m(2, 0) = -2.0*pC * q0;
+    m(2, 1) = -2.0*pC * q1;
 
     // Solve for qdot0 and qdot1 via least squares.
     FactorQTZ qtz(m);
@@ -215,10 +227,13 @@ void calcX_FM(const SBStateDigest& sbs,
 
     const Real& q0 = Vec3::getAs(q)[0];
     const Real& q1 = Vec3::getAs(q)[1];
+    const Real& L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
     X_F0M0.updP() = Vec3(
-        q1 * deflectionCoefficient,
-        -q0 * deflectionCoefficient,
-        length - displacementCoefficient * (q0*q0 + q1*q1)
+        q1 * dC,
+        -q0 * dC,
+        L - pC * (q0*q0 + q1*q1)
     );
 }
 
@@ -236,14 +251,17 @@ void calcAcrossJointVelocityJacobian(const SBStateDigest& sbs,
     const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
     const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
     const Vec3& q = this->fromQ(sbs.getQ());
+    const Real& L  = getLength(sbs);
+    const Real dC = (2.0 / 3.0) * L;
+    const Real pC = (4.0 / 15.0) * L;
 
     // Fill in columns of H_FM. See Rotation::calcNInvForBodyXYZInParentFrame().
     // Include the contributions of the Euler angle derivatives to the linear
     // velocity of the beam's endpoint.
     H_FM(0) = SpatialVec(Vec3(1,     0,    0),
-        Vec3(0, -deflectionCoefficient, -2.0*displacementCoefficient*q[0]));
+        Vec3(0, -dC, -2.0*pC*q[0]));
     H_FM(1) = SpatialVec(Vec3(0,    c0,    s0),
-        Vec3(deflectionCoefficient, 0, -2.0*displacementCoefficient*q[1]));
+        Vec3(dC, 0, -2.0*pC*q[1]));
     H_FM(2) = SpatialVec(Vec3(s1, -s0*c1, c0*c1), Vec3(0));
 }
 
@@ -263,21 +281,23 @@ void calcAcrossJointVelocityJacobianDot(
     // Use "upd" here because we're realizing velocities now.
     const Vec3& qdot = this->fromQ(sbs.updQDot());
     const Real qd0 = qdot[0], qd1 = qdot[1];
+    const Real pC = (4.0 / 15.0) * getLength(sbs);
 
     const Real dc0 = -s0*qd0, dc1 = -s1*qd1; // derivatives of c0,c1,s0,s1
     const Real ds0 =  c0*qd0, ds1 =  c1*qd1;
 
     // Compare with H_FM above.
     HDot_FM(0) = SpatialVec(Vec3(0, 0, 0),
-        Vec3(0, 0, -2.0*displacementCoefficient*qd0));
+        Vec3(0, 0, -2.0*pC*qd0));
     HDot_FM(1) = SpatialVec(Vec3(0, dc0, ds0),
-        Vec3(0, 0, -2.0*displacementCoefficient*qd1));
+        Vec3(0, 0, -2.0*pC*qd1));
     HDot_FM(2) = SpatialVec(Vec3(ds1, -ds0*c1-s0*dc1, dc0*c1+c0*dc1), Vec3(0));
 }
 
 // Can use default for calcQDot, multiplyByN, etc., since qdot==u for
 // CantileverFreeBeam mobilizer.
-
+private:
+    const MobilizedBody::CantileverFreeBeamImpl& impl;
 };
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_CANTILEVER_FREE_BEAM_H_

@@ -35,6 +35,7 @@
 #include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+#include "MobilizedBodyImpl.h" // need MobilizedBody::EllipsoidImpl
 
 
     // ELLIPSOID //
@@ -72,23 +73,38 @@
 // This mobilizer was written by Ajay Seth and hacked somewhat by Sherm.
 
 class RBNodeEllipsoid : public RigidBodyNodeSpec<3, false> {
-    Vec3 semi; // semi axis dimensions in x,y,z resp.
 public:
 
 typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "ellipsoid"; }
 
-RBNodeEllipsoid(const MassProperties& mProps_B,
-              const Vec3&           radii, // x,y,z
-              bool                  isReversed,
-              UIndex&               nextUSlot,
-              USquaredIndex&        nextUSqSlot,
-              QIndex&               nextQSlot)
+RBNodeEllipsoid(const MobilizedBody::EllipsoidImpl& impl,
+                const MassProperties& mProps_B,
+                bool                  isReversed,
+                UIndex&               nextUSlot,
+                USquaredIndex&        nextUSqSlot,
+                QIndex&               nextQSlot)
   : RigidBodyNodeSpec<3, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
                          RigidBodyNode::QDotMayDifferFromU, RigidBodyNode::QuaternionMayBeUsed, isReversed),
-    semi(radii)
+    impl(impl)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
+}
+
+const Vec3& getRadii(const SBStateDigest& sbs) const {
+    return impl.getRadii(sbs.getState());
+}
+
+// d(p_GB)/d(r) = R_GF * diag(n), where n = R_FM.col(2) is the M-frame
+// z-axis (ellipsoid surface normal) expressed in F. Used by
+// MobilizedBody::Ellipsoid::multiplyByPositionJacobianWrtRadii{,Transpose}.
+Mat33 calcPositionJacobianWrtRadii(const SBInstanceVars&      iv,
+                                   const SBTreePositionCache& pc) const {
+    const Rotation R_GF = this->getX_GP(pc).R() * this->getX_PF(iv).R();
+    const Vec3 n = this->getX_FM(pc).R().col(2);
+    return Mat33(R_GF.col(0) * n[0],
+                 R_GF.col(1) * n[1],
+                 R_GF.col(2) * n[2]);
 }
 
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
@@ -235,6 +251,7 @@ void calcX_FM(const SBStateDigest& sbs,
     }
 
     // Translation.
+    const Vec3& semi = getRadii(sbs);
     const Vec3& n = X_F0M0.z(); // just calculated above
     X_F0M0.updP() = Vec3(semi[0]*n[0], semi[1]*n[1], semi[2]*n[2]);
 }
@@ -251,6 +268,7 @@ void calcAcrossJointVelocityJacobian(
     // used to *define* this mobilizer, not necessarily the ones used after
     // handling mobilizer reversal.
     const Vec3 n = this->findX_F0M0(pc).z();
+    const Vec3& semi = getRadii(sbs);
 
     H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
     H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
@@ -271,6 +289,7 @@ void calcAcrossJointVelocityJacobianDot(
     const Vec3       n      = this->findX_F0M0(pc).z();
     const Vec3       w_F0M0 = this->find_w_F0M0(pc, vc);
     const Vec3       ndot   = w_F0M0 % n; // w_FM x n (9 flops)
+    const Vec3&      semi   = getRadii(sbs);
 
     HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*semi[1], ndot[1]*semi[2]) );
     HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*semi[0],       0,        -ndot[0]*semi[2]) );
@@ -541,7 +560,8 @@ void convertToQuaternions(const Vector& inputQ, Vector& outputQ) const {
     rot.setRotationToBodyFixedXYZ(this->fromQ(inputQ));
     this->toQuat(outputQ) = rot.convertRotationToQuaternion().asVec4();
 }
-
+private:
+    const MobilizedBody::EllipsoidImpl& impl;
 };
 
 

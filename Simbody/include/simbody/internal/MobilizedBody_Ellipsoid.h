@@ -41,7 +41,11 @@ this mobilizer are also the same as for a Ball mobilizer, that is
 the three measure numbers of the angular velocity vector w_FM, the
 relative angular velocity of the outboard M frame in the inboard F frame,
 expressed in the F frame. That is unchanged by setting the "use Euler
-angles" modeling option. Note that qdot != u for this mobilizer. **/
+angles" modeling option. Note that qdot != u for this mobilizer.
+
+The semi-axis radii are an Instance-stage State variable; see setRadii() and
+getRadii().
+**/
 class SimTK_SIMBODY_EXPORT MobilizedBody::Ellipsoid : public MobilizedBody {
 public:
     /** Default constructor provides an empty handle that can be assigned to
@@ -81,6 +85,37 @@ public:
     /** Get the default semi-axis dimensions of the ellipsoid as specified 
     during construction or via setDefaultRadii(). **/
     const Vec3& getDefaultRadii() const;
+
+    /** Override the semi-axis dimensions of the ellipsoid for this State.
+    This is an Instance-stage variable: setting it invalidates Stage::Instance
+    and higher, so the State must be re-realized to Position before any
+    kinematic query reflects the new radii. All three components must be
+    strictly positive. The topology default (see setDefaultRadii()) is used
+    as the initial value when the State is created.
+    @see setDefaultRadii(), getRadii() **/
+    void setRadii(State& state, const Vec3& radii) const;
+    /** Get the semi-axis dimensions of the ellipsoid currently in effect for
+    this State. The State must have been realized to Stage::Instance or higher.
+    @see setRadii(), getDefaultRadii() **/
+    const Vec3& getRadii(const State& state) const;
+
+    /** Return d(p_GB)/d(radii), the local Ground-frame position Jacobian
+    column of this Ellipsoid's body origin with respect to its three
+    semi-axis radii. The formula is R_GF * diag(R_FM.col(2)), evaluated
+    at the current State (which must be realized through Stage::Position).
+
+    To build a full system-level position Jacobian product, compose with
+    `SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation`:
+    \code
+    const Mat33 J = ellipsoid.calcPositionJacobianWrtRadii(state);
+    matter.multiplyByPositionJacobianWrtMobilizerTranslation(
+            state, ellipsoid.getMobilizedBodyIndex(), J * dRadii, dp_GB);
+    \endcode
+
+    For the transpose path, pair with
+    `multiplyByPositionJacobianWrtMobilizerTranslationTranspose` and
+    project the returned subtree sum via `~J * sum`. **/
+    Mat33 calcPositionJacobianWrtRadii(const State& state) const;
 
 
     /** Provide a default orientation for this mobilizer if you don't want to

@@ -2025,6 +2025,98 @@ void SimbodyMatterSubsystem::calcBiasForFrameJacobian
 
 
 //==============================================================================
+//   JACOBIANS WRT INBOARD/OUTBOARD MOBILIZER FRAME POSITIONS
+//==============================================================================
+
+void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtInboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_PF,
+        Vector_<Vec3>&       dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(dp_PF.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtInboardFramePositions",
+        "dp_PF size %d does not match number of bodies %d.",
+        dp_PF.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtInboardFramePositions(s, dp_PF, dp_GB);
+}
+
+void SimbodyMatterSubsystem::
+multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_PF) const {
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtInboardFramePositionsTranspose",
+        "dp_GB size %d does not match number of bodies %d.",
+        dp_GB.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+            s, dp_GB, dp_PF);
+}
+
+void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_BM,
+        Vector_<Vec3>&       dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(dp_BM.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtOutboardFramePositions",
+        "dp_BM size %d does not match number of bodies %d.",
+        dp_BM.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtOutboardFramePositions(s, dp_BM, dp_GB);
+}
+
+void SimbodyMatterSubsystem::
+multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_BM) const {
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtOutboardFramePositionsTranspose",
+        "dp_GB size %d does not match number of bodies %d.",
+        dp_GB.size(), getNumBodies());
+    getRep().multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+            s, dp_GB, dp_BM);
+}
+
+void SimbodyMatterSubsystem::multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(
+        mobodIdx.isValid() && mobodIdx < getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslation",
+        "mobodIdx %d is not a valid MobilizedBodyIndex (system has %d bodies).",
+        (int)mobodIdx, getNumBodies());
+    getRep().multiplyByPositionJacobianWrtMobilizerTranslation(
+            s, mobodIdx, localShift, dp_GB);
+}
+
+Vec3 SimbodyMatterSubsystem::
+multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const {
+    SimTK_APIARGCHECK2_ALWAYS(
+        mobodIdx.isValid() && mobodIdx < getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslationTranspose",
+        "mobodIdx %d is not a valid MobilizedBodyIndex (system has %d bodies).",
+        (int)mobodIdx, getNumBodies());
+    SimTK_APIARGCHECK2_ALWAYS(dp_GB.size() == getNumBodies(),
+        "SimbodyMatterSubsystem",
+        "multiplyByPositionJacobianWrtMobilizerTranslationTranspose",
+        "dp_GB size %d does not match number of bodies %d.",
+        dp_GB.size(), getNumBodies());
+    return getRep().multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+            s, mobodIdx, dp_GB);
+}
+
+
+//==============================================================================
 //                              MISC OPERATORS
 //==============================================================================
 

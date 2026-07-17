@@ -342,6 +342,45 @@ public:
         // No generalized speeds so no contribution to JtX.
     }
 
+    // Ground has no parent and no inboard/outboard mobilizer frame. For the
+    // forward operators we simply zero out dp_GB[0]; for the transpose ones
+    // we accumulate children's subtree sums into subtreeSum[0] (so any
+    // caller that reads it sees a self-consistent value) and write the
+    // outgoing per-mobilizer slot to zero.
+    void multiplyByPositionJacobianWrtInboardFramePosition(
+        const SBTreePositionCache&,
+        const Vec3*, Vec3* dp_GB) const override
+    {
+        dp_GB[0] = Vec3(0);
+    }
+
+    void multiplyByPositionJacobianWrtInboardFramePositionTranspose(
+        const SBTreePositionCache&,
+        Vec3* subtreeSum, const Vec3* dp_GB, Vec3* dp_PF) const override
+    {
+        subtreeSum[0] = dp_GB[0];
+        for (unsigned i = 0; i < children.size(); ++i)
+            subtreeSum[0] += subtreeSum[children[i]->getNodeNum()];
+        dp_PF[0] = Vec3(0);
+    }
+
+    void multiplyByPositionJacobianWrtOutboardFramePosition(
+        const SBTreePositionCache&,
+        const Vec3*, Vec3* dp_GB) const override
+    {
+        dp_GB[0] = Vec3(0);
+    }
+
+    void multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
+        const SBTreePositionCache&,
+        Vec3* subtreeSum, const Vec3* dp_GB, Vec3* dp_BM) const override
+    {
+        subtreeSum[0] = dp_GB[0];
+        for (unsigned i = 0; i < children.size(); ++i)
+            subtreeSum[0] += subtreeSum[children[i]->getNodeNum()];
+        dp_BM[0] = Vec3(0);
+    }
+
     void calcEquivalentJointForces(
         const SBTreePositionCache&  pc,
         const SBTreeVelocityCache&,

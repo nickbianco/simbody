@@ -844,11 +844,32 @@ public:
     }
     const Vec3& getDefaultRadii() const {return defaultRadii;}
 
+    void realizeTopologyVirtual(State& s) const override {
+        radiiIndex = s.allocateDiscreteVariable(
+            getMyMatterSubsystemRep().getMySubsystemIndex(),
+            Stage::Instance,
+            new Value<Vec3>(defaultRadii));
+    }
+
+    void setRadii(State& s, const Vec3& r) const {
+        Value<Vec3>::updDowncast(
+            s.updDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                radiiIndex)).upd() = r;
+    }
+    const Vec3& getRadii(const State& s) const {
+        return Value<Vec3>::downcast(
+            s.getDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                radiiIndex)).get();
+    }
+
     SimTK_DOWNCAST(EllipsoidImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::Ellipsoid;
-    Vec3 defaultRadii;    // used for visualization only
-    Quaternion defaultQ;  // the default orientation
+    Vec3 defaultRadii;                        // topology default
+    Quaternion defaultQ;                      // the default orientation
+    mutable DiscreteVariableIndex radiiIndex; // allocated at topology stage
 };
 
 class MobilizedBody::TranslationImpl : public MobilizedBodyImpl {
@@ -1058,11 +1079,32 @@ public:
     }
     const Real& getDefaultLength() const {return defaultLength;}
 
+    void realizeTopologyVirtual(State& s) const override {
+        lengthIndex = s.allocateDiscreteVariable(
+            getMyMatterSubsystemRep().getMySubsystemIndex(),
+            Stage::Instance,
+            new Value<Real>(defaultLength));
+    }
+
+    void setLength(State& s, const Real& length) const {
+        Value<Real>::updDowncast(
+            s.updDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                lengthIndex)).upd() = length;
+    }
+    const Real& getLength(const State& s) const {
+        return Value<Real>::downcast(
+            s.getDiscreteVariable(
+                getMyMatterSubsystemRep().getMySubsystemIndex(),
+                lengthIndex)).get();
+    }
+
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::CantileverFreeBeam;
-    Real defaultLength; // used for visualization only
-    Vec3 defaultQ;      // the default orientation
+    Real defaultLength;                        // topology default
+    Vec3 defaultQ;                             // the default orientation
+    mutable DiscreteVariableIndex lengthIndex; // allocated at topology stage
 };
 
 /////////////////////////////////////////////////

@@ -556,11 +556,46 @@ public:
     // generalized coordinates q. This is an O(n) operator which can be called 
     // after realizePosition(). Because this is an operator, there is no effect
     // on the State cache.
-    void multiplyBySystemJacobianTranspose(const State&, 
-        const Vector_<SpatialVec>& X, 
+    void multiplyBySystemJacobianTranspose(const State&,
+        const Vector_<SpatialVec>& X,
         Vector&                    JtX) const;
 
-    // Given a set of body forces, return the equivalent set of mobilizer torques 
+    void multiplyByPositionJacobianWrtInboardFramePositions(const State& s,
+        const Vector_<Vec3>& dp_PF,
+        Vector_<Vec3>&       dp_GB) const;
+
+    void multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_PF) const;
+
+    void multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_BM,
+        Vector_<Vec3>&       dp_GB) const;
+
+    void multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_BM) const;
+
+    // Propagate a Ground-frame translation shift at one mobilizer
+    // through its kinematic subtree. Implemented as a thin dispatch
+    // through the existing RigidBodyNode::applyPositionShift virtual.
+    void multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const;
+
+    // Transpose: return the subtree-sum of dp_GB at mobodIdx via the
+    // existing RigidBodyNode::computeSubtreeSum virtual.
+    Vec3 multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const;
+
+    // Given a set of body forces, return the equivalent set of mobilizer torques
     // IGNORING CONSTRAINTS.
     // Must be in DynamicsStage so that articulated body inertias are available,
     // however, velocities are ignored. This operator has NO effect on the state

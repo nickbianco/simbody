@@ -32,6 +32,7 @@
 #include "RigidBodyNodeSpec_SphericalCoords.h"
 #include "RigidBodyNodeSpec_Ball.h"
 #include "RigidBodyNodeSpec_Ellipsoid.h"
+#include "RigidBodyNodeSpec_Translation.h"
 #include "RigidBodyNodeSpec_Free.h"
 #include "RigidBodyNodeSpec_Screw.h"
 #include "RigidBodyNodeSpec_Universal.h"
@@ -44,6 +45,7 @@
 #include "RigidBodyNodeSpec_CantileverFreeBeam.h"
 #include "RigidBodyNodeSpec_Custom.h"
 #include "RigidBodyNodeSpec_Translation.h"
+
 
     /////////////////////////////////////////////////////////
     // MoblizedBodyImpl::createRigidBodyNode() definitions //
@@ -198,11 +200,10 @@ RigidBodyNode* MobilizedBody::EllipsoidImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    return new RBNodeEllipsoid(
+    return new RBNodeEllipsoid(*this,
         getDefaultRigidBodyMassProperties(),
-        getDefaultRadii(),
         isReversed(),
-        nextUSlot, nextUSqSlot, nextQSlot);
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::LineOrientationImpl::createRigidBodyNode(
@@ -232,22 +233,20 @@ RigidBodyNode* MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
     USquaredIndex& nextUSqSlot,
     QIndex&        nextQSlot) const
 {
-    return new RBNodeCantileverFreeBeam(
+    return new RBNodeCantileverFreeBeam(*this,
         getDefaultRigidBodyMassProperties(),
-        getDefaultLength(),
         isReversed(),
-        nextUSlot, nextUSqSlot, nextQSlot);
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::TranslationImpl::createRigidBodyNode(
-    UIndex&        nextUSlot,
-    USquaredIndex& nextUSqSlot,
-    QIndex&        nextQSlot) const
-{
+        UIndex&        nextUSlot,
+        USquaredIndex& nextUSqSlot,
+        QIndex&        nextQSlot) const {
     return new RBNodeTranslate(
         getDefaultRigidBodyMassProperties(),
         isReversed(),
-        nextUSlot, nextUSqSlot, nextQSlot);
+        nextUSlot,nextUSqSlot,nextQSlot);
 }
 
 RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(

@@ -1227,6 +1227,103 @@ SpatialVec calcBiasForFrameJacobian(const State&         state,
 /**@}**/
 
 //==============================================================================
+/** @name           Task Space Jacobians w.r.t. Mobilizer Frames
+**/
+
+/**@{**/
+
+/**
+@param[in]  state
+    A State that has already been realized through Position stage.
+@param[in]  dp_PF
+@param[out] dp_GB
+**/
+void multiplyByPositionJacobianWrtInboardFramePositions(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_PF,
+        Vector_<Vec3>&                    dp_GB) const;
+
+/**
+@param[in]  state
+    A State that has already been realized through Position stage.
+@param[in]  dp_GB
+@param[out] dp_PF
+**/
+void multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_GB,
+        Vector_<Vec3>&                    dp_PF) const;
+
+/**
+@param[in]  state
+    A State that has already been realized through Position stage.
+@param[in]  dp_BM
+@param[out] dp_GB
+**/
+void multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_BM,
+        Vector_<Vec3>&                    dp_GB) const;
+
+/**
+@param[in]  state
+    A State that has already been realized through Position stage.
+@param[in]  dp_GB
+@param[out] dp_BM
+**/
+void multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&                      state,
+        const Vector_<Vec3>&              dp_GB,
+        Vector_<Vec3>&                    dp_BM) const;
+
+/** Write `localShift` to `dp_GB` at the given mobilizer's body and at
+every descendant body in its kinematic subtree, leaving all other
+entries zero. Useful for composing a per-mobilizer parameter Jacobian
+column (where the Jacobian column J yields a Ground-frame translation
+shift J * dParam at this mobilizer's body) into a system-level
+position Jacobian.
+@param[in]  state
+    A State that has already been realized through Stage::Position.
+@param[in]  mobodIdx
+    Index of the mobilizer whose translation parameter is being
+    differentiated. Must be a valid MobilizedBodyIndex in this matter
+    subsystem.
+@param[in]  localShift
+    The Ground-frame translation shift at the mobilizer's body.
+@param[out] dp_GB
+    Resized to getNumBodies(). On return, `dp_GB[bi] = localShift` for
+    every body bi in the subtree rooted at `mobodIdx` (including
+    mobodIdx itself), and `Vec3(0)` for every other body.
+**/
+void multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&                      state,
+        MobilizedBodyIndex                mobodIdx,
+        const Vec3&                       localShift,
+        Vector_<Vec3>&                    dp_GB) const;
+
+/** Transpose of multiplyByPositionJacobianWrtMobilizerTranslation: return
+`dp_GB[mobodIdx]` plus the per-body sums over every descendant of
+mobodIdx. Caller multiplies the returned subtree-sum by ~J (the
+parameter-specific Jacobian-column transpose) to obtain the parameter
+gradient.
+@param[in]  state
+    A State that has already been realized through Stage::Position.
+@param[in]  mobodIdx
+    Index of the mobilizer whose translation parameter is being
+    differentiated.
+@param[in]  dp_GB
+    A per-body Vec3 input, size = getNumBodies().
+@return  Sum of `dp_GB[bi]` over every body bi in the subtree rooted
+    at `mobodIdx`.
+**/
+Vec3 multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&                      state,
+        MobilizedBodyIndex                mobodIdx,
+        const Vector_<Vec3>&              dp_GB) const;
+
+/**@}**/
+
+//==============================================================================
 /** @name               System matrix manipulation
 The documentation for the SimbodyMatterSubsystem describes the system equations
 in matrix notion, although internal computations are generally matrix-free.

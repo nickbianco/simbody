@@ -6352,6 +6352,146 @@ void SimbodyMatterSubsystemRep::multiplyBySystemJacobianTranspose
 //................... MULTIPLY BY SYSTEM JACOBIAN TRANSPOSE ....................
 
 
+// =============================================================================
+//             JACOBIANS WRT MOBILIZER INBOARD AND OUTBOARD FRAMES
+// =============================================================================
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtInboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_PF,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    assert(dp_PF.size() == nb);
+    dp_GB.resize(nb);
+    assert(dp_PF.hasContiguousData() && dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_PFPtr = dp_PF.size() ? &dp_PF[0] : nullptr;
+    Vec3*       dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    for (int i = 0; i < (int)rbNodeLevels.size(); ++i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtInboardFramePosition(
+                    pc, dp_PFPtr, dp_GBPtr);
+        }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_PF) const {
+    const int nb = getNumBodies();
+    assert(dp_GB.size() == nb);
+    dp_PF.resize(nb);
+    assert(dp_GB.hasContiguousData() && dp_PF.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vector_<Vec3> zTemp(nb); zTemp.setToZero();
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    Vec3*       dp_PFPtr = dp_PF.size() ? &dp_PF[0] : nullptr;
+    Vec3*       zTempPtr = zTemp.size() ? &zTemp[0] : nullptr;
+
+    for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtInboardFramePositionTranspose(
+                    pc, zTempPtr, dp_GBPtr, dp_PFPtr);
+        }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtOutboardFramePositions(
+        const State&         s,
+        const Vector_<Vec3>& dp_BM,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    assert(dp_BM.size() == nb);
+    dp_GB.resize(nb);
+    assert(dp_BM.hasContiguousData() && dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_BMPtr = dp_BM.size() ? &dp_BM[0] : nullptr;
+    Vec3*       dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    for (int i = 0; i < (int)rbNodeLevels.size(); ++i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtOutboardFramePosition(
+                    pc, dp_BMPtr, dp_GBPtr);
+        }
+}
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtOutboardFramePositionsTranspose(
+        const State&         s,
+        const Vector_<Vec3>& dp_GB,
+        Vector_<Vec3>&       dp_BM) const {
+    const int nb = getNumBodies();
+    assert(dp_GB.size() == nb);
+    dp_BM.resize(nb);
+    assert(dp_GB.hasContiguousData() && dp_BM.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vector_<Vec3> zTemp(nb); zTemp.setToZero();
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    Vec3*       dp_BMPtr = dp_BM.size() ? &dp_BM[0] : nullptr;
+    Vec3*       zTempPtr = zTemp.size() ? &zTemp[0] : nullptr;
+
+    for (int i = (int)rbNodeLevels.size() - 1; i >= 0; --i)
+        for (int j = 0; j < (int)rbNodeLevels[i].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[i][j];
+            node.multiplyByPositionJacobianWrtOutboardFramePositionTranspose(
+                    pc, zTempPtr, dp_GBPtr, dp_BMPtr);
+        }
+}
+
+//.............JACOBIANS WRT MOBILIZER INBOARD AND OUTBOARD FRAMES..............
+
+
+// =============================================================================
+//       JACOBIAN WRT MOBILIZER GROUND-FRAME TRANSLATION (single mobilizer)
+// =============================================================================
+// Forward: propagate a Ground-frame translation shift from one mobilizer
+// through its kinematic subtree. Implemented as a thin dispatch through
+// the existing RigidBodyNode::applyPositionShift virtual.
+//
+// Transpose: return the subtree-sum of dp_GB at mobodIdx via the
+// existing RigidBodyNode::computeSubtreeSum virtual.
+
+void SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtMobilizerTranslation(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vec3&          localShift,
+        Vector_<Vec3>&       dp_GB) const {
+    const int nb = getNumBodies();
+    dp_GB.resize(nb);
+    dp_GB = Vec3(0);
+    assert(dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+
+    getRigidBodyNode(mobodIdx).applyPositionShift(pc, localShift, dp_GBPtr);
+}
+
+Vec3 SimbodyMatterSubsystemRep::
+multiplyByPositionJacobianWrtMobilizerTranslationTranspose(
+        const State&         s,
+        MobilizedBodyIndex   mobodIdx,
+        const Vector_<Vec3>& dp_GB) const {
+    const int nb = getNumBodies();
+    assert(dp_GB.size() == nb);
+    assert(dp_GB.hasContiguousData());
+
+    const SBTreePositionCache& pc = getTreePositionCache(s);
+    const Vec3* dp_GBPtr = dp_GB.size() ? &dp_GB[0] : nullptr;
+    return getRigidBodyNode(mobodIdx).computeSubtreeSum(pc, dp_GBPtr);
+}
+
+//...........JACOBIAN WRT MOBILIZER GROUND-FRAME TRANSLATION..............
 
 // =============================================================================
 //                     CALC TREE EQUIVALENT MOBILITY FORCES
