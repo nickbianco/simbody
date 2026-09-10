@@ -21,17 +21,20 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
-/* Sandbox containing every calculation needed to perform inverse dynamics on a
-double pendulum, i.e. to solve
+/* Every step of Simbody's O(n) inverse dynamics, written out for a multibody
+system with Pin, Ball and Free mobilizers, i.e. solving
 
         tau = M(q) udot + f_inertial(q,u) - f_applied
 
 for the mobility forces tau. The calculations are grouped and named after the
-corresponding RigidBodyNode/RigidBodyNodeSpec methods so they can be compared
-side by side with Simbody's internals; only the Pin-specific pieces (calcX_FM,
-calcAcrossJointVelocityJacobian, calcAcrossJointVelocityJacobianDot) are
-specialized here. The result is checked against
-SimbodyMatterSubsystem::calcResidualForceIgnoringConstraints(). */
+corresponding RigidBodyNode/RigidBodyNodeSpec methods so they can be read side
+by side with Simbody's internals. Only three pieces are mobilizer-specific --
+calcX_FM(), calcAcrossJointVelocityJacobian() and its Dot form -- and each is
+implemented for all three mobilizer types here, so the multi-DoF paths get
+exercised rather than assumed.
+
+Each intermediate is checked against the corresponding Simbody quantity, and
+the resulting tau against calcResidualForceIgnoringConstraints(). */
 
 #include "SimTKsimbody.h"
 
@@ -44,143 +47,160 @@ using std::endl;
 
 static const Real Tol = 1e-10;
 
-SpatialVec cross(const SpatialVec& v, const SpatialVec& u) {
-    SpatialVec w;
-    w[0] = v[0] % u[0];
-    w[1] = v[1] % u[0] + v[0] % u[1];
-}
+static const Vec3 GravityVec(0, -9.81, 0);
 
-SpatialVec crossStar(const SpatialVec& v, const SpatialVec& f) {
-    SpatialVec c;
-    c[0] = v[0] % f[0] + v[1] % f[1];
-    c[1] = v[0] % f[1];
-}
-
-SpatialVec crossStarBar(const SpatialVec& f, const SpatialVec& v) {
-    SpatialVec c;
-    c[0] = -f[0] % v[0] - f[1] % v[1];
-    c[1] = -f[1] % v[0];
-}
 
 //==============================================================================
 //                              PENDULUM SYSTEM
 //==============================================================================
-// Two Pin-jointed links. The second joint axis is tilted out of the first
-// joint's plane and each mass center is offset from its body origin so that no
-// term in the algebra can vanish by accident.
+//     Ground --Free--> link1 --Ball--> link2 --Pin--> link3
+//                            \--Pin--> link4
+//
+// A floating base, a multi-DoF interior joint, and a branch, so nothing about
+// the algorithm below can be right by accident of topology. Mass centers are
+// off their body origins and the mobilizer frames are skew, so no term drops
+// out numerically either. nq = 13 (Free and Ball are quaternion-parameterized),
+// nu = 11.
 class PendulumSystem {
 public:
-    static const Real L1, Mass1, Radius1;
-    static const Real L2, Mass2, Radius2;
-    static const Vec3 Com1, Com2;
-    static const Real Tilt2;
-    static const Vec3 GravityVec;
-
     PendulumSystem() : m_matter(m_system) {
-        const Inertia Ic1 = Mass1 * Inertia::cylinderAlongY(Radius1, L1/2);
-        const Inertia Ic2 = Mass2 * Inertia::cylinderAlongY(Radius2, L2/2);
+        Body::Rigid body1(massProps(2.0, Vec3( 0.03,-0.02, 0.05), 0.30, 0.05));
+        Body::Rigid body2(massProps(1.4, Vec3(-0.02, 0.04,-0.01), 0.25, 0.04));
+        Body::Rigid body3(massProps(0.8, Vec3( 0.01, 0.03, 0.02), 0.18, 0.03));
+        Body::Rigid body4(massProps(0.6, Vec3( 0.02,-0.01,-0.03), 0.15, 0.03));
 
-        Body::Rigid body1(MassProperties(Mass1, Com1,
-                                         Ic1.shiftFromMassCenter(-Com1, Mass1)));
-        Body::Rigid body2(MassProperties(Mass2, Com2,
-                                         Ic2.shiftFromMassCenter(-Com2, Mass2)));
+        m_link1 = MobilizedBody::Free(m_matter.Ground(),
+            Transform(Rotation(0.20, XAxis), Vec3(0.05,  0.10, -0.02)),
+            body1,
+            Transform(Rotation(0.15, YAxis), Vec3(0.00,  0.30,  0.00)));
 
-        m_link1 = MobilizedBody::Pin(m_matter.Ground(),
-                                     Transform(Rotation(), Vec3(0)),
-                                     body1,
-                                     Transform(Rotation(), Vec3(0, L1/2, 0)));
+        m_link2 = MobilizedBody::Ball(m_link1,
+            Transform(Rotation(0.35, ZAxis), Vec3(0.00, -0.30,  0.04)),
+            body2,
+            Transform(Rotation(0.10, XAxis), Vec3(0.02,  0.25,  0.00)));
 
-        m_link2 = MobilizedBody::Pin(m_link1,
-                                     Transform(Rotation(Tilt2, XAxis),
-                                               Vec3(0, -L1/2, 0)),
-                                     body2,
-                                     Transform(Rotation(), Vec3(0, L2/2, 0)));
+        m_link3 = MobilizedBody::Pin(m_link2,
+            Transform(Rotation(0.40, XAxis), Vec3(0.00, -0.25,  0.03)),
+            body3,
+            Transform(Rotation(0.25, ZAxis), Vec3(0.00,  0.18,  0.00)));
+
+        m_link4 = MobilizedBody::Pin(m_link1,
+            Transform(Rotation(-0.30, YAxis), Vec3(0.12, -0.10, -0.05)),
+            body4,
+            Transform(Rotation(0.05, XAxis), Vec3(0.00,  0.15,  0.00)));
 
         m_state = m_system.realizeTopology();
     }
 
-    void setState(Real q1, Real q2, Real u1, Real u2) {
-        m_link1.setAngle(m_state, q1);  m_link1.setRate(m_state, u1);
-        m_link2.setAngle(m_state, q2);  m_link2.setRate(m_state, u2);
+    // Set through the mobilizer-level fitting methods rather than by writing q
+    // directly, so the Free and Ball quaternions come out normalized.
+    void setArbitraryState() {
+        m_link1.setQToFitTransform(m_state,
+            Transform(Rotation(BodyRotationSequence,
+                               0.30, XAxis, -0.45, YAxis, 0.25, ZAxis),
+                      Vec3(0.15, 0.40, -0.20)));
+        m_link1.setUToFitVelocity(m_state,
+            SpatialVec(Vec3(0.70, -1.10, 0.50), Vec3(-0.40, 0.90, 1.30)));
+
+        m_link2.setQToFitRotation(m_state,
+            Rotation(BodyRotationSequence,
+                     -0.55, XAxis, 0.35, YAxis, 0.60, ZAxis));
+        m_link2.setUToFitAngularVelocity(m_state, Vec3(1.20, 0.60, -0.85));
+
+        m_link3.setAngle(m_state, 0.65);   m_link3.setRate(m_state, -1.45);
+        m_link4.setAngle(m_state, -0.85);  m_link4.setRate(m_state,  0.95);
+
         m_system.realize(m_state, Stage::Velocity);
     }
 
-    // One scalar per mobility, and one spatial force per body (moment about
-    // Bo, force at Bo, expressed in Ground) with Ground as body zero.
-    void calcAppliedForces(Real joint1Torque, const Vec3& tipForce_G,
-                           Vector& mobilityForces,
-                           Vector_<SpatialVec>& bodyForces) const {
-        mobilityForces.resize(getNumMobilities());
-        mobilityForces.setToZero();
-        mobilityForces[m_link1.getFirstUIndex(m_state)] = joint1Torque;
-
-        bodyForces.resize(getNumBodies());
-        bodyForces.setTo(SpatialVec(Vec3(0), Vec3(0)));
-
-        for (MobilizedBodyIndex mbx(1); mbx < getNumBodies(); ++mbx) {
-            const MobilizedBody& mobod = m_matter.getMobilizedBody(mbx);
-            const MassProperties& mp = mobod.getBodyMassProperties(m_state);
-            const Vec3 p_BoBc_G =
-                mobod.getBodyRotation(m_state) * mp.getMassCenter();
-            const Vec3 fGrav_G = mp.getMass() * GravityVec;
-            bodyForces[mbx] += SpatialVec(p_BoBc_G % fGrav_G, fGrav_G);
-        }
-
-        const Vec3 p_BoS_G =
-            m_link2.getBodyRotation(m_state) * Vec3(0, -L2/2, 0);
-        bodyForces[m_link2.getMobilizedBodyIndex()] +=
-            SpatialVec(p_BoS_G % tipForce_G, tipForce_G);
+    Vector calcArbitraryUDot() const {
+        Vector udot(getNumMobilities());
+        for (int i=0; i < udot.size(); ++i)
+            udot[i] = 0.35 + 0.27*i - 0.11*(i%3) - 0.05*(i%5);
+        return udot;
     }
 
-    Vector calcUDot(Real udot1, Real udot2) const {
-        Vector udot(getNumMobilities(), Real(0));
-        udot[m_link1.getFirstUIndex(m_state)] = udot1;
-        udot[m_link2.getFirstUIndex(m_state)] = udot2;
-        return udot;
+    // One spatial force per body (moment about Bo, force at Bo, expressed in
+    // Ground), Ground being body zero.
+    void calcGravityBodyForces(const State& state,
+                               Vector_<SpatialVec>& bodyForces) const {
+        bodyForces.resize(getNumBodies());
+        bodyForces.setTo(SpatialVec(Vec3(0), Vec3(0)));
+        for (MobilizedBodyIndex mbx(1); mbx < getNumBodies(); ++mbx) {
+            const MobilizedBody& mobod = m_matter.getMobilizedBody(mbx);
+            const MassProperties& mp = mobod.getBodyMassProperties(state);
+            const Vec3 p_BoBc_G =
+                mobod.getBodyRotation(state) * mp.getMassCenter();
+            const Vec3 fGrav_G = mp.getMass() * GravityVec;
+            bodyForces[mbx] = SpatialVec(p_BoBc_G % fGrav_G, fGrav_G);
+        }
+    }
+
+    // Gravity, a point force on the tip of link3, and a torque on every
+    // mobility, so no applied-force path goes untested.
+    void calcAppliedForces(const State& state, Vector& mobilityForces,
+                           Vector_<SpatialVec>& bodyForces) const {
+        mobilityForces.resize(getNumMobilities());
+        for (int i=0; i < mobilityForces.size(); ++i)
+            mobilityForces[i] = 0.9 - 0.31*i + 0.17*(i%4);
+
+        calcGravityBodyForces(state, bodyForces);
+
+        const Vec3 tipForce_G(3.0, -1.5, 2.0);
+        const Vec3 p_BoS_G = m_link3.getBodyRotation(state) * Vec3(0, -0.18, 0);
+        bodyForces[m_link3.getMobilizedBodyIndex()] +=
+            SpatialVec(p_BoS_G % tipForce_G, tipForce_G);
     }
 
     const MultibodySystem&        getSystem() const {return m_system;}
     const SimbodyMatterSubsystem& getMatter() const {return m_matter;}
     const State&                  getState()  const {return m_state;}
-    int getNumBodies()      const {return m_matter.getNumBodies();}
-    int getNumMobilities()  const {return m_matter.getNumMobilities();}
+    int getNumBodies()     const {return m_matter.getNumBodies();}
+    int getNumMobilities() const {return m_matter.getNumMobilities();}
 
 private:
+    static MassProperties massProps(Real mass, const Vec3& com,
+                                    Real halfLength, Real radius) {
+        const Inertia Ic = mass * Inertia::cylinderAlongY(radius, halfLength);
+        return MassProperties(mass, com, Ic.shiftFromMassCenter(-com, mass));
+    }
+
     MultibodySystem        m_system;
     SimbodyMatterSubsystem m_matter;
-    MobilizedBody::Pin     m_link1, m_link2;
+    MobilizedBody::Free    m_link1;
+    MobilizedBody::Ball    m_link2;
+    MobilizedBody::Pin     m_link3, m_link4;
     State                  m_state;
 };
-
-const Real PendulumSystem::L1 = 0.8, PendulumSystem::Mass1 = 2.0,
-           PendulumSystem::Radius1 = 0.03;
-const Real PendulumSystem::L2 = 0.6, PendulumSystem::Mass2 = 1.0,
-           PendulumSystem::Radius2 = 0.025;
-const Vec3 PendulumSystem::Com1(0, -0.02, 0.03);
-const Vec3 PendulumSystem::Com2(0,  0.03,-0.01);
-const Real PendulumSystem::Tilt2 = 20 * Pi/180;
-const Vec3 PendulumSystem::GravityVec(0, -9.81, 0);
 
 
 //==============================================================================
 //                              INVERSE DYNAMICS
 //==============================================================================
-// Reimplementation of Simbody's O(n) inverse dynamics for a chain of Pin
-// mobilizers, using the same decomposition and method names as
-// RigidBodyNode/RigidBodyNodeSpec. Each mobilizer has dof==1, so the hinge
-// matrices H are single SpatialVec columns.
+// Reimplementation of Simbody's O(n) inverse dynamics using the same
+// decomposition and method names as RigidBodyNode/RigidBodyNodeSpec. Hinge
+// matrices are stored one SpatialVec per mobility, so a column of H for joint j
+// is m_H[firstUIndex(j) + d].
 class InverseDynamics {
 public:
     explicit InverseDynamics(const PendulumSystem& pendulum)
     :   m_matter(pendulum.getMatter()), m_cache(pendulum.getNumBodies()) {
         const State& state = pendulum.getState();
+        const int nu = pendulum.getNumMobilities();
+        m_H_FM.resize(nu); m_H.resize(nu);
+        m_HDot_FM.resize(nu); m_HDot.resize(nu);
+
         for (MobilizedBodyIndex mbx(0); mbx < pendulum.getNumBodies(); ++mbx) {
             const MobilizedBody& mobod = m_matter.getMobilizedBody(mbx);
             MobodCache& mc = m_cache[mbx];
             if (mbx == 0) { mc.X_GB = Transform(); continue; }
-            SimTK_ERRCHK1_ALWAYS(MobilizedBody::Pin::isInstanceOf(mobod),
-                "InverseDynamics::InverseDynamics()",
-                "Mobilized body %d is not a Pin.", (int)mbx);
+
+            if      (MobilizedBody::Pin::isInstanceOf(mobod))  mc.type = PinType;
+            else if (MobilizedBody::Ball::isInstanceOf(mobod)) mc.type = BallType;
+            else if (MobilizedBody::Free::isInstanceOf(mobod)) mc.type = FreeType;
+            else SimTK_ERRCHK1_ALWAYS(false, "InverseDynamics()",
+                "Mobilized body %d is not a Pin, Ball or Free.", (int)mbx);
+
             mc.parent = mobod.getParentMobilizedBody().getMobilizedBodyIndex();
             mc.X_PF   = mobod.getInboardFrame(state);
             mc.X_MB   = ~mobod.getOutboardFrame(state);
@@ -190,6 +210,7 @@ public:
             mc.unitInertia_Bo_B = mp.getUnitInertia();
             mc.qx = mobod.getFirstQIndex(state);
             mc.ux = mobod.getFirstUIndex(state);
+            mc.nu = mobod.getNumU(state);
         }
     }
 
@@ -204,36 +225,44 @@ public:
     }
 
     void realizeVelocity(const Vector& u) {
-        m_cache[MobilizedBodyIndex(0)].V_GB = SpatialVec(Vec3(0), Vec3(0));
-        m_cache[MobilizedBodyIndex(0)].totalCoriolisAcceleration =
-            SpatialVec(Vec3(0), Vec3(0));
+        const SpatialVec zero(Vec3(0), Vec3(0));
+        m_cache[MobilizedBodyIndex(0)].V_GB = zero;
+        m_cache[MobilizedBodyIndex(0)].totalCoriolisAcceleration = zero;
+
         for (MobilizedBodyIndex mbx(1); mbx < m_cache.size(); ++mbx) {
             MobodCache& mc = m_cache[mbx];
-            mc.V_FM   = mc.H_FM * u[mc.ux];
-            mc.V_PB_G = mc.H_PB_G * u[mc.ux];
+            mc.V_FM = zero; mc.V_PB_G = zero;
+            for (int d=0; d < mc.nu; ++d) {
+                const UIndex ux(mc.ux+d);
+                mc.V_FM   += m_H_FM[ux] * u[ux];
+                mc.V_PB_G += m_H[ux]    * u[ux];
+            }
             calcAcrossJointVelocityJacobianDot(mbx);
             calcParentToChildVelocityJacobianInGroundDot(mbx);
-            mc.VD_PB_G = mc.HDot_PB_G * u[mc.ux];
+            mc.VD_PB_G = zero;
+            for (int d=0; d < mc.nu; ++d)
+                mc.VD_PB_G += m_HDot[UIndex(mc.ux+d)] * u[UIndex(mc.ux+d)];
             calcJointIndependentKinematicsVel(mbx);
         }
     }
 
-    // Requires realizePosition() and realizeVelocity() to have been called.
+    // Requires realizePosition() and realizeVelocity().
     void calcInverseDynamics(const Vector&              knownUdot,
                              const Vector&              mobilityForces,
                              const Vector_<SpatialVec>& bodyForces,
                              Vector&                    tau) {
         tau.resize(m_matter.getNumMobilities());
-        m_cache[MobilizedBodyIndex(0)].A_GB = SpatialVec(Vec3(0), Vec3(0));
+        const SpatialVec zero(Vec3(0), Vec3(0));
+        m_cache[MobilizedBodyIndex(0)].A_GB = zero;
         for (MobilizedBodyIndex mbx(1); mbx < m_cache.size(); ++mbx)
             calcBodyAccelerationsFromUdotOutward(mbx, knownUdot);
         for (MobilizedBodyIndex mbx(0); mbx < m_cache.size(); ++mbx)
-            m_cache[mbx].F = SpatialVec(Vec3(0), Vec3(0));
+            m_cache[mbx].F = zero;
         for (MobilizedBodyIndex mbx(m_cache.size()-1); mbx >= 1; --mbx)
-            calcInverseDynamicsPass2Inward(mbx, mobilityForces, bodyForces,
-                                           tau);
+            calcInverseDynamicsPass2Inward(mbx, mobilityForces, bodyForces, tau);
     }
 
+    const SpatialVec& getH(UIndex ux) const {return m_H[ux];}
     const SpatialVec& getV_GB(MobilizedBodyIndex mbx) const
     {   return m_cache[mbx].V_GB; }
     const SpatialVec& getA_GB(MobilizedBodyIndex mbx) const
@@ -241,34 +270,39 @@ public:
     const SpatialVec& getMobilizerCoriolisAcceleration
        (MobilizedBodyIndex mbx) const
     {   return m_cache[mbx].mobilizerCoriolisAcceleration; }
+    const SpatialVec& getTotalCoriolisAcceleration
+       (MobilizedBodyIndex mbx) const
+    {   return m_cache[mbx].totalCoriolisAcceleration; }
     const SpatialVec& getGyroscopicForce(MobilizedBodyIndex mbx) const
     {   return m_cache[mbx].gyroscopicForce; }
     const SpatialVec& getTotalCentrifugalForces(MobilizedBodyIndex mbx) const
     {   return m_cache[mbx].totalCentrifugalForces; }
 
 private:
+    enum MobilizerType {PinType, BallType, FreeType};
+
     struct MobodCache {
         // Instance.
         MobilizedBodyIndex  parent;
+        MobilizerType       type{PinType};
         Transform           X_PF, X_MB;
         Real                mass{NaN};
         Vec3                com_B{NaN, NaN, NaN};
         UnitInertia         unitInertia_Bo_B;
         QIndex              qx;
         UIndex              ux;
+        int                 nu{0};
 
         // Position.
         Transform           X_FM, X_PB, X_GB;
-        SpatialVec          H_FM, H_PB_G;
         PhiMatrix           Phi;
         Vec3                COM_G;
         SpatialInertia      Mk_G;
 
         // Velocity.
-        SpatialVec          V_FM, V_PB_G, HDot_FM, HDot_PB_G, VD_PB_G, V_GB;
+        SpatialVec          V_FM, V_PB_G, VD_PB_G, V_GB;
         SpatialVec          gyroscopicForce, mobilizerCoriolisAcceleration,
                             totalCoriolisAcceleration, totalCentrifugalForces;
-        SpatialVec          Psidot_PB_G;
 
         // Acceleration.
         SpatialVec          A_GB, F;
@@ -277,20 +311,61 @@ private:
     static SpatialVec reexpress(const Rotation& R, const SpatialVec& H)
     {   return SpatialVec(R*H[0], R*H[1]); }
 
+    static Vec3 unitVec(int i) {Vec3 e(0); e[i] = 1; return e;}
+
     //--------------------------------------------------------------------------
-    // Pin-specific.
+    // Mobilizer-specific. These are the only three methods that need to know
+    // which kind of mobilizer this is.
     //--------------------------------------------------------------------------
+    // Ball and Free are quaternion-parameterized: q = [quat(4)] and
+    // q = [quat(4), p_FM(3)] respectively, with p_FM along the F axes.
     void calcX_FM(MobilizedBodyIndex mbx, const Vector& q) {
         MobodCache& mc = m_cache[mbx];
-        mc.X_FM = Transform(Rotation(q[mc.qx], ZAxis), Vec3(0));
+        const QIndex qx = mc.qx;
+        switch (mc.type) {
+        case PinType:
+            mc.X_FM = Transform(Rotation(q[qx], ZAxis), Vec3(0));
+            break;
+        case BallType:
+            mc.X_FM = Transform(Rotation(Quaternion(
+                          Vec4(q[qx], q[qx+1], q[qx+2], q[qx+3]))), Vec3(0));
+            break;
+        case FreeType:
+            mc.X_FM = Transform(Rotation(Quaternion(
+                          Vec4(q[qx], q[qx+1], q[qx+2], q[qx+3]))),
+                      Vec3(q[qx+4], q[qx+5], q[qx+6]));
+            break;
+        }
     }
 
+    // H_FM maps u to the cross-mobilizer velocity V_FM = (w_FM, v_FMo),
+    // expressed in F and referred to Mo. For all three of these mobilizers the
+    // generalized speeds ARE the measure numbers of w_FM and v_FMo in F, so
+    // H_FM is a constant selection matrix -- which is also why HDot_FM below is
+    // zero. A mobilizer with q-dependent H_FM would need more.
     void calcAcrossJointVelocityJacobian(MobilizedBodyIndex mbx) {
-        m_cache[mbx].H_FM = SpatialVec(Vec3(0,0,1), Vec3(0));
+        const MobodCache& mc = m_cache[mbx];
+        switch (mc.type) {
+        case PinType:
+            m_H_FM[mc.ux] = SpatialVec(Vec3(0,0,1), Vec3(0));
+            break;
+        case BallType:
+            for (int d=0; d < 3; ++d)
+                m_H_FM[UIndex(mc.ux+d)] = SpatialVec(unitVec(d), Vec3(0));
+            break;
+        case FreeType:
+            for (int d=0; d < 3; ++d) {
+                m_H_FM[UIndex(mc.ux+d)]   = SpatialVec(unitVec(d), Vec3(0));
+                m_H_FM[UIndex(mc.ux+3+d)] = SpatialVec(Vec3(0), unitVec(d));
+            }
+            break;
+        }
     }
 
     void calcAcrossJointVelocityJacobianDot(MobilizedBodyIndex mbx) {
-        m_cache[mbx].HDot_FM = SpatialVec(Vec3(0), Vec3(0));
+        const MobodCache& mc = m_cache[mbx];
+        for (int d=0; d < mc.nu; ++d)
+            m_HDot_FM[UIndex(mc.ux+d)] = SpatialVec(Vec3(0), Vec3(0));
     }
 
     //--------------------------------------------------------------------------
@@ -303,33 +378,36 @@ private:
         mc.X_GB = m_cache[mc.parent].X_GB * mc.X_PB;
     }
 
-    // H_PB_G maps u to the cross-body relative spatial velocity of B in P,
-    // expressed in Ground and taken about Bo.
+    // H (== H_PB_G) maps u to the cross-body relative spatial velocity of B in
+    // P, expressed in Ground and referred to Bo.
     void calcParentToChildVelocityJacobianInGround(MobilizedBodyIndex mbx) {
-        MobodCache& mc = m_cache[mbx];
+        const MobodCache& mc = m_cache[mbx];
         const Rotation R_GF = m_cache[mc.parent].X_GB.R() * mc.X_PF.R();
         const Vec3 r_MB_F = mc.X_FM.R() * mc.X_MB.p();
-        const SpatialVec H_MB_F(Vec3(0), -(r_MB_F % mc.H_FM[0]));
-        mc.H_PB_G = reexpress(R_GF, mc.H_FM + H_MB_F);
+        for (int d=0; d < mc.nu; ++d) {
+            const UIndex ux(mc.ux+d);
+            const SpatialVec H_MB_F(Vec3(0), -(r_MB_F % m_H_FM[ux][0]));
+            m_H[ux] = reexpress(R_GF, m_H_FM[ux] + H_MB_F);
+        }
     }
 
     void calcParentToChildVelocityJacobianInGroundDot(MobilizedBodyIndex mbx) {
-        MobodCache& mc = m_cache[mbx];
+        const MobodCache& mc = m_cache[mbx];
         const Rotation R_GF = m_cache[mc.parent].X_GB.R() * mc.X_PF.R();
         const Vec3& w_GF = m_cache[mc.parent].V_GB[0];
         const Vec3 r_MB_F = mc.X_FM.R() * mc.X_MB.p();
         const Vec3& w_FM = mc.V_FM[0];
-        const SpatialVec HDot_MB_F(Vec3(0),
-                                   -(r_MB_F % mc.HDot_FM[0])
-                                   - (w_FM % r_MB_F) % mc.H_FM[0]);
-        mc.HDot_PB_G = reexpress(R_GF, mc.HDot_FM + HDot_MB_F)
-                     + SpatialVec(w_GF % mc.H_PB_G[0], w_GF % mc.H_PB_G[1]);
-
-        // Psidot_i = v_lambda(i) % S_i
-        mc.Psidot_PB_G = cross(m_cache[mc.parent].V_GB, mc.H_PB_G);
+        for (int d=0; d < mc.nu; ++d) {
+            const UIndex ux(mc.ux+d);
+            const SpatialVec HDot_MB_F(Vec3(0),
+                -(r_MB_F % m_HDot_FM[ux][0])
+                - (w_FM % r_MB_F) % m_H_FM[ux][0]);
+            m_HDot[ux] = reexpress(R_GF, m_HDot_FM[ux] + HDot_MB_F)
+                       + SpatialVec(w_GF % m_H[ux][0], w_GF % m_H[ux][1]);
+        }
     }
 
-    // Phi and the spatial mass properties about Bo, expressed in Ground.
+    // Phi, and the spatial mass properties about Bo expressed in Ground.
     void calcJointIndependentKinematicsPos(MobilizedBodyIndex mbx) {
         MobodCache& mc = m_cache[mbx];
         const Vec3 p_PB_G = m_cache[mc.parent].X_GB.R() * mc.X_PB.p();
@@ -361,8 +439,7 @@ private:
         const Vec3& w_GP = pc.V_GB[0];
         const Vec3& v_GP = pc.V_GB[1];
         mc.mobilizerCoriolisAcceleration =
-            SpatialVec(mc.VD_PB_G[0],
-                       mc.VD_PB_G[1] + w_GP % (v_GB - v_GP));
+            SpatialVec(mc.VD_PB_G[0], mc.VD_PB_G[1] + w_GP % (v_GB - v_GP));
         mc.totalCoriolisAcceleration = PhiT * pc.totalCoriolisAcceleration
                                      + mc.mobilizerCoriolisAcceleration;
         mc.totalCentrifugalForces = mc.Mk_G * mc.totalCoriolisAcceleration
@@ -373,9 +450,10 @@ private:
     void calcBodyAccelerationsFromUdotOutward(MobilizedBodyIndex mbx,
                                               const Vector& knownUdot) {
         MobodCache& mc = m_cache[mbx];
-        const SpatialVec A_GP = ~mc.Phi * m_cache[mc.parent].A_GB;
-        mc.A_GB = A_GP + mc.H_PB_G * knownUdot[mc.ux]
-                + mc.mobilizerCoriolisAcceleration;
+        SpatialVec A = ~mc.Phi * m_cache[mc.parent].A_GB;
+        for (int d=0; d < mc.nu; ++d)
+            A += m_H[UIndex(mc.ux+d)] * knownUdot[UIndex(mc.ux+d)];
+        mc.A_GB = A + mc.mobilizerCoriolisAcceleration;
     }
 
     // F = Mk_G*A_GB + b - F_applied + sum_children Phi*F_child, then
@@ -386,60 +464,137 @@ private:
                                         Vector&                    tau) {
         MobodCache& mc = m_cache[mbx];
         mc.F += mc.Mk_G * mc.A_GB + mc.gyroscopicForce - bodyForces[mbx];
-        tau[mc.ux] = dot(mc.H_PB_G, mc.F) - mobilityForces[mc.ux];
+        for (int d=0; d < mc.nu; ++d) {
+            const UIndex ux(mc.ux+d);
+            tau[ux] = dot(m_H[ux], mc.F) - mobilityForces[ux];
+        }
         m_cache[mc.parent].F += mc.Phi * mc.F;
     }
 
-    const SimbodyMatterSubsystem&              m_matter;
-    Array_<MobodCache, MobilizedBodyIndex>     m_cache;
+    const SimbodyMatterSubsystem&          m_matter;
+    Array_<MobodCache, MobilizedBodyIndex> m_cache;
+    Array_<SpatialVec, UIndex>             m_H_FM, m_H, m_HDot_FM, m_HDot;
 };
 
 
+
+
+
+
 //==============================================================================
-//                                  MAIN
+//                               OPERATOR SENSITIVITIES
 //==============================================================================
-namespace {
 
-Real maxAbsDiff(const Vector& a, const Vector& b) {
-    Real e = 0;
-    for (int i=0; i < a.size(); ++i) e = std::max(e, std::abs(a[i]-b[i]));
-    return e;
+
+// One column of the Eq. 18.28 sensitivities: the coordinate (i,d) is fixed and
+// each entry is indexed by the body k it belongs to.
+struct Derivatives {
+    Vector_<SpatialVec> dVw_dqdot;          // 18.28a
+    Vector_<SpatialVec> dVwParent_dqdot;    // 18.28b
+
+    Derivatives(int nb)
+    :   dVw_dqdot(nb, SpatialVec(Vec3(0), Vec3(0))),
+        dVwParent_dqdot(nb, SpatialVec(Vec3(0), Vec3(0))) {}
+};
+
+
+// V^w is exactly linear in u, so the step size is uncritical and the central
+// difference is exact to roundoff.
+Derivatives calcFiniteDifferences(const SimbodyMatterSubsystem& matter,
+                                  const State& state,
+                                  MobilizedBodyIndex i, int d) {
+
+    const MobilizedBody& mobod_i = matter.getMobilizedBody(i);
+    SimTK_ERRCHK2_ALWAYS(d >= 0 && d < mobod_i.getNumU(state),
+        "calcFiniteDifferences()",
+        "Mobility %d is out of range for mobilized body %d.", d, (int)i);
+
+    const Real h = 1e-5;
+    const UIndex ux(mobod_i.getFirstUIndex(state) + d);
+
+    // (i,d) is fixed, so perturb once rather than once per body.
+    State pertPlus = state, pertMinus = state;
+    pertPlus.updU()[ux]  += h;
+    pertMinus.updU()[ux] -= h;
+    matter.getSystem().realize(pertPlus,  Stage::Velocity);
+    matter.getSystem().realize(pertMinus, Stage::Velocity);
+
+    const int nb = matter.getNumBodies();
+    Derivatives derivatives(nb);
+    for (int k = 1; k < nb; ++k) {
+        const MobilizedBody& mobod_k =
+            matter.getMobilizedBody(MobilizedBodyIndex(k));
+        const MobilizedBody& parent_k = mobod_k.getParentMobilizedBody();
+
+        // dV^w(k) / dqdot_{i,d} (18.28a)
+        derivatives.dVw_dqdot[k] = SpatialVec(
+            (mobod_k.getBodyVelocity(pertPlus)[0]
+           - mobod_k.getBodyVelocity(pertMinus)[0]) / (2*h), Vec3(0));
+
+        // dV^w(p(k)) / dqdot_{i,d} (18.28b)
+        derivatives.dVwParent_dqdot[k] = SpatialVec(
+            (parent_k.getBodyVelocity(pertPlus)[0]
+           - parent_k.getBodyVelocity(pertMinus)[0]) / (2*h), Vec3(0));
+    }
+
+    return derivatives;
 }
 
-Real maxAbsDiff(const SpatialVec& a, const SpatialVec& b) {
-    Real e = 0;
-    for (int i=0; i < 2; ++i)
-        for (int j=0; j < 3; ++j) e = std::max(e, std::abs(a[i][j]-b[i][j]));
-    return e;
-}
+Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
+                              const State& state,
+                              MobilizedBodyIndex i, int d) {
 
-bool report(const char* what, Real err) {
-    const bool ok = err <= Tol;
-    printf("  %-44s %-10.3e %s\n", what, err, ok ? "OK" : "*** MISMATCH ***");
-    return ok;
-}
+    // Jain's 1_[i >= k]: joint i lies on the path from body k to
+    // Ground. Returns false for Ground, which is what makes 1_[i > k] fall out
+    // of asking this about p(k).
+    auto isAncestorOf = [&](MobilizedBodyIndex iAnc, MobilizedBodyIndex kBody) {
+        for (MobilizedBodyIndex b = kBody; b != 0;
+                b = matter.getMobilizedBody(b).getParentMobilizedBody()
+                        .getMobilizedBodyIndex()) {
+            if (b == iAnc) return true;
+        }
+        return false;
+    };
 
-void printVec(const char* label, const Vector& v) {
-    printf("  %-22s [", label);
-    for (int i=0; i < v.size(); ++i) printf(" % .12f", v[i]);
-    printf(" ]\n");
-}
+    const MobilizedBody& mobod_i = matter.getMobilizedBody(i);
+    SimTK_ERRCHK2_ALWAYS(d >= 0 && d < mobod_i.getNumU(state),
+        "calcSensitivities()",
+        "Mobility %d is out of range for mobilized body %d.", d, (int)i);
 
-} // anonymous namespace
+    const SpatialVec& H_i = mobod_i.getHCol(state, MobilizerUIndex(d));
+
+    const int nb = matter.getNumBodies();
+    Derivatives derivatives(nb);
+    for (int k = 1; k < nb; ++k) {
+        const MobilizedBodyIndex p_k = matter.getMobilizedBody(k)
+            .getParentMobilizedBody().getMobilizedBodyIndex();
+
+        // dV^w(k) / dqdot_{i,d} = H*_w(i) 1_[i >= k]            (18.28a)
+        if (isAncestorOf(i, k)) {
+            derivatives.dVw_dqdot[k] = SpatialVec(H_i[0], Vec3(0));
+        }
+
+        // dV^w(p(k)) / dqdot_{i,d} = H*_w(i) 1_[i > k]          (18.28b)
+        if (isAncestorOf(i, pk)) {
+            derivatives.dVwParent_dqdot[k] = SpatialVec(H_i[0], Vec3(0));
+        }
+    }
+
+    return derivatives;
+}
 
 int main() {
-try {
     PendulumSystem pendulum;
-    pendulum.setState(25*Pi/180, -40*Pi/180, 1.3, -2.1);
+    pendulum.setArbitraryState();
 
     const SimbodyMatterSubsystem& matter = pendulum.getMatter();
     const State& state = pendulum.getState();
+    const int nb = pendulum.getNumBodies();
 
-    const Vector knownUdot = pendulum.calcUDot(0.7, 2.4);
+    const Vector knownUdot = pendulum.calcArbitraryUDot();
     Vector              mobilityForces;
     Vector_<SpatialVec> bodyForces;
-    pendulum.calcAppliedForces(1.75, Vec3(3.0, -1.5, 2.0),
-                               mobilityForces, bodyForces);
+    pendulum.calcAppliedForces(state, mobilityForces, bodyForces);
 
     InverseDynamics id(pendulum);
     id.realizePosition(state.getQ());
@@ -450,65 +605,6 @@ try {
 
     Vector tauRef;
     matter.calcResidualForceIgnoringConstraints(state, mobilityForces,
-                                               bodyForces, knownUdot, tauRef);
+                                                bodyForces, knownUdot, tauRef);
 
-    printVec("q", state.getQ());
-    printVec("u", state.getU());
-    printVec("knownUdot", knownUdot);
-    printVec("tau", tau);
-    printVec("tau (Simbody)", tauRef);
-
-    printf("\n  %-44s %-10s\n", "check", "max|diff|");
-    bool allOk = true;
-    for (MobilizedBodyIndex mbx(1); mbx < pendulum.getNumBodies(); ++mbx) {
-        const MobilizedBody& mobod = matter.getMobilizedBody(mbx);
-        char buf[80];
-        snprintf(buf, sizeof(buf), "V_GB[%d]", (int)mbx);
-        allOk &= report(buf, maxAbsDiff(id.getV_GB(mbx),
-                                        mobod.getBodyVelocity(state)));
-        snprintf(buf, sizeof(buf), "a_mobilizer[%d]", (int)mbx);
-        allOk &= report(buf,
-            maxAbsDiff(id.getMobilizerCoriolisAcceleration(mbx),
-                       matter.getMobilizerCoriolisAcceleration(state, mbx)));
-        snprintf(buf, sizeof(buf), "gyroscopic force[%d]", (int)mbx);
-        allOk &= report(buf, maxAbsDiff(id.getGyroscopicForce(mbx),
-                                        matter.getGyroscopicForce(state, mbx)));
-        snprintf(buf, sizeof(buf), "total centrifugal forces[%d]", (int)mbx);
-        allOk &= report(buf,
-            maxAbsDiff(id.getTotalCentrifugalForces(mbx),
-                       matter.getTotalCentrifugalForces(state, mbx)));
-    }
-
-    Vector_<SpatialVec> A_GB_ref;
-    matter.calcBodyAccelerationFromUDot(state, knownUdot, A_GB_ref);
-    for (MobilizedBodyIndex mbx(1); mbx < pendulum.getNumBodies(); ++mbx) {
-        char buf[80];
-        snprintf(buf, sizeof(buf), "A_GB[%d]", (int)mbx);
-        allOk &= report(buf, maxAbsDiff(id.getA_GB(mbx), A_GB_ref[mbx]));
-    }
-
-    allOk &= report("tau vs Simbody", maxAbsDiff(tau, tauRef));
-
-    // Round trip: applying tau in forward dynamics must reproduce knownUdot.
-    {
-        State dynState = state;
-        pendulum.getSystem().realize(dynState, Stage::Dynamics);
-        Vector udotFwd;
-        Vector_<SpatialVec> A_GB_fwd;
-        matter.calcAccelerationIgnoringConstraints(dynState,
-                                                   mobilityForces + tau,
-                                                   bodyForces,
-                                                   udotFwd, A_GB_fwd);
-        allOk &= report("forward dynamics round trip",
-                        maxAbsDiff(udotFwd, knownUdot));
-    }
-
-    printf("\n%s\n\n", allOk ? "All checks passed."
-                             : "*** SOME CHECKS FAILED ***");
-    return allOk ? 0 : 1;
-
-} catch (const std::exception& e) {
-    cout << "EXCEPTION: " << e.what() << endl;
-    return 1;
-}
 }
