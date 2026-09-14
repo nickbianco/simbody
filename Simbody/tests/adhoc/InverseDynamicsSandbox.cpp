@@ -493,8 +493,6 @@ struct Derivatives {
     Vector_<SpatialVec> dDeltaV_dqdot;      // 18.28e
 
     Vector_<SpatialMat> dPhi_dq;            // 18.29a
-    // Indexed by UIndex, not body: H*(k) has one column per mobility of k, so
-    // dH*(k)/dq has one entry per column.
     Vector_<SpatialVec> dH_dq;              // 18.29b
 
     Derivatives(int nb, int nu)
@@ -707,7 +705,7 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
             derivatives.dPhi_dq[k] = tilde_Hw*Phi - Phi*tilde_Hw;
         }
 
-        // dH*(k) / dq_{i,d} = Htilde*_w(i) H*(k) 1_[k < i]      (18.29b)
+        // dH*_B(k) / dq_{i,d}                                   (18.29b)
         const Vec3 p_BoMo_G = mobod_k.getBodyRotation(state) *
                               mobod_k.getOutboardFrame(state).p();
         for (int e = 0; e < mobod_k.getNumU(state); ++e) {
@@ -722,7 +720,6 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
                     SpatialVec(Vec3(0), -(H_k[0] % (H_i[0] % p_BoMo_G)));
             }
         }
-
     }
 
     return derivatives;
