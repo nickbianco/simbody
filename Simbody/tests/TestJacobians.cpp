@@ -27,12 +27,13 @@ using namespace SimTK;
 
 namespace {
 
-    // A branched multibody of bodies containing various mobilizers of different
-    // types including Pin, Ellipsoid, and CantileverFreeBeam mobilizers.
+    // A branched multibody of bodies containing various mobilizers of
+    // different types including Pin, Ellipsoid, and CantileverFreeBeam
+    // mobilizers.
     class BranchedSystem {
     public:
         enum MobilizerType {Ground=0, Pin=1, Ellipsoid=2, CantileverFreeBeam=3,
-                            Gimbal=4, Weld=5, Free=6};
+                            Gimbal=4, Weld=5, Free=6, ReversedEllipsoid=7};
 
         BranchedSystem() :
                 m_matter(m_system), m_forces(m_system),
@@ -60,8 +61,14 @@ namespace {
                     m_pin, X_PF[Gimbal],
                     body, X_BM[Gimbal]);
 
+            m_reversedEllipsoid = MobilizedBody::Ellipsoid(
+                    m_gimbal, X_PF[ReversedEllipsoid],
+                    body, X_BM[ReversedEllipsoid],
+                    m_reversedEllipsoidRadii,
+                    MobilizedBody::Reverse);
+
             m_weld = MobilizedBody::Weld(
-                    m_gimbal, X_PF[Weld],
+                    m_reversedEllipsoid, X_PF[Weld],
                     body, X_BM[Weld]);
 
             m_free = MobilizedBody::Free(
@@ -87,11 +94,13 @@ namespace {
         MobilizedBody::Ellipsoid          m_ellipsoid;
         MobilizedBody::CantileverFreeBeam m_cantileverFreeBeam;
         MobilizedBody::Gimbal             m_gimbal;
+        MobilizedBody::Ellipsoid          m_reversedEllipsoid;
         MobilizedBody::Weld               m_weld;
         MobilizedBody::Free               m_free;
 
         const Real m_cantileverFreeBeamLength = 1.23;
         const Vec3 m_ellipsoidRadii = Vec3(0.1, 0.2, 0.3);
+        const Vec3 m_reversedEllipsoidRadii = Vec3(0.15, 0.25, 0.35);
 
     private:
         const Array_<Transform> X_PF = {
@@ -119,7 +128,11 @@ namespace {
             Transform(Rotation(BodyRotationSequence,  // [6] Free
                             -Pi/10, YAxis,
                             Pi/11, XAxis),
-                    Vec3(-1.5, 1.6, -1.7))};
+                    Vec3(-1.5, 1.6, -1.7)),
+            Transform(Rotation(BodyRotationSequence,  // [7] Ellipsoid (reversed)
+                            Pi/3, YAxis,
+                            -Pi/8, XAxis),
+                    Vec3(0.4, 0.5, -0.6))};
         const Array_<Transform> X_BM = {
             Transform(),                              // [0] Ground
             Transform(Rotation(BodyRotationSequence,  // [1] Pin
@@ -145,7 +158,11 @@ namespace {
             Transform(Rotation(BodyRotationSequence,  // [6] Free
                             Pi/9, ZAxis,
                             -Pi/10, YAxis),
-                    Vec3(0.25, -0.26, 0.27))};
+                    Vec3(0.25, -0.26, 0.27)),
+            Transform(Rotation(BodyRotationSequence,  // [7] Ellipsoid (reversed)
+                            -Pi/5, ZAxis,
+                            Pi/7, XAxis),
+                    Vec3(-0.28, 0.29, -0.30))};
     };
 
 }
@@ -169,13 +186,14 @@ void testMultiplyByPositionJacobianWrtInboardFramePositions() {
             state, dp_PF, dp_GB);
 
     State pert = state;
-    MobilizedBody mobods[6] = { sys.m_pin,
+    MobilizedBody mobods[7] = { sys.m_pin,
                                 sys.m_ellipsoid,
                                 sys.m_cantileverFreeBeam,
                                 sys.m_gimbal,
+                                sys.m_reversedEllipsoid,
                                 sys.m_weld,
                                 sys.m_free };
-    for (int m = 0; m < 6; ++m) {
+    for (int m = 0; m < 7; ++m) {
         const MobilizedBodyIndex bIdx = mobods[m].getMobilizedBodyIndex();
         Transform X_PF = mobods[m].getInboardFrame(pert);
         X_PF.updP() += h * dp_PF[bIdx];
@@ -242,13 +260,14 @@ void testMultiplyByPositionJacobianWrtOutboardFramePositions() {
         state, dp_BM, dp_GB);
 
     State pert = state;
-    MobilizedBody mobods[6] = { sys.m_pin,
+    MobilizedBody mobods[7] = { sys.m_pin,
                                 sys.m_ellipsoid,
                                 sys.m_cantileverFreeBeam,
                                 sys.m_gimbal,
+                                sys.m_reversedEllipsoid,
                                 sys.m_weld,
                                 sys.m_free };
-    for (int m = 0; m < 6; ++m) {
+    for (int m = 0; m < 7; ++m) {
         const MobilizedBodyIndex bIdx = mobods[m].getMobilizedBodyIndex();
         Transform X_BM = mobods[m].getOutboardFrame(pert);
         X_BM.updP() += h * dp_BM[bIdx];
@@ -296,6 +315,74 @@ void testMultiplyByPositionJacobianWrtOutboardFramePositionsTranspose() {
     SimTK_TEST_EQ_TOL(lhs, rhs, 1e-10);
 }
 
+void testMultiplyByPositionJacobianWrtRadii() {
+    BranchedSystem sys;
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+
+    const Vec3 dradii(0.37, -0.52, 0.81);
+
+    MobilizedBody::Ellipsoid ellipsoids[2] = { sys.m_ellipsoid,
+                                               sys.m_reversedEllipsoid };
+    for (int e = 0; e < 2; ++e) {
+        const MobilizedBody::Ellipsoid& ellipsoid = ellipsoids[e];
+
+        Vector_<Vec3> dp_GB;
+        ellipsoid.multiplyByPositionJacobianWrtRadii(state, dradii, dp_GB);
+
+        State pert = state;
+        ellipsoid.setRadii(pert, ellipsoid.getRadii(state) + h*dradii);
+        sys.m_system.realize(pert, Stage::Position);
+
+        for (int ib = 0; ib < nb; ++ib) {
+            const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                        .getBodyTransform(state).p();
+            const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                        .getBodyTransform(pert).p();
+            SimTK_TEST_EQ_TOL(dp_GB[ib], (p1 - p0) / h, 1e-10);
+        }
+    }
+}
+
+void testMultiplyByPositionJacobianWrtRadiiTranspose() {
+    BranchedSystem sys;
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+
+    Vector_<Vec3> g_GB(nb);
+    for (int b = 0; b < nb; ++b) {
+        g_GB[b] = Vec3(-0.5*(b+1), 0.7*(b+1), -0.9*(b+1));
+    }
+    g_GB[0] = Vec3(0);
+
+    const Vec3 dradii(0.37, -0.52, 0.81);
+
+    MobilizedBody::Ellipsoid ellipsoids[2] = { sys.m_ellipsoid,
+                                               sys.m_reversedEllipsoid };
+    for (int e = 0; e < 2; ++e) {
+        const MobilizedBody::Ellipsoid& ellipsoid = ellipsoids[e];
+
+        Vector_<Vec3> dp_GB;
+        ellipsoid.multiplyByPositionJacobianWrtRadii(state, dradii, dp_GB);
+        const Vec3 g_radii =
+            ellipsoid.multiplyByPositionJacobianWrtRadiiTranspose(state, g_GB);
+
+        // <Jpr*dradii, g_GB> = <dradii, ~Jpr*g_GB>
+        Real lhs = 0;
+        for (int b = 0; b < nb; ++b) {
+            lhs += dot(g_GB[b], dp_GB[b]);
+        }
+        SimTK_TEST_EQ_TOL(lhs, dot(dradii, g_radii), 1e-10);
+    }
+}
+
 int main() {
     SimTK_START_TEST("TestJacobians");
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtInboardFramePositions);
@@ -304,5 +391,7 @@ int main() {
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtOutboardFramePositions);
         SimTK_SUBTEST(
             testMultiplyByPositionJacobianWrtOutboardFramePositionsTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadii);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadiiTranspose);
     SimTK_END_TEST();
 }
