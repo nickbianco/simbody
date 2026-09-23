@@ -35,7 +35,7 @@
 #include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
-
+#include "MobilizedBodyImpl.h"
 
     // ELLIPSOID //
 
@@ -52,7 +52,7 @@
 // not the identity transform. Instead, although the frames are aligned the
 // M frame origin is offset from F along their shared +z axis, so that it lies
 // on the ellipsoid surface at the point (0,0,rz) where rz is the z-radius
-// (semiaxis) of the ellipsoid.
+// of the ellipsoid.
 //
 // The generalized coordinates are:
 //   * 4 quaternions or 3 1-2-3 body fixed Euler angles (that is, fixed in M)
@@ -72,23 +72,27 @@
 // This mobilizer was written by Ajay Seth and hacked somewhat by Sherm.
 
 class RBNodeEllipsoid : public RigidBodyNodeSpec<3, false> {
-    Vec3 semi; // semi axis dimensions in x,y,z resp.
+    const MobilizedBody::EllipsoidImpl& impl;
 public:
 
 typedef typename RigidBodyNodeSpec<3, false>::HType HType;
 virtual const char* type() { return "ellipsoid"; }
 
-RBNodeEllipsoid(const MassProperties& mProps_B,
-              const Vec3&           radii, // x,y,z
+RBNodeEllipsoid(const MobilizedBody::EllipsoidImpl& impl,
+              const MassProperties& mProps_B,
               bool                  isReversed,
               UIndex&               nextUSlot,
               USquaredIndex&        nextUSqSlot,
               QIndex&               nextQSlot)
   : RigidBodyNodeSpec<3, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
                          RigidBodyNode::QDotMayDifferFromU, RigidBodyNode::QuaternionMayBeUsed, isReversed),
-    semi(radii)
+    impl(impl)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
+}
+
+const Vec3& getRadii(const SBStateDigest& sbs) const {
+    return impl.getRadii(sbs.getState());
 }
 
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
@@ -234,9 +238,9 @@ void calcX_FM(const SBStateDigest& sbs,
         X_F0M0.updR().setRotationFromQuaternion(quat); // 29 flops
     }
 
-    // Translation.
+    const Vec3& radii = getRadii(sbs);
     const Vec3& n = X_F0M0.z(); // just calculated above
-    X_F0M0.updP() = Vec3(semi[0]*n[0], semi[1]*n[1], semi[2]*n[2]);
+    X_F0M0.updP() = Vec3(radii[0]*n[0], radii[1]*n[1], radii[2]*n[2]);
 }
 
 // Generalized speeds are the angular velocity expressed in F, so they
@@ -251,10 +255,11 @@ void calcAcrossJointVelocityJacobian(
     // used to *define* this mobilizer, not necessarily the ones used after
     // handling mobilizer reversal.
     const Vec3 n = this->findX_F0M0(pc).z();
+    const Vec3& radii = getRadii(sbs);
 
-    H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
-    H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
-    H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*semi[0], n[0]*semi[1],       0     ) );
+    H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*radii[1], n[1]*radii[2]) );
+    H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*radii[0],       0,     -n[0]*radii[2]) );
+    H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*radii[0], n[0]*radii[1],       0     ) );
 }
 
 // Calculate time derivative of H_FM, which is *not* constant. (18 flops)
@@ -271,10 +276,11 @@ void calcAcrossJointVelocityJacobianDot(
     const Vec3       n      = this->findX_F0M0(pc).z();
     const Vec3       w_F0M0 = this->find_w_F0M0(pc, vc);
     const Vec3       ndot   = w_F0M0 % n; // w_FM x n (9 flops)
+    const Vec3&      radii  = getRadii(sbs);
 
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*semi[1], ndot[1]*semi[2]) );
-    HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*semi[0],       0,        -ndot[0]*semi[2]) );
-    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(-ndot[1]*semi[0], ndot[0]*semi[1],       0        ) );
+    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*radii[1], ndot[1]*radii[2]) );
+    HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*radii[0],       0,        -ndot[0]*radii[2]) );
+    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(-ndot[1]*radii[0], ndot[0]*radii[1],       0        ) );
 }
 
 // Calculate qdot=N(q)*u. Precalculations make this fast in Euler angle
