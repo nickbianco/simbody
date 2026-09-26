@@ -754,6 +754,57 @@ void testVariableEllipsoidRadii() {
     SimTK_TEST_EQ(ellipsoidReverse.getRadii(state), defaultRadii);
 }
 
+void testVariableBeamLength() {
+
+    // Create a system with two cantilever free beam mobilizers: forward and
+    // reverse.
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    GeneralForceSubsystem forces(system);
+    Body::Rigid body(MassProperties(1.0, Vec3(0), Inertia(1)));
+    Transform X_PF(Rotation(-1.9, Vec3(-3, 2, 4)), Vec3(-0.33, 0.66, -0.99));
+    Transform X_BM(Rotation(0.5, Vec3(2, -5, 1)), Vec3(0.25, -0.50, 0.75));
+    const Real defaultLength = 0.75;
+    MobilizedBody::CantileverFreeBeam beamForward(matter.Ground(), X_PF, body,
+            X_BM, defaultLength, MobilizedBody::Forward);
+    MobilizedBody::CantileverFreeBeam beamReverse(matter.Ground(), X_PF, body,
+            X_BM, defaultLength, MobilizedBody::Reverse);
+
+    // The beam lengths should match the defaults.
+    system.realizeTopology();
+    State state = system.getDefaultState();
+    SimTK_TEST_EQ(beamForward.getLength(state), defaultLength);
+    SimTK_TEST_EQ(beamReverse.getLength(state), defaultLength);
+
+    // Set new beam lengths.
+    Real newLengthForward = 1.35;
+    Real newLengthReverse = 0.42;
+    beamForward.setLength(state, newLengthForward);
+    beamReverse.setLength(state, newLengthReverse);
+    // No need to realize here, since we're just pulling directly from the
+    // Instance-stage discrete variables.
+    SimTK_TEST_EQ(beamForward.getLength(state), newLengthForward);
+    SimTK_TEST_EQ(beamReverse.getLength(state), newLengthReverse);
+
+    // Now we need to realize to Position, since we're pulling from the cache to
+    // perform calculations.
+    system.realize(state, Stage::Position);
+    Vec3 station(0.1, 0.2, 0.3);
+    Vec3 location = beamForward.findStationLocationInGround(state, station);
+    const Transform& X_FM = beamForward.getMobilizerTransform(state);
+    SimTK_TEST_EQ(location, X_PF * X_FM * ~X_BM * station);
+
+    // In the undeformed state the M frame origin is offset from Fo along their
+    // shared +z axis by the beam length.
+    SimTK_TEST_EQ(X_FM.p(), Vec3(0, 0, newLengthForward));
+
+    // Grabbing a fresh default state should restore the mobilizer frame
+    // defaults.
+    state = system.getDefaultState();
+    SimTK_TEST_EQ(beamForward.getLength(state), defaultLength);
+    SimTK_TEST_EQ(beamReverse.getLength(state), defaultLength);
+}
+
 int main() {
     SimTK_START_TEST("TestMobilizedBody");
         SimTK_SUBTEST(testCalculationMethods);
@@ -765,5 +816,6 @@ int main() {
         SimTK_SUBTEST(testCantileverFreeBeamEnergyConservation);
         SimTK_SUBTEST(testVariableMobilizerFrames);
         SimTK_SUBTEST(testVariableEllipsoidRadii);
+        SimTK_SUBTEST(testVariableBeamLength);
     SimTK_END_TEST();
 }

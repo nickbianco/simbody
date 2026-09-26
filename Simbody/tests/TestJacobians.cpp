@@ -383,6 +383,66 @@ void testMultiplyByPositionJacobianWrtRadiiTranspose() {
     }
 }
 
+void testMultiplyByPositionJacobianWrtLength() {
+    BranchedSystem sys;
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+    const Real h = 1e-5;
+
+    const Real dlength = 0.63;
+    const MobilizedBody::CantileverFreeBeam& beam = sys.m_cantileverFreeBeam;
+
+    Vector_<Vec3> dp_GB;
+    beam.multiplyByPositionJacobianWrtLength(state, dlength, dp_GB);
+
+    // p_GB is exactly affine in the beam length, so a forward difference is
+    // exact up to roundoff.
+    State pert = state;
+    beam.setLength(pert, beam.getLength(state) + h*dlength);
+    sys.m_system.realize(pert, Stage::Position);
+
+    for (int ib = 0; ib < nb; ++ib) {
+        const Vec3 p0 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(state).p();
+        const Vec3 p1 = sys.m_matter.getMobilizedBody(MobilizedBodyIndex(ib))
+                                    .getBodyTransform(pert).p();
+        SimTK_TEST_EQ_TOL(dp_GB[ib], (p1 - p0) / h, 1e-10);
+    }
+}
+
+void testMultiplyByPositionJacobianWrtLengthTranspose() {
+    BranchedSystem sys;
+    State state = sys.m_system.realizeTopology();
+    sys.loadDefaultState(state);
+    sys.m_system.realize(state, Stage::Position);
+
+    const int nb = sys.m_matter.getNumBodies();
+
+    Vector_<Vec3> g_GB(nb);
+    for (int b = 0; b < nb; ++b) {
+        g_GB[b] = Vec3(-0.5*(b+1), 0.7*(b+1), -0.9*(b+1));
+    }
+    g_GB[0] = Vec3(0);
+
+    const Real dlength = 0.63;
+    const MobilizedBody::CantileverFreeBeam& beam = sys.m_cantileverFreeBeam;
+
+    Vector_<Vec3> dp_GB;
+    beam.multiplyByPositionJacobianWrtLength(state, dlength, dp_GB);
+    const Real g_length =
+        beam.multiplyByPositionJacobianWrtLengthTranspose(state, g_GB);
+
+    // <Jpl*dlength, g_GB> = <dlength, ~Jpl*g_GB>
+    Real lhs = 0;
+    for (int b = 0; b < nb; ++b) {
+        lhs += dot(g_GB[b], dp_GB[b]);
+    }
+    SimTK_TEST_EQ_TOL(lhs, dlength * g_length, 1e-10);
+}
+
 int main() {
     SimTK_START_TEST("TestJacobians");
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtInboardFramePositions);
@@ -393,5 +453,7 @@ int main() {
             testMultiplyByPositionJacobianWrtOutboardFramePositionsTranspose);
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadii);
         SimTK_SUBTEST(testMultiplyByPositionJacobianWrtRadiiTranspose);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtLength);
+        SimTK_SUBTEST(testMultiplyByPositionJacobianWrtLengthTranspose);
     SimTK_END_TEST();
 }

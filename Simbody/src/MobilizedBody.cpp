@@ -2840,6 +2840,77 @@ MobilizedBody::CantileverFreeBeam::CantileverFreeBeam
      return getImpl().getDefaultLength();
  }
 
+const Real& MobilizedBody::CantileverFreeBeam::getLength(const State& s) const {
+    return getImpl().getLength(s);
+}
+
+void MobilizedBody::CantileverFreeBeam::setLength(State& s,
+                                                  const Real& length) const {
+    getImpl().setLength(s, length);
+}
+
+void MobilizedBody::CantileverFreeBeam::multiplyByPositionJacobianWrtLength(
+        const State& state, const Real& dlength, Vector_<Vec3>& dp_GB) const {
+    const SimbodyMatterSubsystem& matter = getMatterSubsystem();
+
+    // We want Jl*dlength, where Jl = ∂p_GB / ∂length. The length enters the
+    // kinematics only through the cross-mobilizer translation, and only as an
+    // overall scale factor: p_F0M0 = length*v, where
+    //
+    //     v = (2/3 q1, -2/3 q0, 1 - 4/15 (q0^2 + q1^2))
+    //
+    // is a function of the generalized coordinates alone; R_FM does not depend
+    // on the length at all. So we can use the existing position Jacobian with
+    // respect to inboard frame positions:
+    //
+    // ∂p_GB / ∂length = R_GF*(∂p_FM / ∂length)
+    //                 = R_GF*(p_FM / length)
+    //                 = R_GP*R_PF*(p_FM / length)
+    //                 = JpF*R_PF*(p_FM / length)
+    //
+    // where multiplication with JpF is achieved via SimbodyMatterSubsystem's
+    // multiplyByPositionJacobianWrtInboardFramePositions().
+    const Vec3 dp_FM = getMobilizerTransform(state).p() / getLength(state);
+
+    // Compute dp_PF = R_PF*(∂p_FM / ∂length)*dlength.
+    Vector_<Vec3> dp_frame(matter.getNumBodies());
+    dp_frame.setToZero();
+    dp_frame[getMobilizedBodyIndex()] =
+        getInboardFrame(state).R() * (dlength * dp_FM);
+
+    // Compute JpF*dp_PF.
+    matter.multiplyByPositionJacobianWrtInboardFramePositions(
+            state, dp_frame, dp_GB);
+}
+
+Real MobilizedBody::CantileverFreeBeam::
+multiplyByPositionJacobianWrtLengthTranspose(
+        const State& state, const Vector_<Vec3>& g_GB) const {
+    const SimbodyMatterSubsystem& matter = getMatterSubsystem();
+
+    // We want ~Jl*g_GB, where Jl = ∂p_GB / ∂length. Using the transpose of the
+    // expression described in multiplyByPositionJacobianWrtLength() above:
+    //
+    // ~Jl = ~(JpF*R_PF*(p_FM / length))
+    //     = ~(p_FM / length)*(~R_PF)*(~JpF)
+    //
+    // where multiplication with ~JpF is achieved via SimbodyMatterSubsystem's
+    // multiplyByPositionJacobianWrtInboardFramePositionsTranspose().
+    const Vec3 dp_FM = getMobilizerTransform(state).p() / getLength(state);
+
+    // Compute ~JpF*g_GB.
+    Vector_<Vec3> g_PF;
+    matter.multiplyByPositionJacobianWrtInboardFramePositionsTranspose(
+            state, g_GB, g_PF);
+
+    // Compute g_k = ~R_PF*g_PF for the current node, k.
+    const Vec3 g_k =
+        ~getInboardFrame(state).R() * g_PF[getMobilizedBodyIndex()];
+
+    // Compute dlength = ~(∂p_FM / ∂length)*g_k.
+    return dot(dp_FM, g_k);
+}
+
  const Vec3& MobilizedBody::CantileverFreeBeam::getDefaultQ() const {
      return getImpl().defaultQ;
  }

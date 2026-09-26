@@ -1080,11 +1080,33 @@ public:
     }
     const Real& getDefaultLength() const {return defaultLength;}
 
+    const Real& getLength(const State& s) const {
+        return s.getDiscreteVariable(getMySubsystemIndex(), lengthIx)
+                    .getValue<Real>();
+    }
+    void setLength(State& s, const Real& length) const {
+        assert(length>0);
+        s.updDiscreteVariable(
+                getMySubsystemIndex(), lengthIx).updValue<Real>() = length;
+    }
+
+    void realizeTopologyVirtual(State& s) const override {
+        lengthIx = s.allocateDiscreteVariable(getMySubsystemIndex(),
+                                              Stage::Instance,
+                                              new Value<Real>(defaultLength));
+    }
+
     SimTK_DOWNCAST(CantileverFreeBeamImpl, MobilizedBodyImpl);
 private:
     friend class MobilizedBody::CantileverFreeBeam;
-    Real defaultLength; // used for visualization only
-    Vec3 defaultQ;      // the default orientation
+
+    SubsystemIndex getMySubsystemIndex() const {
+        return getMyMatterSubsystemRep().getMySubsystemIndex();
+    }
+
+    Real defaultLength;  // initial value for the length state variable
+    Vec3 defaultQ;       // the default orientation
+    mutable DiscreteVariableIndex lengthIx; // the length discrete value index
 };
 
 /////////////////////////////////////////////////
