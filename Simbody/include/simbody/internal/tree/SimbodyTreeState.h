@@ -68,38 +68,97 @@ allocated if necessary), and then advance to stage Whatever. */
 
 #include <cassert>
 #include <iostream>
+#include <type_traits>
+#include <utility>
 using std::cout; using std::endl;
 
 using namespace SimTK;
 
 class SimbodyMatterSubsystemRep;
-class RigidBodyNode;
-template <int dof, bool noR_FM>
-    class RigidBodyNodeSpec;
+template <class P> class RigidBodyNode_;
+typedef RigidBodyNode_<Real> RigidBodyNode;
 
 // defined below
 
+// The cache entries and Instance-stage variables that hold scalar quantities
+// (and are used by the RigidBodyNode tree computations) are templatized on
+// the scalar type P. The default Real precision versions are what are stored
+// in the State; other scalar types (e.g. casadi::SX) are used only outside
+// the State (see SBScalarStateDigest below).
+
 class SBTopologyCache;
 class SBModelCache;
-class SBInstanceCache;
+template <class P> class SBInstanceCache_;
+typedef SBInstanceCache_<Real> SBInstanceCache;
 class SBTimeCache;
-class SBTreePositionCache;
+template <class P> class SBTreePositionCache_;
+typedef SBTreePositionCache_<Real> SBTreePositionCache;
 class SBConstrainedPositionCache;
-class SBCompositeBodyInertiaCache;
-class SBArticulatedBodyInertiaCache;
-class SBTreeVelocityCache;
+template <class P> class SBCompositeBodyInertiaCache_;
+typedef SBCompositeBodyInertiaCache_<Real> SBCompositeBodyInertiaCache;
+template <class P> class SBArticulatedBodyInertiaCache_;
+typedef SBArticulatedBodyInertiaCache_<Real> SBArticulatedBodyInertiaCache;
+template <class P> class SBTreeVelocityCache_;
+typedef SBTreeVelocityCache_<Real> SBTreeVelocityCache;
 class SBConstrainedVelocityCache;
-class SBDynamicsCache;
-class SBTreeAccelerationCache;
+template <class P> class SBArticulatedBodyVelocityCache_;
+typedef SBArticulatedBodyVelocityCache_<Real> SBArticulatedBodyVelocityCache;
+template <class P> class SBDynamicsCache_;
+typedef SBDynamicsCache_<Real> SBDynamicsCache;
+template <class P> class SBTreeAccelerationCache_;
+typedef SBTreeAccelerationCache_<Real> SBTreeAccelerationCache;
 class SBConstrainedAccelerationCache;
 
 class SBModelVars;
-class SBInstanceVars;
+template <class P> class SBInstanceVars_;
+typedef SBInstanceVars_<Real> SBInstanceVars;
 class SBTimeVars;
 class SBPositionVars;
 class SBVelocityVars;
 class SBDynamicsVars;
 class SBAccelerationVars;
+
+// Storage used in the scalar-templatized cache entries for variable-length
+// arrays that are Vector_s in the State. For the default Real precision
+// these are Vector_s as before; for other scalar types Vector_ is not
+// available (it is instantiated only for built-in types) so we use Array_.
+template <class P, class T>
+using SBVector_ = typename std::conditional<std::is_same<P,Real>::value,
+                                            Vector_<T>, Array_<T>>::type;
+
+// Conversions from Real-precision quantities to scalar type P, used to build
+// the non-Real copies of Instance-stage quantities.
+template <class P> inline Vec<3,P> sbCast(const Vec3& v)
+{   return Vec<3,P>(P(v[0]), P(v[1]), P(v[2])); }
+template <class P> inline Mat<3,3,P> sbCast(const Mat33& m) {
+    Mat<3,3,P> r;
+    for (int i=0; i<3; ++i) for (int j=0; j<3; ++j) r(i,j) = P(m(i,j));
+    return r;
+}
+template <class P> inline SymMat<3,P> sbCast(const SymMat33& s) {
+    SymMat<3,P> r;
+    for (int i=0; i<3; ++i) for (int j=0; j<=i; ++j) r(i,j) = P(s(i,j));
+    return r;
+}
+template <class P> inline Rotation_<P> sbCast(const Rotation& R)
+{   return Rotation_<P>(sbCast<P>(R.asMat33()), true); }
+template <class P> inline Transform_<P> sbCast(const Transform& X)
+{   return Transform_<P>(sbCast<P>(X.R()), sbCast<P>(X.p())); }
+template <class P> inline Inertia_<P> sbCast(const Inertia& I)
+{   return Inertia_<P>(sbCast<P>(I.asSymMat33())); }
+template <class P> inline UnitInertia_<P> sbCast(const UnitInertia& G)
+{   return UnitInertia_<P>(sbCast<P>(G.asSymMat33())); }
+template <class P> inline MassProperties_<P> sbCast(const MassProperties& m)
+{   return MassProperties_<P>(P(m.getMass()), sbCast<P>(m.getMassCenter()),
+                              sbCast<P>(m.getUnitInertia())); }
+template <class P, class T, class X>
+inline Array_<decltype(sbCast<P>(std::declval<T>())),X>
+sbCastArray(const Array_<T,X>& a) {
+    Array_<decltype(sbCast<P>(std::declval<T>())),X> r;
+    r.reserve(a.size());
+    for (const T& t : a) r.push_back(sbCast<P>(t));
+    return r;
+}
 
 
 
@@ -463,8 +522,42 @@ public:
 
 // -----------------------------------------------------------------------------
 //                               INSTANCE CACHE
-class SBInstanceCache {
+template <class P>
+class SBInstanceCache_ {
 public:
+    SBInstanceCache_() = default;
+
+    // Make a copy of a Real-precision instance cache for scalar type P.
+    template <class Q = P, 
+              class = typename std::enable_if<!std::is_same<Q,Real>::value>::type>
+    explicit SBInstanceCache_(const SBInstanceCache& src)
+    :   totalMass(src.totalMass),
+        centralInertias(sbCastArray<P>(src.centralInertias)),
+        principalMoments(sbCastArray<P>(src.principalMoments)),
+        principalAxes(sbCastArray<P>(src.principalAxes)),
+        referenceConfiguration(sbCastArray<P>(src.referenceConfiguration)),
+        outboardMobilizerFramesInverse
+           (sbCastArray<P>(src.outboardMobilizerFramesInverse)),
+        mobodInstanceInfo(src.mobodInstanceInfo),
+        constraintInstanceInfo(src.constraintInstanceInfo),
+        presQ(src.presQ), zeroQ(src.zeroQ), freeQ(src.freeQ),
+        presU(src.presU), zeroU(src.zeroU), freeU(src.freeU),
+        presUDot(src.presUDot), zeroUDot(src.zeroUDot), freeUDot(src.freeUDot),
+        presForce(src.presForce),
+        firstQuaternionQErrSlot(src.firstQuaternionQErrSlot),
+        qErrIndex(src.qErrIndex), uErrIndex(src.uErrIndex), 
+        udotErrIndex(src.udotErrIndex),
+        totalNHolonomicConstraintEquationsInUse
+           (src.totalNHolonomicConstraintEquationsInUse),
+        totalNNonholonomicConstraintEquationsInUse
+           (src.totalNNonholonomicConstraintEquationsInUse),
+        totalNAccelerationOnlyConstraintEquationsInUse
+           (src.totalNAccelerationOnlyConstraintEquationsInUse),
+        totalNConstrainedBodiesInUse(src.totalNConstrainedBodiesInUse),
+        totalNConstrainedMobilizersInUse(src.totalNConstrainedMobilizersInUse),
+        totalNConstrainedQInUse(src.totalNConstrainedQInUse),
+        totalNConstrainedUInUse(src.totalNConstrainedUInUse) {}
+
     // Instance variables are:
     //   body mass props; particle masses
     //   X_BM, X_PF mobilizer transforms
@@ -478,12 +571,12 @@ public:
     //       for each rigid body
     //   inverse of outboard mobilizer frames, X_MB = ~X_BM
 
-    Real              totalMass; // sum of all rigid body and particles masses
-    Array_<Inertia,MobilizedBodyIndex>   centralInertias;                // nb
-    Array_<Vec3,MobilizedBodyIndex>      principalMoments;               // nb
-    Array_<Rotation,MobilizedBodyIndex>  principalAxes;                  // nb
-    Array_<Transform,MobilizedBodyIndex> referenceConfiguration;         // nb
-    Array_<Transform,MobilizedBodyIndex> outboardMobilizerFramesInverse; // nb
+    P                 totalMass; // sum of all rigid body and particles masses
+    Array_<Inertia_<P>,MobilizedBodyIndex>   centralInertias;                // nb
+    Array_<Vec<3,P>,MobilizedBodyIndex>      principalMoments;               // nb
+    Array_<Rotation_<P>,MobilizedBodyIndex>  principalAxes;                  // nb
+    Array_<Transform_<P>,MobilizedBodyIndex> referenceConfiguration;         // nb
+    Array_<Transform_<P>,MobilizedBodyIndex> outboardMobilizerFramesInverse; // nb
 
     int getNumMobilizedBodies() const {return (int)mobodInstanceInfo.size();}
     SBInstancePerMobodInfo& updMobodInstanceInfo(MobilizedBodyIndex mbx)
@@ -583,7 +676,7 @@ public:
     void allocate(const SBTopologyCache& topo,
                   const SBModelCache&    model) 
     {
-        totalMass = SimTK::NaN;
+        totalMass = NTraits<P>::getNaN();
         centralInertias.resize(topo.nBodies);                // I_CB
         principalMoments.resize(topo.nBodies);               // (Ixx,Iyy,Izz)
         principalAxes.resize(topo.nBodies);                  // [axx ayy azz]
@@ -653,18 +746,24 @@ public:
 // soon as possible, so that later calculations (constraint position errors, 
 // prescribed velocities) can access these without a stage violation.
 
-class SBTreePositionCache {
+template <class P>
+class SBTreePositionCache_ {
 public:
-    const Transform& getX_FM(MobilizedBodyIndex mbx) const {return bodyJointInParentJointFrame[mbx];}
-    Transform&       updX_FM(MobilizedBodyIndex mbx)       {return bodyJointInParentJointFrame[mbx];}
-    const Transform& getX_PB(MobilizedBodyIndex mbx) const {return bodyConfigInParent[mbx];}
-    Transform&       updX_PB(MobilizedBodyIndex mbx)       {return bodyConfigInParent[mbx];}
-    const Transform& getX_GB(MobilizedBodyIndex mbx) const {return bodyConfigInGround[mbx];}
-    Transform&       updX_GB(MobilizedBodyIndex mbx)       {return bodyConfigInGround[mbx];}
+    typedef Vec<3,P>            Vec3P;
+    typedef Transform_<P>       TransformP;
+    typedef PhiMatrix_<P>       PhiMatrixP;
+    typedef SpatialInertia_<P>  SpatialInertiaP;
 
-    const Transform& getX_AB(AncestorConstrainedBodyPoolIndex cbpx) const 
+    const TransformP& getX_FM(MobilizedBodyIndex mbx) const {return bodyJointInParentJointFrame[mbx];}
+    TransformP&       updX_FM(MobilizedBodyIndex mbx)       {return bodyJointInParentJointFrame[mbx];}
+    const TransformP& getX_PB(MobilizedBodyIndex mbx) const {return bodyConfigInParent[mbx];}
+    TransformP&       updX_PB(MobilizedBodyIndex mbx)       {return bodyConfigInParent[mbx];}
+    const TransformP& getX_GB(MobilizedBodyIndex mbx) const {return bodyConfigInGround[mbx];}
+    TransformP&       updX_GB(MobilizedBodyIndex mbx)       {return bodyConfigInGround[mbx];}
+
+    const TransformP& getX_AB(AncestorConstrainedBodyPoolIndex cbpx) const 
     {   return constrainedBodyConfigInAncestor[cbpx]; }
-    Transform&       updX_AB(AncestorConstrainedBodyPoolIndex cbpx)
+    TransformP&       updX_AB(AncestorConstrainedBodyPoolIndex cbpx)
     {   return constrainedBodyConfigInAncestor[cbpx]; }
 public:
     // At model stage, each mobilizer (RBNode) is given a chance to grab
@@ -674,30 +773,30 @@ public:
     // Everything must be filled in by the end of realizePosition() but the
     // mobilizer is free to fill in different parts at different times during
     // its realizePosition() calculations.
-    Array_<Real, MobodQPoolIndex> mobilizerQCache;
+    Array_<P, MobodQPoolIndex> mobilizerQCache;
 
     // CAUTION: our definition of the H matrix is transposed from those used
     // by Jain and by Schwieters. Jain would call these H* and Schwieters
     // would call them H^T, but we call them H.
     // TODO(sherm1) Since each dof gets a SpatialVec, consider making each
     //  entry a SpatialVec instead to get rid of the 2x in the index.
-    Array_<Vec3> storageForH_FM;   // 2 x ndof (H_FM)
-    Array_<Vec3> storageForH_PB_G; // 2 x ndof (H_PB_G)
+    Array_<Vec3P> storageForH_FM;   // 2 x ndof (H_FM)
+    Array_<Vec3P> storageForH_PB_G; // 2 x ndof (H_PB_G)
 
-    Array_<Transform,MobilizedBodyIndex>    bodyJointInParentJointFrame;  // nb (X_FM)
-    Array_<Transform,MobilizedBodyIndex>    bodyConfigInParent;           // nb (X_PB)
-    Array_<Transform,MobilizedBodyIndex>    bodyConfigInGround;           // nb (X_GB)
-    Array_<PhiMatrix,MobilizedBodyIndex>    bodyToParentShift;            // nb (phi)
+    Array_<TransformP,MobilizedBodyIndex>   bodyJointInParentJointFrame;  // nb (X_FM)
+    Array_<TransformP,MobilizedBodyIndex>   bodyConfigInParent;           // nb (X_PB)
+    Array_<TransformP,MobilizedBodyIndex>   bodyConfigInGround;           // nb (X_GB)
+    Array_<PhiMatrixP,MobilizedBodyIndex>   bodyToParentShift;            // nb (phi)
 
     // This contains mass m, p_BBc_G (center of mass location measured from
     // B origin, expressed in Ground), and G_Bo_G (unit inertia [gyration]
     // matrix about B's origin, expressed in Ground). Note that this body's
     // inertia is I_Bo_G = m*G_Bo_G.
-    Array_<SpatialInertia,MobilizedBodyIndex> bodySpatialInertiaInGround; // nb (Mk_G)
+    Array_<SpatialInertiaP,MobilizedBodyIndex> bodySpatialInertiaInGround; // nb (Mk_G)
 
     // This is the body center of mass location measured from the ground
     // origin and expressed in ground, p_GBc = p_GB + p_BBc_G (above).
-    Array_<Vec3,MobilizedBodyIndex> bodyCOMInGround;                      // nb (p_GBc)
+    Array_<Vec3P,MobilizedBodyIndex> bodyCOMInGround;                     // nb (p_GBc)
 
 
         // Constrained Body Pool
@@ -706,7 +805,7 @@ public:
     // entries for each of their Constrained Bodies (call the total number 
     // 'nacb') to store the above information but measured and expressed in 
     // the Ancestor frame rather than Ground.
-    Array_<Transform> constrainedBodyConfigInAncestor;   // nacb (X_AB)
+    Array_<TransformP> constrainedBodyConfigInAncestor;  // nacb (X_AB)
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -740,12 +839,12 @@ public:
         bodyToParentShift[GroundIndex].setToZero();
 
         bodySpatialInertiaInGround.resize(nBodies); 
-        bodySpatialInertiaInGround[GroundIndex].setMass(Infinity);
-        bodySpatialInertiaInGround[GroundIndex].setMassCenter(Vec3(0));
-        bodySpatialInertiaInGround[GroundIndex].setUnitInertia(UnitInertia(Infinity));
+        bodySpatialInertiaInGround[GroundIndex].setMass(P(Infinity));
+        bodySpatialInertiaInGround[GroundIndex].setMassCenter(Vec3P(0));
+        bodySpatialInertiaInGround[GroundIndex].setUnitInertia(UnitInertia_<P>(P(Infinity)));
 
         bodyCOMInGround.resize(nBodies);             
-        bodyCOMInGround[GroundIndex] = Vec3(0);
+        bodyCOMInGround[GroundIndex] = Vec3P(0);
 
         constrainedBodyConfigInAncestor.resize(nacb);
     }
@@ -811,9 +910,10 @@ public:
 // all. So we give them their own cache entry and expect explicit realization 
 // some time after Position stage, if at all.
 
-class SBCompositeBodyInertiaCache {
+template <class P>
+class SBCompositeBodyInertiaCache_ {
 public:
-    Array_<SpatialInertia,MobilizedBodyIndex> compositeBodyInertia; // nb (R)
+    Array_<SpatialInertia_<P>,MobilizedBodyIndex> compositeBodyInertia; // nb (R)
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -875,14 +975,15 @@ entry should have depends-on stage Instance, with PositionKinematics as an
 additional prerequisite, and computed-by stage Acceleration. However, it can
 be realized explicitly any time its stage and prerequisite are valid, such as
 after Stage::Position. */
-class SBArticulatedBodyInertiaCache {
+template <class P>
+class SBArticulatedBodyInertiaCache_ {
 public:
-    Array_<ArticulatedInertia,MobodIndex> articulatedBodyInertia; // nb (P)
-    Array_<ArticulatedInertia,MobodIndex> pPlus;                  // nb (PPlus)
+    Array_<ArticulatedInertia_<P>,MobodIndex> articulatedBodyInertia; // nb (P)
+    Array_<ArticulatedInertia_<P>,MobodIndex> pPlus;                  // nb (PPlus)
 
-    Vector_<Real>       storageForD;    // sum(nu[j]^2)
-    Vector_<Real>       storageForDI;   // sum(nu[j]^2)
-    Array_<Vec3>        storageForG;    // 2 X ndof
+    SBVector_<P,P>      storageForD;    // sum(nu[j]^2)
+    SBVector_<P,P>      storageForDI;   // sum(nu[j]^2)
+    Array_<Vec<3,P>>    storageForG;    // 2 X ndof
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -928,45 +1029,49 @@ public:
 // later calculations (constraint velocity errors) can access these without a 
 // stage violation.
 
-class SBTreeVelocityCache {
+template <class P>
+class SBTreeVelocityCache_ {
 public:
-    const SpatialVec& getV_FM(MobodIndex mbx) const 
+    typedef Vec<3,P>       Vec3P;
+    typedef SpatialVec_<P> SpatialVecP;
+
+    const SpatialVecP& getV_FM(MobodIndex mbx) const 
     {   return mobilizerRelativeVelocity[mbx]; }
-    SpatialVec&       updV_FM(MobodIndex mbx)       
+    SpatialVecP&       updV_FM(MobodIndex mbx)       
     {   return mobilizerRelativeVelocity[mbx]; }
-    const SpatialVec& getV_PB(MobodIndex mbx) const 
+    const SpatialVecP& getV_PB(MobodIndex mbx) const 
     {   return bodyVelocityInParent[mbx]; }
-    SpatialVec&       updV_PB(MobodIndex mbx)       
+    SpatialVecP&       updV_PB(MobodIndex mbx)       
     {   return bodyVelocityInParent[mbx]; }
-    const SpatialVec& getV_GB(MobodIndex mbx) const 
+    const SpatialVecP& getV_GB(MobodIndex mbx) const 
     {   return bodyVelocityInGround[mbx]; }
-    SpatialVec&       updV_GB(MobodIndex mbx)       
+    SpatialVecP&       updV_GB(MobodIndex mbx)       
     {   return bodyVelocityInGround[mbx]; }
 
-    const SpatialVec& getV_AB(AncestorConstrainedBodyPoolIndex cbpx) const 
+    const SpatialVecP& getV_AB(AncestorConstrainedBodyPoolIndex cbpx) const 
     {   return constrainedBodyVelocityInAncestor[cbpx]; }
-    SpatialVec&       updV_AB(AncestorConstrainedBodyPoolIndex cbpx)       
+    SpatialVecP&       updV_AB(AncestorConstrainedBodyPoolIndex cbpx)       
     {   return constrainedBodyVelocityInAncestor[cbpx]; }
 
 public:
     // qdot cache space is supplied directly by the State
 
-    Array_<SpatialVec,MobodIndex> mobilizerRelativeVelocity; // nb (V_FM)
-    Array_<SpatialVec,MobodIndex> bodyVelocityInParent;      // nb (V_PB)
-    Array_<SpatialVec,MobodIndex> bodyVelocityInGround;      // nb (V_GB)
+    Array_<SpatialVecP,MobodIndex> mobilizerRelativeVelocity; // nb (V_FM)
+    Array_<SpatialVecP,MobodIndex> bodyVelocityInParent;      // nb (V_PB)
+    Array_<SpatialVecP,MobodIndex> bodyVelocityInGround;      // nb (V_GB)
 
     // CAUTION: our definition of the H matrix is transposed from those used
     // by Jain and by Schwieters.
-    Array_<Vec3> storageForHDot_FM;  // 2 x ndof (HDot_FM)
-    Array_<Vec3> storageForHDot;     // 2 x ndof (HDot_PB_G)
+    Array_<Vec3P> storageForHDot_FM;  // 2 x ndof (HDot_FM)
+    Array_<Vec3P> storageForHDot;     // 2 x ndof (HDot_PB_G)
 
     // nb (VB_PB_G=HDot_PB_G*u)
-    Array_<SpatialVec,MobodIndex> bodyVelocityInParentDerivRemainder; 
+    Array_<SpatialVecP,MobodIndex> bodyVelocityInParentDerivRemainder; 
     
-    Array_<SpatialVec,MobodIndex> gyroscopicForces;                // nb (b)
-    Array_<SpatialVec,MobodIndex> mobilizerCoriolisAcceleration;   // nb (a)
-    Array_<SpatialVec,MobodIndex> totalCoriolisAcceleration;       // nb (A)
-    Array_<SpatialVec,MobodIndex> totalCentrifugalForces;          // nb (M*A+b)
+    Array_<SpatialVecP,MobodIndex> gyroscopicForces;                // nb (b)
+    Array_<SpatialVecP,MobodIndex> mobilizerCoriolisAcceleration;   // nb (a)
+    Array_<SpatialVecP,MobodIndex> totalCoriolisAcceleration;       // nb (A)
+    Array_<SpatialVecP,MobodIndex> totalCentrifugalForces;          // nb (M*A+b)
 
 
         // Ancestor Constrained Body Pool
@@ -975,7 +1080,7 @@ public:
     // entries for each of their Constrained Bodies (call the total number 
     // 'nacb') to store the above information but measured and expressed in the
     // Ancestor frame rather than Ground.
-    Array_<SpatialVec> constrainedBodyVelocityInAncestor; // nacb (V_AB)
+    Array_<SpatialVecP> constrainedBodyVelocityInAncestor; // nacb (V_AB)
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -988,7 +1093,7 @@ public:
         const int maxNQs  = tree.maxNQs; // allocate max # q's we'll ever need
         const int nacb    = tree.nAncestorConstrainedBodies;
 
-        const SpatialVec SVZero(Vec3(0),Vec3(0));
+        const SpatialVecP SVZero(Vec3P(0),Vec3P(0));
 
         mobilizerRelativeVelocity.resize(nBodies);       
         mobilizerRelativeVelocity[GroundIndex] = SVZero;
@@ -1074,9 +1179,10 @@ entry should have depends-on stage Instance, with VelocityKinematics and ABIs
 as an additional prerequisites, and computed-by stage Acceleration. However, it 
 can be realized any time its stage and prerequisites are valid, such 
 as after Stage::Velocity plus realizeArticulatedBodyInertias(). */
-class SBArticulatedBodyVelocityCache {
+template <class P>
+class SBArticulatedBodyVelocityCache_ {
 public:
-    Array_<SpatialVec,MobodIndex> articulatedBodyCentrifugalForces; //nb (P*a+b)
+    Array_<SpatialVec_<P>,MobodIndex> articulatedBodyCentrifugalForces; //nb (P*a+b)
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -1088,7 +1194,7 @@ public:
         
         articulatedBodyCentrifugalForces.resize(nBodies);           
         articulatedBodyCentrifugalForces[GroundIndex] = 
-                                                    SpatialVec(Vec3(0),Vec3(0));
+                                        SpatialVec_<P>(Vec<3,P>(0),Vec<3,P>(0));
     }
 };
 //...................... ARTICULATED BODY VELOCITY CACHE .......................
@@ -1097,14 +1203,15 @@ public:
 // =============================================================================
 //                                DYNAMICS CACHE
 // =============================================================================
-class SBDynamicsCache {
+template <class P>
+class SBDynamicsCache_ {
 public:
     // This holds the values from all the Motion prescribed acceleration 
     // calculations, and those which result from diffentiating prescribed 
     // velocities, or twice-differentiating prescribed positions.
-    Array_<Real> presUDotPool;    // Index with PresUDotPoolIndex
+    Array_<P> presUDotPool;    // Index with PresUDotPoolIndex
 
-    Array_<SpatialMat,MobilizedBodyIndex> Y;                          // nb
+    Array_<SpatialMat_<P>,MobilizedBodyIndex> Y;                      // nb
 
 public:
     void allocate(const SBTopologyCache& tree,
@@ -1117,7 +1224,7 @@ public:
         presUDotPool.resize(instance.getTotalNumPresUDot());
 
         Y.resize(nBodies); // TODO: op space compliance kernel (see Jain 2011)
-        Y[GroundIndex] = SpatialMat(Mat33(0));
+        Y[GroundIndex] = SpatialMat_<P>(Mat<3,3,P>(0));
     }
 };
 //............................... DYNAMICS CACHE ...............................
@@ -1143,17 +1250,20 @@ public:
 // possible, so that later calculations (constraint acceleration errors) can 
 // access these without a stage violation.
 
-class SBTreeAccelerationCache {
+template <class P>
+class SBTreeAccelerationCache_ {
 public:
-    const SpatialVec& getA_GB(MobilizedBodyIndex mbx) const 
+    typedef SpatialVec_<P> SpatialVecP;
+
+    const SpatialVecP& getA_GB(MobilizedBodyIndex mbx) const 
     {   return bodyAccelerationInGround[mbx]; }
-    SpatialVec&       updA_GB(MobilizedBodyIndex mbx)       
+    SpatialVecP&       updA_GB(MobilizedBodyIndex mbx)       
     {   return bodyAccelerationInGround[mbx]; }
 
 public:
     // udot, qdotdot cache space is provided directly by the State.
 
-    Vector_<SpatialVec> bodyAccelerationInGround; // nb (A_GB)
+    SBVector_<P,SpatialVecP> bodyAccelerationInGround; // nb (A_GB)
 
     // This is where the calculated prescribed motion "taus" go. (That is, 
     // generalized forces needed to implement prescribed generalized 
@@ -1161,12 +1271,12 @@ public:
     // known accelerations; there is one scalar here per mobility in those 
     // mobilizers. Look in the InstanceCache to see which slots are allocated
     // to which mobilizers.
-    Vector presMotionForces;    // Index with PresForcePoolIndex
+    SBVector_<P,P> presMotionForces;    // Index with PresForcePoolIndex
 
     // Temps used in calculating accelerations and prescribed forces.
-    Vector                                epsilon;  // nu
-    Array_<SpatialVec,MobilizedBodyIndex> z;        // nb
-    Array_<SpatialVec,MobilizedBodyIndex> zPlus;    // nb
+    SBVector_<P,P>                         epsilon;  // nu
+    Array_<SpatialVecP,MobilizedBodyIndex> z;        // nb
+    Array_<SpatialVecP,MobilizedBodyIndex> zPlus;    // nb
 
 public:
     void allocate(const SBTopologyCache& topo,
@@ -1178,7 +1288,7 @@ public:
         const int nDofs   = topo.nDOFs;     // this is the number of u's (nu)
 
         bodyAccelerationInGround.resize(nBodies);   
-        bodyAccelerationInGround[0] = SpatialVec(Vec3(0),Vec3(0));;
+        bodyAccelerationInGround[0] = SpatialVecP(Vec<3,P>(0),Vec<3,P>(0));
 
         presMotionForces.resize(instance.getTotalNumPresForces());
 
@@ -1296,11 +1406,30 @@ public:
 // Note: we may at some point have instance variables whose allocation is
 // deferred until realizeModel() but those would be wiped out whenever a change
 // to a Model-stage variable is made (most notably useEulerAngles).
-class SBInstanceVars {
+template <class P>
+class SBInstanceVars_ {
 public:
-    Array_<MassProperties,MobilizedBodyIndex>   bodyMassProperties;
-    Array_<Transform,     MobilizedBodyIndex>   outboardMobilizerFrames;
-    Array_<Transform,     MobilizedBodyIndex>   inboardMobilizerFrames;
+    SBInstanceVars_() = default;
+
+    // Make a copy of Real-precision instance variables for scalar type P.
+    template <class Q = P, 
+              class = typename std::enable_if<!std::is_same<Q,Real>::value>::type>
+    explicit SBInstanceVars_(const SBInstanceVars& src)
+    :   bodyMassProperties(sbCastArray<P>(src.bodyMassProperties)),
+        outboardMobilizerFrames(sbCastArray<P>(src.outboardMobilizerFrames)),
+        inboardMobilizerFrames(sbCastArray<P>(src.inboardMobilizerFrames)),
+        mobilizerLockLevel(src.mobilizerLockLevel),
+        lockedQs(src.lockedQs), lockedUs(src.lockedUs),
+        prescribedMotionIsDisabled(src.prescribedMotionIsDisabled),
+        particleMasses(src.particleMasses),
+        constraintIsDisabled(src.constraintIsDisabled) {}
+
+    Array_<MassProperties_<P>,MobilizedBodyIndex>   bodyMassProperties;
+    Array_<Transform_<P>,     MobilizedBodyIndex>   outboardMobilizerFrames;
+    Array_<Transform_<P>,     MobilizedBodyIndex>   inboardMobilizerFrames;
+
+    // The rest of these are not used in computations that must support
+    // other scalar types so remain Real regardless of P.
 
     Array_<Motion::Level, MobilizedBodyIndex>   mobilizerLockLevel;
     Vector                                      lockedQs;
@@ -1321,13 +1450,14 @@ public:
 
         // Clear first to make sure all entries are reset to default values.
         bodyMassProperties.clear();
-        bodyMassProperties.resize(nb, MassProperties(1,Vec3(0),Inertia(1)));
+        bodyMassProperties.resize(nb, MassProperties_<P>(P(1),Vec<3,P>(0),
+                                                         Inertia_<P>(P(1))));
         
         outboardMobilizerFrames.clear();
-        outboardMobilizerFrames.resize(nb, Transform());
+        outboardMobilizerFrames.resize(nb, Transform_<P>());
 
         inboardMobilizerFrames.clear();
-        inboardMobilizerFrames.resize(nb, Transform());
+        inboardMobilizerFrames.resize(nb, Transform_<P>());
 
         mobilizerLockLevel.clear();
         mobilizerLockLevel.resize(nb, Motion::NoLevel);
@@ -1741,5 +1871,92 @@ private:
     SBTreeAccelerationCache*        tac;
     SBConstrainedAccelerationCache* cac;
 };
+
+
+    ////////////////////////////
+    // SB SCALAR STATE DIGEST //
+    ////////////////////////////
+
+/*
+ * This plays the role of SBStateDigest for RigidBodyNode computations with a
+ * scalar type P other than Real (e.g. casadi::SX). There is no State; 
+ * instead the Model and Instance stage information comes from a Real State
+ * (the structure of the model), the P-typed Instance quantities are copies
+ * of the Real ones, and the P-typed continuous variables and cache entries are
+ * owned by the caller. The accessors have the same names as those of 
+ * SBStateDigest, so that the RigidBodyNode computations can be written once
+ * for both; the continuous variables are returned as raw pointers rather than
+ * Vectors.
+ */
+template <class P>
+class SBScalarStateDigest {
+public:
+    SBScalarStateDigest(const SBModelVars&              mv, 
+                        const SBModelCache&             mc,
+                        const SBInstanceVars_<P>&       iv,
+                        const SBInstanceCache_<P>&      ic)
+    :   mv(&mv), mc(&mc), iv(&iv), ic(&ic) {}
+
+    // Set the continuous variables and the storage for the computed results.
+    // Any of these can be null if the computations being performed do not
+    // need them.
+    void setQ(const P* q_)              {q=q_;}
+    void setU(const P* u_)              {u=u_;}
+    void setQDot(P* qdot_)              {qdot=qdot_;}
+    void setQErr(P* qErr_)              {qErr=qErr_;}
+    void setTreePositionCache(SBTreePositionCache_<P>* tpc_)  {tpc=tpc_;}
+    void setTreeVelocityCache(SBTreeVelocityCache_<P>* tvc_)  {tvc=tvc_;}
+    void setDynamicsCache(SBDynamicsCache_<P>* dc_)           {dc=dc_;}
+    void setTreeAccelerationCache(SBTreeAccelerationCache_<P>* tac_)
+    {   tac=tac_; }
+
+    const SBModelVars&          getModelVars()     const {return *mv;}
+    const SBModelCache&         getModelCache()    const {return *mc;}
+    const SBInstanceVars_<P>&   getInstanceVars()  const {return *iv;}
+    const SBInstanceCache_<P>&  getInstanceCache() const {return *ic;}
+
+    const P* getQ()    const {assert(q);    return q;}
+    const P* getU()    const {assert(u);    return u;}
+    P*       updQDot() const {assert(qdot); return qdot;}
+    P*       updQErr() const {return qErr;} // only used with quaternions
+
+    SBTreePositionCache_<P>& updTreePositionCache() const 
+    {   assert(tpc); return *tpc; }
+    const SBTreePositionCache_<P>& getTreePositionCache() const 
+    {   assert(tpc); return *tpc; }
+    SBTreeVelocityCache_<P>& updTreeVelocityCache() const 
+    {   assert(tvc); return *tvc; }
+    const SBTreeVelocityCache_<P>& getTreeVelocityCache() const 
+    {   assert(tvc); return *tvc; }
+    SBDynamicsCache_<P>& updDynamicsCache() const 
+    {   assert(dc); return *dc; }
+    const SBDynamicsCache_<P>& getDynamicsCache() const 
+    {   assert(dc); return *dc; }
+    SBTreeAccelerationCache_<P>& updTreeAccelerationCache() const 
+    {   assert(tac); return *tac; }
+    const SBTreeAccelerationCache_<P>& getTreeAccelerationCache() const 
+    {   assert(tac); return *tac; }
+
+private:
+    const SBModelVars*          mv;
+    const SBModelCache*         mc;
+    const SBInstanceVars_<P>*   iv;
+    const SBInstanceCache_<P>*  ic;
+
+    const P*                        q    = nullptr;
+    const P*                        u    = nullptr;
+    P*                              qdot = nullptr;
+    P*                              qErr = nullptr;
+    SBTreePositionCache_<P>*        tpc  = nullptr;
+    SBTreeVelocityCache_<P>*        tvc  = nullptr;
+    SBDynamicsCache_<P>*            dc   = nullptr;
+    SBTreeAccelerationCache_<P>*    tac  = nullptr;
+};
+
+// The state digest type used by RigidBodyNode_<P>.
+template <class P>
+using SBStateDigest_ = typename std::conditional<std::is_same<P,Real>::value,
+                                                 SBStateDigest, 
+                                                 SBScalarStateDigest<P>>::type;
 
 #endif // SimTK_SIMBODY_TREE_STATE_H_

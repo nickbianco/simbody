@@ -28,7 +28,6 @@
  * Define the RigidBodyNode that implements a Planar mobilizer.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
 
@@ -40,37 +39,42 @@
 // and the common z axis of F and M as the rotational axis. The generalized
 // coordinates are theta,x,y interpreted as rotation around z and translation
 // along the (space fixed) Fx and Fy axes.
-class RBNodePlanar : public RigidBodyNodeSpec<3, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodePlanar_ : public RigidBodyNodeSpec_<T, 3, false> {
 public:
-typedef typename RigidBodyNodeSpec<3, false>::HType HType;
-virtual const char* type() { return "planar"; }
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 3, false> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "planar"; }
 
-RBNodePlanar(const MassProperties&    mProps_B,
+RBNodePlanar_(const MassProperties_<T>&  mProps_B,
                 bool                  isReversed,
                 UIndex&               nextUSlot,
                 USquaredIndex&        nextUSqSlot,
                 QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<3, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
-                         isReversed)
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed,
+         isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
 }
 
-    // Implementations of virtual methods.
+// These are available only for the default Real precision.
 
 // This has a default implementation but it rotates first then translates,
 // which works fine for the normal Planar joint but produces wrong behavior
 // when the mobilizer is reversed.
 void setQToFitTransformImpl(const SBStateDigest& sbs, const Transform& X_FM, 
-                            Vector& q) const override 
+                            Vector& q) const
 {
     setQToFitTranslationImpl(sbs, X_FM.p(), q); // see below
     setQToFitRotationImpl(sbs, X_FM.R(), q);
 }
 
 void setQToFitRotationImpl(const SBStateDigest& sbs,
-                           const Rotation& R_FM, Vector& q) const override {
+                           const Rotation& R_FM, Vector& q) const {
     // The only rotation our planar joint can handle is about z.
     // TODO: should use 321 to deal with singular configuration (angle2==pi/2) better;
     // in that case 1 and 3 are aligned and the conversion routine allocates all the
@@ -81,7 +85,7 @@ void setQToFitRotationImpl(const SBStateDigest& sbs,
     this->toQ(q)[0] = angles123[2];
 }
 void setQToFitTranslationImpl(const SBStateDigest& sbs,
-                              const Vec3&  p_FM, Vector& q) const override {
+                              const Vec3&  p_FM, Vector& q) const {
     // Ignore translation in the z direction.
     this->toQ(q)[1] = p_FM[0]; // x
     this->toQ(q)[2] = p_FM[1]; // y
@@ -89,71 +93,74 @@ void setQToFitTranslationImpl(const SBStateDigest& sbs,
 
 void setUToFitAngularVelocityImpl(const SBStateDigest& sbs,
                                   const Vector&, const Vec3& w_FM,
-                                  Vector& u) const override {
+                                  Vector& u) const {
     // We can represent the z angular velocity exactly, but nothing else.
     this->toU(u)[0] = w_FM[2];
 }
 void setUToFitLinearVelocityImpl(const SBStateDigest& sbs,
                                  const Vector&, const Vec3& v_FM,
-                                 Vector& u) const override
+                                 Vector& u) const
 {
     // Ignore translational velocity in the z direction.
     this->toU(u)[1] = v_FM[0]; // x
     this->toU(u)[2] = v_FM[1]; // y
 }
 
-enum {PoolSize=2};
+enum {PoolSize=2}; // number of Reals
 enum {CosQ=0, SinQ=1};
 // We want space for cos(q) and sin(q).
-int calcQPoolSize(const SBModelVars&) const override
+int calcQPoolSize(const SBModelVars&) const
 {   return PoolSize; }
 
 // Precalculation of sin/cos costs around 50 flops.
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q, int nq,
-                             Real* qCache,  int nQCache,
-                             Real* qErr,    int nQErr) const override
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q, int nq,
+                             RealP* qCache,  int nQCache,
+                             RealP* qErr,    int nQErr) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize && nQErr==0);
-    qCache[CosQ] = std::cos(q[0]);
-    qCache[SinQ] = std::sin(q[0]);
+    qCache[CosQ] = cos(q[0]);
+    qCache[SinQ] = sin(q[0]);
 }
 
 // This is nearly free since we already calculated sin/cos.
-void calcX_FM(const SBStateDigest& sbs,
-                const Real* q,      int nq,
-                const Real* qCache, int nQCache,
-                Transform&  X_FM) const override
+void calcX_FM(const SBStateDigest_<T>& sbs,
+                const RealP* q,      int nq,
+                const RealP* qCache, int nQCache,
+                TransformP&  X_FM) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize);
     // Rotational q is about common z axis, translational q's along 
     // Fx and Fy.
     X_FM.updR().setRotationFromAngleAboutZ(qCache[CosQ], qCache[SinQ]);
-    X_FM.updP() = Vec3(q[1], q[2], 0);
+    X_FM.updP() = Vec3P(q[1], q[2], RealP(0));
 }
 
 // The rotational generalized speed is about the common z axis; translations
 // are along Fx and Fy so all axes are constant in F.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
-    HType&               H_FM) const override
+    const SBStateDigest_<T>& sbs,
+    HType&               H_FM) const
 {
-    H_FM(0) = SpatialVec( Vec3(0,0,1),   Vec3(0) );
-    H_FM(1) = SpatialVec(   Vec3(0),   Vec3(1,0,0) );
-    H_FM(2) = SpatialVec(   Vec3(0),   Vec3(0,1,0) );
+    H_FM(0) = SpatialVecP( Vec3P(0,0,1),   Vec3P(0) );
+    H_FM(1) = SpatialVecP(   Vec3P(0),   Vec3P(1,0,0) );
+    H_FM(2) = SpatialVecP(   Vec3P(0),   Vec3P(0,1,0) );
 }
 
 // Since the Jacobian above is constant in F, its time derivative is zero.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
-    HType&               HDot_FM) const override
+    const SBStateDigest_<T>& sbs,
+    HType&               HDot_FM) const
 {
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0) );
-    HDot_FM(1) = SpatialVec( Vec3(0), Vec3(0) );
-    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(0) );
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(1) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(2) = SpatialVecP( Vec3P(0), Vec3P(0) );
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodePlanar_<Real> RBNodePlanar;
 
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_PLANAR_H_

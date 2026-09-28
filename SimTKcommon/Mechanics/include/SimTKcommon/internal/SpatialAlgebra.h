@@ -64,50 +64,73 @@ concept, which includes an orientation matrix and a translation vector.
 @see Transform **/
 /**@{**/
 
-/** SpatialVec[0] is the rotational component; [1] is translational. **/
-typedef Vec<2,   Vec3>  SpatialVec;
-/** This is the type of a transposed SpatialVec. **/
-typedef Row<2,   Row3>  SpatialRow;
+/** SpatialVec_[0] is the rotational component; [1] is translational. The
+template argument is the scalar type (e.g. float, double). **/
+template <class P> using SpatialVec_ = Vec<2,   Vec<3,P>>;
+/** This is the type of a transposed SpatialVec_. **/
+template <class P> using SpatialRow_ = Row<2,   Row<3,P>>;
 /** This is used for primarily for spatial mass properties. **/
-typedef Mat<2,2, Mat33> SpatialMat;
+template <class P> using SpatialMat_ = Mat<2,2, Mat<3,3,P>>;
+
+/** SpatialVec[0] is the rotational component; [1] is translational. **/
+typedef SpatialVec_<Real> SpatialVec;
+/** This is the type of a transposed SpatialVec. **/
+typedef SpatialRow_<Real> SpatialRow;
+/** This is used for primarily for spatial mass properties. **/
+typedef SpatialMat_<Real> SpatialMat;
 
 
 // Pre-declare methods here so that we can list them in whatever order we'd
-// like them to appear in Doxygen.
-inline SpatialVec findRelativeVelocity( const Transform&  X_FA,
-                                        const SpatialVec& V_FA,
-                                        const Transform&  X_FB,
-                                        const SpatialVec& V_FB);
-inline SpatialVec findRelativeVelocityInF(  const Vec3&       p_AB_F,
-                                            const SpatialVec& V_FA,
-                                            const SpatialVec& V_FB);
+// like them to appear in Doxygen. These are templatized on the scalar type P;
+// non-template overloads for the default Real precision appear at the end so
+// that arguments needing implicit conversion (e.g. negated or strided vectors)
+// continue to work.
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeVelocity( const Transform_<P>&  X_FA,
+                                            const SpatialVec_<P>& V_FA,
+                                            const Transform_<P>&  X_FB,
+                                            const SpatialVec_<P>& V_FB);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeVelocityInF(  const Vec<3,P>&       p_AB_F,
+                                                const SpatialVec_<P>& V_FA,
+                                                const SpatialVec_<P>& V_FB);
 
-inline SpatialVec findRelativeAcceleration( const Transform&  X_FA,
-                                            const SpatialVec& V_FA,
-                                            const SpatialVec& A_FA,
-                                            const Transform&  X_FB,
-                                            const SpatialVec& V_FB,
-                                            const SpatialVec& A_FB);
-inline SpatialVec findRelativeAccelerationInF(  const Vec3&       p_AB_F,
-                                                const SpatialVec& V_FA,
-                                                const SpatialVec& A_FA,
-                                                const SpatialVec& V_FB,
-                                                const SpatialVec& A_FB);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeAcceleration( const Transform_<P>&  X_FA,
+                                                const SpatialVec_<P>& V_FA,
+                                                const SpatialVec_<P>& A_FA,
+                                                const Transform_<P>&  X_FB,
+                                                const SpatialVec_<P>& V_FB,
+                                                const SpatialVec_<P>& A_FB);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeAccelerationInF(  const Vec<3,P>&       p_AB_F,
+                                                    const SpatialVec_<P>& V_FA,
+                                                    const SpatialVec_<P>& A_FA,
+                                                    const SpatialVec_<P>& V_FB,
+                                                    const SpatialVec_<P>& A_FB);
 
-inline SpatialVec reverseRelativeVelocity(const Transform&  X_AB,
-                                          const SpatialVec& V_AB);
-inline SpatialVec reverseRelativeVelocityInA(const Transform&  X_AB,
-                                             const SpatialVec& V_AB);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> reverseRelativeVelocity(const Transform_<P>&  X_AB,
+                                              const SpatialVec_<P>& V_AB);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> reverseRelativeVelocityInA(const Transform_<P>&  X_AB,
+                                                 const SpatialVec_<P>& V_AB);
 
-inline SpatialVec shiftVelocityBy(const SpatialVec& V_AB, const Vec3& r_A);
-inline SpatialVec shiftVelocityFromTo(const SpatialVec& V_A_BP, 
-                                      const Vec3&       fromP_A,
-                                      const Vec3&       toQ_A);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftVelocityBy(const SpatialVec_<P>& V_AB,
+                                      const Vec<3,P>&       r_A);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftVelocityFromTo(const SpatialVec_<P>& V_A_BP,
+                                          const Vec<3,P>&       fromP_A,
+                                          const Vec<3,P>&       toQ_A);
 
-inline SpatialVec shiftForceBy(const SpatialVec& F_AP, const Vec3& r_A);
-inline SpatialVec shiftForceFromTo(const SpatialVec& F_AP, 
-                                   const Vec3&       fromP_A,
-                                   const Vec3&       toQ_A);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftForceBy(const SpatialVec_<P>& F_AP,
+                                   const Vec<3,P>&       r_A);
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftForceFromTo(const SpatialVec_<P>& F_AP,
+                                       const Vec<3,P>&       fromP_A,
+                                       const Vec<3,P>&       toQ_A);
 
 
 
@@ -145,12 +168,13 @@ want; however, if you don't want it in that frame you can save 30 flops by
 calling findRelativeVelocityInF() instead.
 
 Cost is 51 flops. @see findRelativeVelocityInF() **/
-inline SpatialVec findRelativeVelocity(const Transform&  X_FA,
-                                       const SpatialVec& V_FA,
-                                       const Transform&  X_FB,
-                                       const SpatialVec& V_FB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeVelocity(const Transform_<P>&  X_FA,
+                                           const SpatialVec_<P>& V_FA,
+                                           const Transform_<P>&  X_FB,
+                                           const SpatialVec_<P>& V_FB)
 {
-    const Vec3 p_AB_F = X_FB.p() - X_FA.p();                    //  3 flops
+    const Vec<3,P> p_AB_F = X_FB.p() - X_FA.p();                    //  3 flops
     return ~X_FA.R()*findRelativeVelocityInF(p_AB_F,V_FA,V_FB); // 48 flops
 }
 
@@ -186,19 +210,20 @@ Example:
     SpatialVec V_AB_G = findRelativeVelocityInF(p_AB_G, V_GA, V_GB);
 @endcode
 Cost is 18 flops. @see findRelativeVelocity() **/
-inline SpatialVec findRelativeVelocityInF(const Vec3&       p_AB_F,
-                                          const SpatialVec& V_FA,
-                                          const SpatialVec& V_FB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeVelocityInF(const Vec<3,P>&       p_AB_F,
+                                              const SpatialVec_<P>& V_FA,
+                                              const SpatialVec_<P>& V_FB)
 {
     // Relative angular velocity of B in A, expressed in F.
-    const Vec3 w_AB_F     = V_FB[0] - V_FA[0];              // 3 flops
+    const Vec<3,P> w_AB_F     = V_FB[0] - V_FA[0];              // 3 flops
     // Relative linear velocity of B in A, taken and expressed in F.
-    const Vec3 p_AB_F_dot = V_FB[1] - V_FA[1];              // 3 flops
+    const Vec<3,P> p_AB_F_dot = V_FB[1] - V_FA[1];              // 3 flops
     // Get linear velocity taken in A by removing the component due
     // to A's rotation in F (still expressed in F).
-    const Vec3 v_AB_F = p_AB_F_dot - V_FA[0] % p_AB_F;      // 12 flops
+    const Vec<3,P> v_AB_F = p_AB_F_dot - V_FA[0] % p_AB_F;      // 12 flops
 
-    return SpatialVec(w_AB_F, v_AB_F);
+    return SpatialVec_<P>(w_AB_F, v_AB_F);
 }
 
 
@@ -242,14 +267,15 @@ want; however, if you don't want it in that frame you can save 30 flops by
 calling findRelativeAccelerationInF() instead.
 
 Cost is 105 flops. @see findRelativeAccelerationInF() **/
-inline SpatialVec findRelativeAcceleration( const Transform&  X_FA,
-                                            const SpatialVec& V_FA,
-                                            const SpatialVec& A_FA,
-                                            const Transform&  X_FB,
-                                            const SpatialVec& V_FB,
-                                            const SpatialVec& A_FB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeAcceleration( const Transform_<P>&  X_FA,
+                                                const SpatialVec_<P>& V_FA,
+                                                const SpatialVec_<P>& A_FA,
+                                                const Transform_<P>&  X_FB,
+                                                const SpatialVec_<P>& V_FB,
+                                                const SpatialVec_<P>& A_FB)
 {
-    const Vec3 p_AB_F = X_FB.p() - X_FA.p();                        //  3 flops
+    const Vec<3,P> p_AB_F = X_FB.p() - X_FA.p();                        //  3 flops
     return ~X_FA.R() *                                              // 30 flops
            findRelativeAccelerationInF(p_AB_F,V_FA,A_FA,V_FB,A_FB); // 72 flops
 }
@@ -292,38 +318,39 @@ Example:
                                                             V_GB, A_GB);
 @endcode
 Cost is 72 flops. @see findRelativeAcceleration() **/
-inline SpatialVec findRelativeAccelerationInF(  const Vec3&       p_AB_F,
-                                                const SpatialVec& V_FA,
-                                                const SpatialVec& A_FA,
-                                                const SpatialVec& V_FB,
-                                                const SpatialVec& A_FB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> findRelativeAccelerationInF(  const Vec<3,P>&       p_AB_F,
+                                                    const SpatialVec_<P>& V_FA,
+                                                    const SpatialVec_<P>& A_FA,
+                                                    const SpatialVec_<P>& V_FB,
+                                                    const SpatialVec_<P>& A_FB)
 {
-    const Vec3& w_FA = V_FA[0];     // aliases for convenience
-    const Vec3& w_FB = V_FB[0];
-    const Vec3& b_FA = A_FA[0];
-    const Vec3& b_FB = A_FB[0];
+    const Vec<3,P>& w_FA = V_FA[0];     // aliases for convenience
+    const Vec<3,P>& w_FB = V_FB[0];
+    const Vec<3,P>& b_FA = A_FA[0];
+    const Vec<3,P>& b_FB = A_FB[0];
 
-    const Vec3 p_AB_F_dot    = V_FB[1] - V_FA[1]; // d/dt p taken in F   (3 flops)
-    const Vec3 p_AB_F_dotdot = A_FB[1] - A_FA[1]; // d^2/dt^2 taken in F (3 flops)
+    const Vec<3,P> p_AB_F_dot    = V_FB[1] - V_FA[1]; // d/dt p taken in F   (3 flops)
+    const Vec<3,P> p_AB_F_dotdot = A_FB[1] - A_FA[1]; // d^2/dt^2 taken in F (3 flops)
 
-    const Vec3 w_AB_F =     // relative angvel of B in A, exp. in F
+    const Vec<3,P> w_AB_F =     // relative angvel of B in A, exp. in F
         w_FB - w_FA;        // (3 flops)
-    const Vec3 v_AB_F =              // d/dt p taken in A, exp in F
+    const Vec<3,P> v_AB_F =              // d/dt p taken in A, exp in F
         p_AB_F_dot - w_FA % p_AB_F;  // (12 flops)
 
-    const Vec3 w_AB_F_dot = b_FB - b_FA; // d/dt of w_AB_F taken in F (3 flops)
-    const Vec3 v_AB_F_dot =              // d/dt v_AB_F taken in F
+    const Vec<3,P> w_AB_F_dot = b_FB - b_FA; // d/dt of w_AB_F taken in F (3 flops)
+    const Vec<3,P> v_AB_F_dot =              // d/dt v_AB_F taken in F
         p_AB_F_dotdot - (b_FA % p_AB_F + w_FA % p_AB_F_dot); // (24 flops)
     
     // We have the derivative in F; change it to derivative in A by adding in 
     // contribution caused by motion of F in A, that is w_AF X w_AB_F. (Note 
     // that w_AF=-w_FA.)
-    const Vec3 b_AB_F =             // ang. accel. of B in A, exp. in F
+    const Vec<3,P> b_AB_F =             // ang. accel. of B in A, exp. in F
         w_AB_F_dot - w_FA % w_AB_F; // (12 flops)
-    const Vec3 a_AB_F =             // taken in A, exp. in F
+    const Vec<3,P> a_AB_F =             // taken in A, exp. in F
         v_AB_F_dot - w_FA % v_AB_F; // (12 flops)
 
-    return SpatialVec(b_AB_F, a_AB_F); // taken in A, expressed in F
+    return SpatialVec_<P>(b_AB_F, a_AB_F); // taken in A, expressed in F
 }
 
 
@@ -361,11 +388,12 @@ part of the result. The angular velocity will just be negated, though, and
 then reexpressed in B.
 
 Cost is 51 flops. @see reverseRelativeVelocityInA() **/
-inline SpatialVec reverseRelativeVelocity(const Transform&  X_AB,
-                                          const SpatialVec& V_AB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> reverseRelativeVelocity(const Transform_<P>&  X_AB,
+                                              const SpatialVec_<P>& V_AB)
 {
     // Reverse the velocity but with the result still expressed in A.
-    const SpatialVec V_BA_A = reverseRelativeVelocityInA(X_AB,V_AB); 
+    const SpatialVec_<P> V_BA_A = reverseRelativeVelocityInA(X_AB,V_AB); 
                                                                 // 21 flops
     // Then reexpress in B.
     return ~X_AB.R()*V_BA_A;                                    // 30 flops
@@ -405,13 +433,15 @@ Example:
 @endcode
 
 Cost is 21 flops. @see reverseRelativeVelocity() **/
-inline SpatialVec reverseRelativeVelocityInA(const Transform&  X_AB,
-                                             const SpatialVec& V_AB)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> reverseRelativeVelocityInA(const Transform_<P>&  X_AB,
+                                                 const SpatialVec_<P>& V_AB)
 {
     // Change the measurement point from a point coincident with OB
     // to a point coincident with OA, and negate since we want A's velocity
     // in B rather than the other way around.
-    const SpatialVec V_BA_A = -shiftVelocityBy(V_AB, -X_AB.p()); // 21 flops
+    const SpatialVec_<P> V_BA_A =                                  // 21 flops
+        -shiftVelocityBy(V_AB, Vec<3,P>(-X_AB.p()));
     return V_BA_A;
 }
 
@@ -450,8 +480,10 @@ in frame A, including the vector r. Example:
 results in the linear velocity changing by w X r.
 
 Cost is 12 flops. @see shiftVelocityFromTo() **/
-inline SpatialVec shiftVelocityBy(const SpatialVec& V_AB, const Vec3& r_A)
-{   return SpatialVec( V_AB[0], V_AB[1] + V_AB[0] % r_A ); } // vp=v + wXr
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftVelocityBy(const SpatialVec_<P>& V_AB,
+                                      const Vec<3,P>&       r_A)
+{   return SpatialVec_<P>( V_AB[0], V_AB[1] + V_AB[0] % r_A ); } // vp=v + wXr
 
 
 //==============================================================================
@@ -490,9 +522,10 @@ measured at P; this method really just shifts the relative velocity by
 the vector r=(to-from). Use it carefully.
 
 Cost is 15 flops. @see shiftVelocityBy() **/
-inline SpatialVec shiftVelocityFromTo(const SpatialVec& V_A_BP, 
-                                      const Vec3&       fromP_A,
-                                      const Vec3&       toQ_A)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftVelocityFromTo(const SpatialVec_<P>& V_A_BP, 
+                                          const Vec<3,P>&       fromP_A,
+                                          const Vec<3,P>&       toQ_A)
 {   return shiftVelocityBy(V_A_BP, toQ_A - fromP_A); }
 
 
@@ -533,10 +566,11 @@ measured and expressed in frame A, including the vector r. Example:
 but results in the linear acceleration changing by b X r + w X (w X r).
 
 Cost is 33 flops. @see shiftAccelerationFromTo() **/
-inline SpatialVec shiftAccelerationBy(const SpatialVec& A_AB, 
-                                      const Vec3&       w_AB, 
-                                      const Vec3&       r_A)
-{   return SpatialVec( A_AB[0],   
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftAccelerationBy(const SpatialVec_<P>& A_AB, 
+                                          const Vec<3,P>&       w_AB,
+                                          const Vec<3,P>&       r_A)
+{   return SpatialVec_<P>( A_AB[0],   
                        A_AB[1] + A_AB[0] % r_A  + w_AB % (w_AB % r_A) ); } 
 
 
@@ -582,10 +616,11 @@ actually measured at P; this method really just shifts the relative
 acceleration by the vector r=(to-from). Use it carefully.
 
 Cost is 36 flops. @see shiftAccelerationBy() **/
-inline SpatialVec shiftAccelerationFromTo(const SpatialVec& A_A_BP, 
-                                          const Vec3&       w_AB,
-                                          const Vec3&       fromP_A,
-                                          const Vec3&       toQ_A)
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftAccelerationFromTo(const SpatialVec_<P>& A_A_BP, 
+                                              const Vec<3,P>&       w_AB,
+                                              const Vec<3,P>&       fromP_A,
+                                              const Vec<3,P>&       toQ_A)
 {   return shiftAccelerationBy(A_A_BP, w_AB, toQ_A - fromP_A); }
 
 
@@ -622,8 +657,10 @@ for some position vector r. All vectors are expressed in frame A. Example:
 results in an adjustment to the moment of -(r X f).
 
 Cost is 12 flops. @see shiftForceFromTo() **/
-inline SpatialVec shiftForceBy(const SpatialVec& F_AP, const Vec3& r_A)
-{   return SpatialVec(F_AP[0] -  r_A % F_AP[1], F_AP[1]); } // mq = mp - r X f
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftForceBy(const SpatialVec_<P>& F_AP,
+                                   const Vec<3,P>&       r_A)
+{   return SpatialVec_<P>(F_AP[0] -  r_A % F_AP[1], F_AP[1]); } // mq = mp - r X f
 
 
 
@@ -665,10 +702,65 @@ applied at P; this method really just shifts the application point by
 the vector r=(to-from). Use it carefully.
 
 Cost is 15 flops. @see shiftForceBy() **/
-inline SpatialVec shiftForceFromTo(const SpatialVec& F_AP, 
+template <class P> requires IsFloatingType<P>::result
+inline SpatialVec_<P> shiftForceFromTo(const SpatialVec_<P>& F_AP, 
+                                       const Vec<3,P>&       fromP_A,
+                                       const Vec<3,P>&       toQ_A)
+{   return shiftForceBy(F_AP, toQ_A - fromP_A); }
+
+// Non-template overloads for the default Real precision. These allow
+// arguments that require an implicit conversion to a SpatialVec, Vec3, or
+// Transform (for example, negated or strided vectors), which the templates
+// above cannot deduce.
+inline SpatialVec findRelativeVelocity(const Transform&  X_FA,
+                                       const SpatialVec& V_FA,
+                                       const Transform&  X_FB,
+                                       const SpatialVec& V_FB)
+{   return findRelativeVelocity<Real>(X_FA, V_FA, X_FB, V_FB); }
+inline SpatialVec findRelativeVelocityInF(const Vec3&       p_AB_F,
+                                          const SpatialVec& V_FA,
+                                          const SpatialVec& V_FB)
+{   return findRelativeVelocityInF<Real>(p_AB_F, V_FA, V_FB); }
+inline SpatialVec findRelativeAcceleration(const Transform&  X_FA,
+                                           const SpatialVec& V_FA,
+                                           const SpatialVec& A_FA,
+                                           const Transform&  X_FB,
+                                           const SpatialVec& V_FB,
+                                           const SpatialVec& A_FB)
+{   return findRelativeAcceleration<Real>(X_FA, V_FA, A_FA, X_FB, V_FB, A_FB); }
+inline SpatialVec findRelativeAccelerationInF(const Vec3&       p_AB_F,
+                                              const SpatialVec& V_FA,
+                                              const SpatialVec& A_FA,
+                                              const SpatialVec& V_FB,
+                                              const SpatialVec& A_FB)
+{   return findRelativeAccelerationInF<Real>(p_AB_F, V_FA, A_FA, V_FB, A_FB); }
+inline SpatialVec reverseRelativeVelocity(const Transform&  X_AB,
+                                          const SpatialVec& V_AB)
+{   return reverseRelativeVelocity<Real>(X_AB, V_AB); }
+inline SpatialVec reverseRelativeVelocityInA(const Transform&  X_AB,
+                                             const SpatialVec& V_AB)
+{   return reverseRelativeVelocityInA<Real>(X_AB, V_AB); }
+inline SpatialVec shiftVelocityBy(const SpatialVec& V_AB, const Vec3& r_A)
+{   return shiftVelocityBy<Real>(V_AB, r_A); }
+inline SpatialVec shiftVelocityFromTo(const SpatialVec& V_A_BP,
+                                      const Vec3&       fromP_A,
+                                      const Vec3&       toQ_A)
+{   return shiftVelocityFromTo<Real>(V_A_BP, fromP_A, toQ_A); }
+inline SpatialVec shiftAccelerationBy(const SpatialVec& A_AB,
+                                      const Vec3&       w_AB,
+                                      const Vec3&       r_A)
+{   return shiftAccelerationBy<Real>(A_AB, w_AB, r_A); }
+inline SpatialVec shiftAccelerationFromTo(const SpatialVec& A_A_BP,
+                                          const Vec3&       w_AB,
+                                          const Vec3&       fromP_A,
+                                          const Vec3&       toQ_A)
+{   return shiftAccelerationFromTo<Real>(A_A_BP, w_AB, fromP_A, toQ_A); }
+inline SpatialVec shiftForceBy(const SpatialVec& F_AP, const Vec3& r_A)
+{   return shiftForceBy<Real>(F_AP, r_A); }
+inline SpatialVec shiftForceFromTo(const SpatialVec& F_AP,
                                    const Vec3&       fromP_A,
                                    const Vec3&       toQ_A)
-{   return shiftForceBy(F_AP, toQ_A - fromP_A); }
+{   return shiftForceFromTo<Real>(F_AP, fromP_A, toQ_A); }
 
 /**@}**/
 
@@ -678,123 +770,142 @@ inline SpatialVec shiftForceFromTo(const SpatialVec& F_AP,
 //                                  PHI MATRIX
 //==============================================================================
 // support for efficient matrix multiplication involving the special phi
-// matrix
+// matrix. These are templatized on the scalar type P. In the operators below
+// only the PhiMatrix_ argument is used to deduce P; the other arguments are
+// non-deduced so that they may require an implicit conversion (e.g. from a
+// negated vector).
 
-class PhiMatrixTranspose;
+template <class P> class PhiMatrixTranspose_;
 
-class PhiMatrix {
+template <class P>
+class PhiMatrix_ {
 public:
-    typedef PhiMatrixTranspose TransposeType;
+    typedef PhiMatrixTranspose_<P> TransposeType;
+    typedef Vec<3,P>               Vec3P;
+    typedef Mat<3,3,P>             Mat33P;
+    typedef SpatialVec_<P>         SpatialVecP;
+    typedef SpatialMat_<P>         SpatialMatP;
 
-    PhiMatrix() { setToNaN(); }
-    explicit PhiMatrix(const Vec3& l) : l_(l) {}
+    PhiMatrix_() { setToNaN(); }
+    explicit PhiMatrix_(const Vec3P& l) : l_(l) {}
 
     void setToZero() { l_ = 0; }
     void setToNaN()  { l_.setToNaN(); }
 
-    SpatialMat toSpatialMat() const {
-        return SpatialMat(Mat33(1), crossMat(l_),
-                          Mat33(0),   Mat33(1));
+    SpatialMatP toSpatialMat() const {
+        return SpatialMatP(Mat33P(1), crossMat(l_),
+                           Mat33P(0),   Mat33P(1));
     }
 
-    const Vec3& l() const { return l_; }
+    const Vec3P& l() const { return l_; }
 private:
-    Vec3 l_;
+    Vec3P l_;
 };
 
-class PhiMatrixTranspose {
+template <class P>
+class PhiMatrixTranspose_ {
 public:
-    explicit PhiMatrixTranspose(const PhiMatrix& phi) : phi(phi) {}
+    typedef Vec<3,P>       Vec3P;
+    typedef Mat<3,3,P>     Mat33P;
+    typedef SpatialVec_<P> SpatialVecP;
+    typedef SpatialMat_<P> SpatialMatP;
 
-    SpatialMat toSpatialMat() const {
-        return SpatialMat(   Mat33(1)    , Mat33(0),
-                          crossMat(-l()) , Mat33(1));
+    explicit PhiMatrixTranspose_(const PhiMatrix_<P>& phi) : phi(phi) {}
+
+    SpatialMatP toSpatialMat() const {
+        return SpatialMatP(   Mat33P(1)    , Mat33P(0),
+                           crossMat(-l()) , Mat33P(1));
     }
 
-    const Vec3& l() const {return phi.l();}
+    const Vec3P& l() const {return phi.l();}
 private:
-  const PhiMatrix& phi;
+  const PhiMatrix_<P>& phi;
 };
 
-inline PhiMatrixTranspose
-transpose(const PhiMatrix& phi)
+/** PhiMatrix for the default Real precision. **/
+typedef PhiMatrix_<Real>          PhiMatrix;
+/** PhiMatrixTranspose for the default Real precision. **/
+typedef PhiMatrixTranspose_<Real> PhiMatrixTranspose;
+
+template <class P> inline PhiMatrixTranspose_<P>
+transpose(const PhiMatrix_<P>& phi)
 {
-    PhiMatrixTranspose ret(phi);
+    PhiMatrixTranspose_<P> ret(phi);
     return ret;
 }
 
-inline PhiMatrixTranspose
-operator~(const PhiMatrix& phi) {return transpose(phi);}
+template <class P> inline PhiMatrixTranspose_<P>
+operator~(const PhiMatrix_<P>& phi) {return transpose(phi);}
 
-inline SpatialVec
-operator*(const PhiMatrix&  phi,
-          const SpatialVec& v)
+template <class P> inline SpatialVec_<P>
+operator*(const PhiMatrix_<P>&                          phi,
+          const typename PhiMatrix_<P>::SpatialVecP&    v)
 {
-    return SpatialVec(v[0] + phi.l() % v[1], // 12 flops
-                      v[1]);
+    return SpatialVec_<P>(v[0] + phi.l() % v[1], // 12 flops
+                          v[1]);
 }
 
-inline SpatialMat
-operator*(const PhiMatrix&  phi,
-          const SpatialMat& m)
+template <class P> inline SpatialMat_<P>
+operator*(const PhiMatrix_<P>&                          phi,
+          const typename PhiMatrix_<P>::SpatialMatP&    m)
 {
-    const Mat33 x = crossMat(phi.l());  // 3 flops
-    return SpatialMat( m(0,0) + x*m(1,0), m(0,1) + x*m(1,1), // 108 flops
-                           m(1,0)       ,     m(1,1));
+    const Mat<3,3,P> x = crossMat(phi.l());  // 3 flops
+    return SpatialMat_<P>( m(0,0) + x*m(1,0), m(0,1) + x*m(1,1), // 108 flops
+                               m(1,0)       ,     m(1,1));
 }
 
-inline SpatialMat
-operator*(const SpatialMat& m,
-          const PhiMatrix&  phi)
+template <class P> inline SpatialMat_<P>
+operator*(const typename PhiMatrix_<P>::SpatialMatP&    m,
+          const PhiMatrix_<P>&                          phi)
 {
-    const Mat33 x = crossMat(phi.l());  // 3 flops
-    return SpatialMat( m(0,0),    m(0,0)*x + m(0,1),   // 54 flops
-                       m(1,0),    m(1,0)*x + m(1,1) ); // 54 flops
+    const Mat<3,3,P> x = crossMat(phi.l());  // 3 flops
+    return SpatialMat_<P>( m(0,0),    m(0,0)*x + m(0,1),   // 54 flops
+                           m(1,0),    m(1,0)*x + m(1,1) ); // 54 flops
 }
 
-inline SpatialVec
-operator*(const PhiMatrixTranspose& phiT,
-          const SpatialVec&         v)
+template <class P> inline SpatialVec_<P>
+operator*(const PhiMatrixTranspose_<P>&                         phiT,
+          const typename PhiMatrixTranspose_<P>::SpatialVecP&   v)
 {
-    return SpatialVec(v[0],
-                      v[1] + v[0] % phiT.l());  // 12 flops
+    return SpatialVec_<P>(v[0],
+                          v[1] + v[0] % phiT.l());  // 12 flops
 }
 
-inline SpatialMat
-operator*(const PhiMatrixTranspose& phiT,
-          const SpatialMat&         m)
+template <class P> inline SpatialMat_<P>
+operator*(const PhiMatrixTranspose_<P>&                         phiT,
+          const typename PhiMatrixTranspose_<P>::SpatialMatP&   m)
 {
-    const Mat33 x = crossMat(phiT.l());  // 3 flops
-    return SpatialMat(    m(0,0)     ,     m(0,1),      
-                      m(1,0)-x*m(0,0), m(1,1)-x*m(0,1)); // 108 flops
+    const Mat<3,3,P> x = crossMat(phiT.l());  // 3 flops
+    return SpatialMat_<P>(    m(0,0)     ,     m(0,1),      
+                          m(1,0)-x*m(0,0), m(1,1)-x*m(0,1)); // 108 flops
 }
 
-inline SpatialMat
-operator*(const SpatialMat::THerm&  m,
-          const PhiMatrixTranspose& phiT)
+template <class P> inline SpatialMat_<P>
+operator*(const typename PhiMatrixTranspose_<P>::SpatialMatP::THerm&    m,
+          const PhiMatrixTranspose_<P>&                                 phiT)
 {
-    const Mat33 x = crossMat(phiT.l()); // 3 flops
-    return SpatialMat( m(0,0) - m(0,1) * x, m(0,1),     // 54 flops
-                       m(1,0) - m(1,1) * x, m(1,1) );   // 54 flops
+    const Mat<3,3,P> x = crossMat(phiT.l()); // 3 flops
+    return SpatialMat_<P>( m(0,0) - m(0,1) * x, m(0,1),     // 54 flops
+                           m(1,0) - m(1,1) * x, m(1,1) );   // 54 flops
 }
 
-inline SpatialMat
-operator*(const SpatialMat&         m,
-          const PhiMatrixTranspose& phiT)
+template <class P> inline SpatialMat_<P>
+operator*(const typename PhiMatrixTranspose_<P>::SpatialMatP&   m,
+          const PhiMatrixTranspose_<P>&                         phiT)
 {
-    const Mat33 x = crossMat(phiT.l()); // 3 flops
-    return SpatialMat( m(0,0) - m(0,1) * x, m(0,1),     // 54 flops
-                       m(1,0) - m(1,1) * x, m(1,1) );   // 54 flops
+    const Mat<3,3,P> x = crossMat(phiT.l()); // 3 flops
+    return SpatialMat_<P>( m(0,0) - m(0,1) * x, m(0,1),     // 54 flops
+                           m(1,0) - m(1,1) * x, m(1,1) );   // 54 flops
 }
 
-inline bool
-operator==(const PhiMatrix& p1, const PhiMatrix& p2)
+template <class P> inline bool
+operator==(const PhiMatrix_<P>& p1, const PhiMatrix_<P>& p2)
 {
     return p1.l() == p2.l();
 }
 
-inline bool
-operator==(const PhiMatrixTranspose& p1, const PhiMatrixTranspose& p2)
+template <class P> inline bool
+operator==(const PhiMatrixTranspose_<P>& p1, const PhiMatrixTranspose_<P>& p2)
 {
     return p1.l() == p2.l();
 }

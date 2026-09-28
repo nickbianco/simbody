@@ -48,6 +48,19 @@
 
 namespace SimTK {
 
+// Make the standard math functions visible in namespace SimTK. That way,
+// unqualified calls from precision-templated code (e.g. `sin(x)` for a
+// template parameter type P) choose the std overloads for the built-in types
+// and still find overloads for other scalar types (such as casadi::SX)
+// through argument-dependent lookup. Without these, the element-wise
+// SimTK::sin(), SimTK::sqrt(), etc. for Vec and Matrix types would hide the
+// std versions.
+using std::sin;  using std::cos;  using std::tan;
+using std::asin; using std::acos; using std::atan; using std::atan2;
+using std::sinh; using std::cosh; using std::tanh;
+using std::exp;  using std::log;  using std::sqrt; using std::pow;
+using std::abs;
+
     /////////////////////////////////////////
     // Handy default-precision definitions //
     /////////////////////////////////////////

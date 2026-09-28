@@ -34,6 +34,7 @@
 #if defined(__cplusplus)
 #include "SimTKcommon/Simmatrix.h"
 #include "SimTKcommon/internal/State.h"
+#include "SimTKcommon/internal/ScalarState.h"
 #include "SimTKcommon/internal/Measure.h"
 #include "SimTKcommon/internal/MeasureImplementation.h"
 #include "SimTKcommon/internal/PolygonalMesh.h"

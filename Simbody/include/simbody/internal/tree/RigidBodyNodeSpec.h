@@ -28,7 +28,7 @@
  * -------------------------------------------------------------------------- */
 
 /**@file
- * This file contains just the templatized class RigidBodyNodeSpec<dof> which
+ * This file contains just the templatized class RigidBodyNodeSpec_<T,dof> which
  * is used as the base class for most of the RigidBodyNodes (that is, the
  * implementations of Mobilizers). The only exceptions are nodes whose 
  * mobilizers provide no degrees of freedom -- Ground and Weld.
@@ -37,14 +37,15 @@
  * involve a single body and its mobilizer (inboard joint), that is, one node 
  * in the multibody tree. These methods constitute the inner loops of the 
  * multibody calculations, and much suffering is undergone here to make them 
- * run fast. In particular most calculations are templatized by the number of 
- * mobilities, so that compile-time sizes are known for everything.
+ * run fast. In particular most calculations are templatized by the number of
+ * mobilities, so that compile-time sizes are known for everything. They are
+ * also templatized by the scalar type T; RigidBodyNodeSpec<dof> is the
+ * default Real precision version.
  *
  * Most methods here expect to be called in a particular order during traversal 
  * of the tree -- either base to tip or tip to base.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 
 /**
@@ -56,18 +57,28 @@
  * mobilities). Each implementation works only on fixed size Vec<> and Mat<> 
  * types, so can use very high speed inline operators.
  */
-template<int dof, bool noR_FM=false>
-class RigidBodyNodeSpec : public RigidBodyNode {
+template <class T, int dof, bool noR_FM=false>
+class RigidBodyNodeSpec_ : public RigidBodyNode_<T> {
 public:
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+using typename Base::QDotHandling;
+using typename Base::QuaternionUse;
+using Base::QDotIsAlwaysTheSameAsU;
+using Base::QDotMayDifferFromU;
+using Base::QuaternionIsNeverUsed;
+using Base::QuaternionMayBeUsed;
+SimTK_RBNODE_BASE_MEMBERS;
 
-RigidBodyNodeSpec(const MassProperties& mProps_B,
+
+RigidBodyNodeSpec_(const MassProperties_<T>& mProps_B,
                   UIndex&               nextUSlot,
                   USquaredIndex&        nextUSqSlot,
                   QIndex&               nextQSlot,
                   QDotHandling          qdotHandling,
                   QuaternionUse         quaternionUse,
                   bool                  isReversed)
-:   RigidBodyNode(mProps_B, qdotHandling, quaternionUse, isReversed)
+:   RigidBodyNode_<T>(mProps_B, qdotHandling, quaternionUse, isReversed)
 {
     // don't call any virtual methods in here!
     uIndex   = nextUSlot;
@@ -87,7 +98,7 @@ void updateSlots(UIndex& nextUSlot, USquaredIndex& nextUSqSlot,
 // These override RigidBodyNode virtuals. Note that not all pure virtuals
 // are overridden here; RigidBodyNodeSpec is still abstract.   
 
-~RigidBodyNodeSpec() override = default;
+~RigidBodyNodeSpec_() override = default;
 
 int getDOF() const override {return dof;}
 int getMaxNQ() const override {
@@ -109,10 +120,11 @@ int getNUInUse(const SBModelVars&) const override {
     return dof;
 }
 
+// Available only for the default Real precision.
 // Default method must be overridden if this mobilizer might use a
 // quaternion under some conditions.
 bool isUsingQuaternion(const SBStateDigest&, 
-                       MobilizerQIndex& startOfQuaternion) const override {
+                       MobilizerQIndex& startOfQuaternion) const {
     assert(quaternionUse == QuaternionIsNeverUsed);
     startOfQuaternion.invalidate();
     return false;
@@ -123,20 +135,20 @@ bool isUsingQuaternion(const SBStateDigest&,
 
 // This method should calculate qdot=N*u, where N=N(q) is the kinematic
 // coupling matrix. State digest should be at Stage::Position.
-void calcQDot(const SBStateDigest&, 
-              const Real* u, Real* qdot) const override 
+void calcQDot(const SBStateDigest_<T>&, 
+              const RealP* u, RealP* qdot) const override 
 {
     assert(qdotHandling == QDotIsAlwaysTheSameAsU);
-    Vec<dof>::updAs(qdot) = Vec<dof>::getAs(u); // default says qdot=u
+    Vec<dof,T>::updAs(qdot) = Vec<dof,T>::getAs(u); // default says qdot=u
 }
 
 // This method should calculate qdotdot=N*udot + NDot*u, where N=N(q),
 // NDot=NDot(q,u). State digest should be at Stage::Velocity.
-void calcQDotDot(const SBStateDigest&, 
-                         const Real* udot, Real* qdotdot) const override
+void calcQDotDot(const SBStateDigest_<T>&, 
+                         const RealP* udot, RealP* qdotdot) const override
 {
     assert(qdotHandling == QDotIsAlwaysTheSameAsU);
-    Vec<dof>::updAs(qdotdot) = Vec<dof>::getAs(udot); // default: qdotdot=udot
+    Vec<dof,T>::updAs(qdotdot) = Vec<dof,T>::getAs(udot); // default: qdotdot=udot
 }
 
 // State digest should be at Stage::Position for calculating N (the matrix that
@@ -146,18 +158,18 @@ void calcQDotDot(const SBStateDigest&,
 // just copies nu numbers from in to out.
 //
 // THIS MUST BE OVERRIDDEN by any mobilizer for which nq != nu, or qdot != u.
-void multiplyByN(const SBStateDigest&, bool matrixOnRight,  
-                 const Real* in, Real* out) const override
+void multiplyByN(const SBStateDigest_<T>&, bool matrixOnRight,  
+                 const RealP* in, RealP* out) const override
 {
     assert(qdotHandling == QDotIsAlwaysTheSameAsU);
-    Vec<dof>::updAs(out) = Vec<dof>::getAs(in);
+    Vec<dof,T>::updAs(out) = Vec<dof,T>::getAs(in);
 }
 
-void multiplyByNInv(const SBStateDigest&, bool matrixOnRight, 
-                    const Real* in, Real* out) const override
+void multiplyByNInv(const SBStateDigest_<T>&, bool matrixOnRight, 
+                    const RealP* in, RealP* out) const override
 {
     assert(qdotHandling == QDotIsAlwaysTheSameAsU);
-    Vec<dof>::updAs(out) = Vec<dof>::getAs(in);
+    Vec<dof,T>::updAs(out) = Vec<dof,T>::getAs(in);
 }
 
 // State digest should be at Stage::Velocity for calculating NDot (the matrix 
@@ -168,18 +180,19 @@ void multiplyByNInv(const SBStateDigest&, bool matrixOnRight,
 // (regardless of side) just copies nu zeros to out.
 //
 // THIS MUST BE OVERRIDDEN by any mobilizer for which nq != nu, or qdot != u.
-void multiplyByNDot(const SBStateDigest&, bool matrixOnRight, 
-                    const Real* in, Real* out) const override
+void multiplyByNDot(const SBStateDigest_<T>&, bool matrixOnRight, 
+                    const RealP* in, RealP* out) const override
 {
     assert(qdotHandling == QDotIsAlwaysTheSameAsU);
-    Vec<dof>::updAs(out) = 0;
+    Vec<dof,T>::updAs(out) = 0;
 }
 
+// Available only for the default Real precision.
 // Return true if any change is made to the q vector.
 bool enforceQuaternionConstraints(
     const SBStateDigest&    sbs,
     Vector&                 q,
-    Vector&                 qErrest) const override
+    Vector&                 qErrest) const
 {
     assert(quaternionUse == QuaternionIsNeverUsed);
     return false;
@@ -187,14 +200,14 @@ bool enforceQuaternionConstraints(
 
 
 void convertToEulerAngles(const Vector& inputQ, 
-                          Vector& outputQ) const override {
+                          Vector& outputQ) const {
     // The default implementation just copies Q.  Subclasses may override this.
     assert(quaternionUse == QuaternionIsNeverUsed);
     toQ(outputQ) = fromQ(inputQ);
 }
 
 void convertToQuaternions(const Vector& inputQ, 
-                          Vector& outputQ) const override {
+                          Vector& outputQ) const {
     // The default implementation just copies Q.  Subclasses may override this.
     assert(quaternionUse == QuaternionIsNeverUsed);
     toQ(outputQ) = fromQ(inputQ);
@@ -206,32 +219,33 @@ void convertToQuaternions(const Vector& inputQ,
 //      setMobilizerDefault{Model,Instance,Time,Dynamics,Acceleration}Values
 //          retain base class do-nothing default implementation.
 void setMobilizerDefaultPositionValues(const SBModelVars& s, 
-                                       Vector& q) const override 
+                                       Vector& q) const 
 {   toQ(q) = 0; }
 
 void setMobilizerDefaultVelocityValues(const SBModelVars&, 
-                                       Vector& u) const override 
+                                       Vector& u) const 
 {   toU(u) = 0; }
 
-void realizeModel(SBStateDigest& sbs) const override 
+// Available only for the default Real precision.
+void realizeModel(SBStateDigest& sbs) const 
 {
 }
 
-void realizeInstance(const SBStateDigest& sbs) const override
+void realizeInstance(const SBStateDigest_<T>& sbs) const override
 {
 }
 
 // Set a new configuration and calculate the consequent kinematics.
 // Must call base-to-tip.
-void realizePosition(const SBStateDigest& sbs) const override 
+void realizePosition(const SBStateDigest_<T>& sbs) const override 
 {
     const SBModelVars&      mv   = sbs.getModelVars();
     const SBModelCache&     mc   = sbs.getModelCache();
-    const SBInstanceVars&   iv   = sbs.getInstanceVars();
-    const SBInstanceCache&  ic   = sbs.getInstanceCache();
-    const Vector&           allQ = sbs.getQ();
-    SBTreePositionCache&    pc   = sbs.updTreePositionCache();
-    Vector&                 allQErr = sbs.updQErr();
+    const SBInstanceVars_<T>&   iv   = sbs.getInstanceVars();
+    const SBInstanceCache_<T>&  ic   = sbs.getInstanceCache();
+    const auto&             allQ = sbs.getQ(); // Vector or const T*
+    SBTreePositionCache_<T>&    pc   = sbs.updTreePositionCache();
+    auto&&                  allQErr = sbs.updQErr(); // Vector& or T*
 
     // Mobilizer specific.
     
@@ -245,9 +259,9 @@ void realizePosition(const SBStateDigest& sbs) const override
 
     const int nq=mbInfo.nQInUse, nqpool=mbInfo.nQPoolInUse,
               nqerr=(mbInfo.hasQuaternionInUse ? 1 : 0);
-    const Real* q0    = nq     ? &allQ[mbInfo.firstQIndex]                : 0;
-    Real*       qpool0= nqpool ? &pc.mobilizerQCache[mbInfo.startInQPool] : 0;
-    Real*       qerr0 = nqerr  ? &allQErr[ic.firstQuaternionQErrSlot
+    const RealP* q0    = nq     ? &allQ[mbInfo.firstQIndex]                : 0;
+    RealP*       qpool0= nqpool ? &pc.mobilizerQCache[mbInfo.startInQPool] : 0;
+    RealP*       qerr0 = nqerr  ? &allQErr[ic.firstQuaternionQErrSlot
                                           + mbInfo.quaternionPoolIndex]     
                                : 0;
     performQPrecalculations(sbs, q0, nq, qpool0, nqpool, qerr0, nqerr);
@@ -258,7 +272,7 @@ void realizePosition(const SBStateDigest& sbs) const override
     // handle that themselves.
 
     if (isReversed()) {
-        Transform X_MF;
+        TransformP X_MF;
         calcX_FM(sbs, q0, nq, qpool0, nqpool, X_MF);
         updX_FM(pc) = ~X_MF;
     } else 
@@ -300,15 +314,15 @@ void realizePosition(const SBStateDigest& sbs) const override
 //   HDot    time derivative of H (==H_PB_G) hinge matrix relating body frames
 //   VD_PB_G acceleration remainder term HDot*u, expr. in G
 // The code is the same for all joints, although parametrized by ndof.
-void realizeVelocity(const SBStateDigest& sbs) const override
+void realizeVelocity(const SBStateDigest_<T>& sbs) const override
 {
     const SBModelVars&          mv = sbs.getModelVars();
-    const SBInstanceVars&       iv = sbs.getInstanceVars();
-    const SBInstanceCache&      ic = sbs.getInstanceCache();
-    const SBTreePositionCache&  pc = sbs.getTreePositionCache();
-    SBTreeVelocityCache&        vc = sbs.updTreeVelocityCache();
-    const Vector&               allU = sbs.getU();
-    const Vec<dof>&             u = fromU(allU);
+    const SBInstanceVars_<T>&       iv = sbs.getInstanceVars();
+    const SBInstanceCache_<T>&      ic = sbs.getInstanceCache();
+    const SBTreePositionCache_<T>&  pc = sbs.getTreePositionCache();
+    SBTreeVelocityCache_<T>&        vc = sbs.updTreeVelocityCache();
+    const auto&                 allU = sbs.getU(); // Vector or const T*
+    const Vec<dof,T>&             u = fromU(allU);
 
     // Mobilizer specific.
     calcQDot(sbs, &allU[uIndex], &sbs.updQDot()[qIndex]);
@@ -333,14 +347,15 @@ void realizeVelocity(const SBStateDigest& sbs) const override
     calcJointIndependentKinematicsVel(pc,vc);
 }
 
-void realizeDynamics(const SBStateDigest&) const override
+// Available only for the default Real precision.
+void realizeDynamics(const SBStateDigest&) const
 {
     // nothing to do
 }
 
 // There is no realizeAcceleration().
 
-void realizeReport(const SBStateDigest& sbs) const override
+void realizeReport(const SBStateDigest& sbs) const
 {
 }
 
@@ -350,112 +365,113 @@ void realizeReport(const SBStateDigest& sbs) const override
 
 // This is a dynamics-stage calculation and must be called tip-to-base (inward).
 void realizeArticulatedBodyInertiasInward(
-    const SBInstanceCache&          ic,
-    const SBTreePositionCache&      pc,
-    SBArticulatedBodyInertiaCache&  abc) const override;
+    const SBInstanceCache_<T>&          ic,
+    const SBTreePositionCache_<T>&      pc,
+    SBArticulatedBodyInertiaCache_<T>&  abc) const override;
 
+// Available only for the default Real precision.
 // This dynamics-stage calculation is needed for handling constraints. It
 // must be called base-to-tip (outward);
 void realizeYOutward(
     const SBInstanceCache&                  ic,
     const SBTreePositionCache&              pc,
     const SBArticulatedBodyInertiaCache&    abc,
-    SBDynamicsCache&                        dc) const override;
+    SBDynamicsCache&                        dc) const;
 
 void multiplyBySystemJacobian(
-    const SBTreePositionCache&  pc,
-    const Real*                 v,
-    SpatialVec*                 Jv) const override;
+    const SBTreePositionCache_<T>&  pc,
+    const RealP*                 v,
+    SpatialVecP*                 Jv) const override;
 
 void multiplyBySystemJacobianTranspose(
-    const SBTreePositionCache&  pc, 
-    SpatialVec*                 zTmp,
-    const SpatialVec*           X, 
-    Real*                       JtX) const override;
+    const SBTreePositionCache_<T>&  pc, 
+    SpatialVecP*                 zTmp,
+    const SpatialVecP*           X, 
+    RealP*                       JtX) const override;
 
 void calcEquivalentJointForces(
-    const SBTreePositionCache&  pc,
-    const SBTreeVelocityCache&  vc,
-    const SpatialVec*           bodyForces,
-    SpatialVec*                 allZ,
-    Real*                       jointForces) const override;
+    const SBTreePositionCache_<T>&  pc,
+    const SBTreeVelocityCache_<T>&  vc,
+    const SpatialVecP*           bodyForces,
+    SpatialVecP*                 allZ,
+    RealP*                       jointForces) const override;
 
 void calcUDotPass1Inward(
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc,
-    const SBArticulatedBodyInertiaCache&,
-    const SBArticulatedBodyVelocityCache&,
-    const Real*                 jointForces,
-    const SpatialVec*           bodyForces,
-    const Real*                 allUDot,
-    SpatialVec*                 allZ,
-    SpatialVec*                 allGepsilon,
-    Real*                       allEpsilon) const override;
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc,
+    const SBArticulatedBodyInertiaCache_<T>&,
+    const SBArticulatedBodyVelocityCache_<T>&,
+    const RealP*                 jointForces,
+    const SpatialVecP*           bodyForces,
+    const RealP*                 allUDot,
+    SpatialVecP*                 allZ,
+    SpatialVecP*                 allGepsilon,
+    RealP*                       allEpsilon) const override;
 
 void calcUDotPass2Outward(
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc,
-    const SBArticulatedBodyInertiaCache&,
-    const SBTreeVelocityCache&  vc,
-    const SBDynamicsCache&      dc,
-    const Real*                 epsilonTmp,
-    SpatialVec*                 allA_GB,
-    Real*                       allUDot,
-    Real*                       allTau) const override;
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc,
+    const SBArticulatedBodyInertiaCache_<T>&,
+    const SBTreeVelocityCache_<T>&  vc,
+    const SBDynamicsCache_<T>&      dc,
+    const RealP*                 epsilonTmp,
+    SpatialVecP*                 allA_GB,
+    RealP*                       allUDot,
+    RealP*                       allTau) const override;
 
 void multiplyByMInvPass1Inward(
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc,
-    const SBArticulatedBodyInertiaCache&,
-    const Real*                 f,
-    SpatialVec*                 allZ,
-    SpatialVec*                 allGepsilon,
-    Real*                       allEpsilon) const override;
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc,
+    const SBArticulatedBodyInertiaCache_<T>&,
+    const RealP*                 f,
+    SpatialVecP*                 allZ,
+    SpatialVecP*                 allGepsilon,
+    RealP*                       allEpsilon) const override;
 
 void multiplyByMInvPass2Outward(
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc,
-    const SBArticulatedBodyInertiaCache&,
-    const Real*                 epsilonTmp,
-    SpatialVec*                 allA_GB,
-    Real*                       allUDot) const override;
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc,
+    const SBArticulatedBodyInertiaCache_<T>&,
+    const RealP*                 epsilonTmp,
+    SpatialVecP*                 allA_GB,
+    RealP*                       allUDot) const override;
 
 // Also serves as pass 1 for inverse dynamics.
 void calcBodyAccelerationsFromUdotOutward(
-    const SBTreePositionCache&  pc,
-    const SBTreeVelocityCache&  vc,
-    const Real*                 allUDot,
-    SpatialVec*                 allA_GB) const override;
+    const SBTreePositionCache_<T>&  pc,
+    const SBTreeVelocityCache_<T>&  vc,
+    const RealP*                 allUDot,
+    SpatialVecP*                 allA_GB) const override;
 
 void calcInverseDynamicsPass2Inward(
-    const SBTreePositionCache&  pc,
-    const SBTreeVelocityCache&  vc,
-    const SpatialVec*           allA_GB,
-    const Real*                 jointForces,
-    const SpatialVec*           bodyForces,
-    SpatialVec*                 allFTmp,
-    Real*                       allTau) const override; 
+    const SBTreePositionCache_<T>&  pc,
+    const SBTreeVelocityCache_<T>&  vc,
+    const SpatialVecP*           allA_GB,
+    const RealP*                 jointForces,
+    const SpatialVecP*           bodyForces,
+    SpatialVecP*                 allFTmp,
+    RealP*                       allTau) const override; 
 
 void multiplyByMPass1Outward(
-    const SBTreePositionCache&  pc,
-    const Real*                 allUDot,
-    SpatialVec*                 allA_GB) const override;
+    const SBTreePositionCache_<T>&  pc,
+    const RealP*                 allUDot,
+    SpatialVecP*                 allA_GB) const override;
 void multiplyByMPass2Inward(
-    const SBTreePositionCache&  pc,
-    const SpatialVec*           allA_GB,
-    SpatialVec*                 allFTmp,
-    Real*                       allTau) const override;
+    const SBTreePositionCache_<T>&  pc,
+    const SpatialVecP*           allA_GB,
+    SpatialVecP*                 allFTmp,
+    RealP*                       allTau) const override;
 
 // Get a column of H_PB_G, which is what Jain calls H* and Schwieters calls H^T.
-const SpatialVec& 
-getHCol(const SBTreePositionCache& pc, int j) const override {
+const SpatialVecP& 
+getHCol(const SBTreePositionCache_<T>& pc, int j) const override {
     return getH(pc)(j);
 }
 
 // Get a column of H_FM the local cross-mobilizer hinge matrix expressed in the
 // parent (inboard) mobilizer frame F.
-const SpatialVec& 
-getH_FMCol(const SBTreePositionCache& pc, int j) const override {
+const SpatialVecP& 
+getH_FMCol(const SBTreePositionCache_<T>& pc, int j) const override {
     return getH_FM(pc)(j);
 }
 
@@ -469,16 +485,17 @@ getH_FMCol(const SBTreePositionCache& pc, int j) const override {
 // setQToFit{Rotation,Translation} and 
 // setUToFit{AngularVelocity,LinearVelocity}; there are no defaults.
 
+// Available only for the default Real precision.
 void setQToFitTransformImpl(const SBStateDigest& sbs, const Transform& X_FM, 
-                            Vector& q) const override {
-    setQToFitRotationImpl   (sbs,X_FM.R(),q);
-    setQToFitTranslationImpl(sbs,X_FM.p(),q);
+                            Vector& q) const {
+    this->setQToFitRotationImpl   (sbs,X_FM.R(),q);
+    this->setQToFitTranslationImpl(sbs,X_FM.p(),q);
 }
 
 void setUToFitVelocityImpl(const SBStateDigest& sbs, const Vector& q, 
-                           const SpatialVec& V_FM, Vector& u) const override {
-    setUToFitAngularVelocityImpl(sbs,q,V_FM[0],u);
-    setUToFitLinearVelocityImpl (sbs,q,V_FM[1],u);
+                           const SpatialVec& V_FM, Vector& u) const {
+    this->setUToFitAngularVelocityImpl(sbs,q,V_FM[0],u);
+    this->setUToFitLinearVelocityImpl (sbs,q,V_FM[1],u);
 }
 
 // End of RigidBodyNode overrides.
@@ -501,7 +518,7 @@ void setUToFitVelocityImpl(const SBStateDigest& sbs, const Vector& q,
 // our H matrix is 6 x nu, or more usefully it is 2 rows of Vec3's.
 // The first row define how u's contribute to angular velocities; the
 // second defines how u's contribute to linear velocities.
-typedef Mat<2,dof,Vec3> HType;
+typedef Mat<2,dof,Vec3P> HType;
 
 // This mandatory routine calculates the joint transition matrix H_FM, giving
 // the change of velocity induced by the generalized speeds u for this 
@@ -518,7 +535,7 @@ typedef Mat<2,dof,Vec3> HType;
 // if you need access to the cross-mobilizer transform.
 // CAUTION: our definition of H is transposed from Jain and Schwieters.
 virtual void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_F0M0) const = 0;
 
 // This mandatory routine calculates the time derivative taken in F of
@@ -533,7 +550,7 @@ virtual void calcAcrossJointVelocityJacobian(
 // of HDot_F0M0 if you need access to the cross-mobilizer transform and/or velocity.
 // CAUTION: our definition of H is transposed from Jain and Schwieters.
 virtual void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_F0M0) const = 0;
 
 // We allow a mobilizer to be defined in reverse when that is more
@@ -543,34 +560,34 @@ virtual void calcAcrossJointVelocityJacobianDot(
 // implementation postprocesses the output from the above methods, but a 
 // mobilizer can override it if it knows how to get the job done faster.
 virtual void calcReverseMobilizerH_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const;
 
 virtual void calcReverseMobilizerHDot_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const;
 
 // This routine is NOT joint specific, but cannot be called until the across-joint
 // transform X_FM has been calculated and is available in the State cache.
 void calcBodyTransforms(
-    const SBInstanceVars&       iv,
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc,
-    Transform&                  X_PB,
-    Transform&                  X_GB) const
+    const SBInstanceVars_<T>&       iv,
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc,
+    TransformP&                  X_PB,
+    TransformP&                  X_GB) const
 {
     const SBInstancePerMobodInfo& info = ic.getMobodInstanceInfo(this->getNodeNum());
     const bool noX_MB = info.noX_MB;
     const bool noR_PF = info.noR_PF;
 
-    const Transform& X_MB = getX_MB(ic); // fixed
-    const Transform& X_PF = getX_PF(iv); // fixed
-    const Transform& X_FM = getX_FM(pc); // just calculated
-    const Transform& X_GP = getX_GP(pc); // already calculated
+    const TransformP& X_MB = getX_MB(ic); // fixed
+    const TransformP& X_PF = getX_PF(iv); // fixed
+    const TransformP& X_FM = getX_FM(pc); // just calculated
+    const TransformP& X_GP = getX_GP(pc); // already calculated
 
-    const Transform X_FB = (noX_MB ? X_FM                   // cheap
+    const TransformP X_FB = (noX_MB ? X_FM                   // cheap
                                    : X_FM*X_MB);            // 63 flops
-    X_PB = (noR_PF ? Transform(X_FB.R(), X_PF.p()+X_FB.p()) // cheap
+    X_PB = (noR_PF ? TransformP(X_FB.R(), X_PF.p()+X_FB.p()) // cheap
                    : X_PF*X_FB);                            // 63 flops
     X_GB = X_GP * X_PB;                                     // 63 flops
 }
@@ -579,9 +596,9 @@ void calcBodyTransforms(
 // one used by Jain and Schwieters, but transposed.
 void calcParentToChildVelocityJacobianInGround(
     const SBModelVars&          mv,
-    const SBInstanceVars&       iv,
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc, 
+    const SBInstanceVars_<T>&       iv,
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc, 
     HType&                      H_PB_G) const;
 
 // Same for all mobilizers. This is the time derivative of 
@@ -589,10 +606,10 @@ void calcParentToChildVelocityJacobianInGround(
 // Ground frame.
 void calcParentToChildVelocityJacobianInGroundDot(
     const SBModelVars&          mv,
-    const SBInstanceVars&       iv,
-    const SBInstanceCache&      ic,
-    const SBTreePositionCache&  pc, 
-    const SBTreeVelocityCache&  vc, 
+    const SBInstanceVars_<T>&       iv,
+    const SBInstanceCache_<T>&      ic,
+    const SBTreePositionCache_<T>&  pc, 
+    const SBTreeVelocityCache_<T>&  vc, 
     HType&                      HDot_PB_G) const;
 
 
@@ -609,59 +626,59 @@ void calcParentToChildVelocityJacobianInGroundDot(
 // routines which will call these ones.
 
 // General joint-dependent select-my-goodies-from-the-pool routines.
-const Vec<dof>&     fromQ  (const Real* q)   const {return Vec<dof>::getAs(&q[qIndex]);}
-Vec<dof>&           toQ    (      Real* q)   const {return Vec<dof>::updAs(&q[qIndex]);}
-const Vec<dof>&     fromU  (const Real* u)   const {return Vec<dof>::getAs(&u[uIndex]);}
-Vec<dof>&           toU    (      Real* u)   const {return Vec<dof>::updAs(&u[uIndex]);}
-const Mat<dof,dof>& fromUSq(const Real* uSq) const {return Mat<dof,dof>::getAs(&uSq[uSqIndex]);}
-Mat<dof,dof>&       toUSq  (      Real* uSq) const {return Mat<dof,dof>::updAs(&uSq[uSqIndex]);}
+const Vec<dof,T>&     fromQ  (const RealP* q)   const {return Vec<dof,T>::getAs(&q[qIndex]);}
+Vec<dof,T>&           toQ    (      RealP* q)   const {return Vec<dof,T>::updAs(&q[qIndex]);}
+const Vec<dof,T>&     fromU  (const RealP* u)   const {return Vec<dof,T>::getAs(&u[uIndex]);}
+Vec<dof,T>&           toU    (      RealP* u)   const {return Vec<dof,T>::updAs(&u[uIndex]);}
+const Mat<dof,dof,T>& fromUSq(const RealP* uSq) const {return Mat<dof,dof,T>::getAs(&uSq[uSqIndex]);}
+Mat<dof,dof,T>&       toUSq  (      RealP* uSq) const {return Mat<dof,dof,T>::updAs(&uSq[uSqIndex]);}
 
 // Same, but specialized for the common case where dof=1 so everything is scalar.
-const Real& from1Q  (const Real* q)   const {return q[qIndex];}
-Real&       to1Q    (      Real* q)   const {return q[qIndex];}
-const Real& from1U  (const Real* u)   const {return u[uIndex];}
-Real&       to1U    (      Real* u)   const {return u[uIndex];}
-const Real& from1USq(const Real* uSq) const {return uSq[uSqIndex];}
-Real&       to1USq  (      Real* uSq) const {return uSq[uSqIndex];}
+const RealP& from1Q  (const RealP* q)   const {return q[qIndex];}
+RealP&       to1Q    (      RealP* q)   const {return q[qIndex];}
+const RealP& from1U  (const RealP* u)   const {return u[uIndex];}
+RealP&       to1U    (      RealP* u)   const {return u[uIndex];}
+const RealP& from1USq(const RealP* uSq) const {return uSq[uSqIndex];}
+RealP&       to1USq  (      RealP* uSq) const {return uSq[uSqIndex];}
 
 // Same, specialized for quaternions. We're assuming that the quaternion is stored
 // in the *first* four coordinates, if there are more than four altogether.
-const Vec4& fromQuat(const Real* q) const {return Vec4::getAs(&q[qIndex]);}
-Vec4&       toQuat  (      Real* q) const {return Vec4::updAs(&q[qIndex]);}
+const Vec4P& fromQuat(const RealP* q) const {return Vec4P::getAs(&q[qIndex]);}
+Vec4P&       toQuat  (      RealP* q) const {return Vec4P::updAs(&q[qIndex]);}
 
 // Extract a Vec3 from a Q-like or U-like object, beginning at an offset from the qIndex or uIndex.
-const Vec3& fromQVec3(const Real* q, int offs) const {return Vec3::getAs(&q[qIndex+offs]);}
-Vec3&       toQVec3  (      Real* q, int offs) const {return Vec3::updAs(&q[qIndex+offs]);}
-const Vec3& fromUVec3(const Real* u, int offs) const {return Vec3::getAs(&u[uIndex+offs]);}
-Vec3&       toUVec3  (      Real* u, int offs) const {return Vec3::updAs(&u[uIndex+offs]);}
+const Vec3P& fromQVec3(const RealP* q, int offs) const {return Vec3P::getAs(&q[qIndex+offs]);}
+Vec3P&       toQVec3  (      RealP* q, int offs) const {return Vec3P::updAs(&q[qIndex+offs]);}
+const Vec3P& fromUVec3(const RealP* u, int offs) const {return Vec3P::getAs(&u[uIndex+offs]);}
+Vec3P&       toUVec3  (      RealP* u, int offs) const {return Vec3P::updAs(&u[uIndex+offs]);}
 
 // These provide an identical interface for when q,u are given as Vectors rather 
 // than Reals. Just convert to array of reals and then use an above method.
-const Vec<dof>&     fromQ  (const Vector& q)   const {return fromQ(&q[0]);}
-Vec<dof>&           toQ    (      Vector& q)   const {return toQ  (&q[0]);}
-const Vec<dof>&     fromU  (const Vector& u)   const {return fromU(&u[0]);}
-Vec<dof>&           toU    (      Vector& u)   const {return toU  (&u[0]);}
-const Mat<dof,dof>& fromUSq(const Vector& uSq) const {return fromUSq(&uSq[0]);}
-Mat<dof,dof>&       toUSq  (      Vector& uSq) const {return toUSq  (&uSq[0]);}
+const Vec<dof,T>&     fromQ  (const VectorP& q)   const {return fromQ(&q[0]);}
+Vec<dof,T>&           toQ    (      VectorP& q)   const {return toQ  (&q[0]);}
+const Vec<dof,T>&     fromU  (const VectorP& u)   const {return fromU(&u[0]);}
+Vec<dof,T>&           toU    (      VectorP& u)   const {return toU  (&u[0]);}
+const Mat<dof,dof,T>& fromUSq(const VectorP& uSq) const {return fromUSq(&uSq[0]);}
+Mat<dof,dof,T>&       toUSq  (      VectorP& uSq) const {return toUSq  (&uSq[0]);}
 
-const Real& from1Q  (const Vector& q)   const {return from1Q  (&q[0]);}
-Real&       to1Q    (      Vector& q)   const {return to1Q    (&q[0]);}
-const Real& from1U  (const Vector& u)   const {return from1U  (&u[0]);}
-Real&       to1U    (      Vector& u)   const {return to1U    (&u[0]);}
-const Real& from1USq(const Vector& uSq) const {return from1USq(&uSq[0]);}
-Real&       to1USq  (      Vector& uSq) const {return to1USq  (&uSq[0]);}
+const RealP& from1Q  (const VectorP& q)   const {return from1Q  (&q[0]);}
+RealP&       to1Q    (      VectorP& q)   const {return to1Q    (&q[0]);}
+const RealP& from1U  (const VectorP& u)   const {return from1U  (&u[0]);}
+RealP&       to1U    (      VectorP& u)   const {return to1U    (&u[0]);}
+const RealP& from1USq(const VectorP& uSq) const {return from1USq(&uSq[0]);}
+RealP&       to1USq  (      VectorP& uSq) const {return to1USq  (&uSq[0]);}
 
 // Same, specialized for quaternions. We're assuming that the quaternion comes 
 // first in the coordinates.
-const Vec4& fromQuat(const Vector& q) const {return fromQuat(&q[0]);}
-Vec4&       toQuat  (      Vector& q) const {return toQuat  (&q[0]);}
+const Vec4P& fromQuat(const VectorP& q) const {return fromQuat(&q[0]);}
+Vec4P&       toQuat  (      VectorP& q) const {return toQuat  (&q[0]);}
 
 // Extract a Vec3 from a Q-like or U-like object, beginning at an offset from
 // the qIndex or uIndex.
-const Vec3& fromQVec3(const Vector& q, int offs) const {return fromQVec3(&q[0], offs);}
-Vec3&       toQVec3  (      Vector& q, int offs) const {return toQVec3  (&q[0], offs);}
-const Vec3& fromUVec3(const Vector& u, int offs) const {return fromUVec3(&u[0], offs);}
-Vec3&       toUVec3  (      Vector& u, int offs) const {return toUVec3  (&u[0], offs);}
+const Vec3P& fromQVec3(const VectorP& q, int offs) const {return fromQVec3(&q[0], offs);}
+Vec3P&       toQVec3  (      VectorP& q, int offs) const {return toQVec3  (&q[0], offs);}
+const Vec3P& fromUVec3(const VectorP& u, int offs) const {return fromUVec3(&u[0], offs);}
+Vec3P&       toUVec3  (      VectorP& u, int offs) const {return toUVec3  (&u[0], offs);}
 
 // Applications of the above extraction routines to particular interesting items
 // in the State. Note that you can't use these for quaternions since they 
@@ -673,77 +690,93 @@ Vec3&       toUVec3  (      Vector& u, int offs) const {return toUVec3  (&u[0], 
 
 
 // CAUTION: our H definition is transposed from Jain and Schwieters.
-const HType& getH_FM(const SBTreePositionCache& pc) const
+const HType& getH_FM(const SBTreePositionCache_<T>& pc) const
 {   return HType::getAs(&pc.storageForH_FM[2*uIndex]); }
-HType&       updH_FM(SBTreePositionCache& pc) const
+HType&       updH_FM(SBTreePositionCache_<T>& pc) const
 {   return HType::updAs(&pc.storageForH_FM[2*uIndex]); }
 
 // "H" here should really be H_PB_G, that is, cross joint transition
 // matrix relating parent and body frames, but expressed in Ground.
 // CAUTION: our H definition is transposed from Jain and Schwieters.
-const HType& getH(const SBTreePositionCache& pc) const
+const HType& getH(const SBTreePositionCache_<T>& pc) const
 {   return HType::getAs(&pc.storageForH_PB_G[2*uIndex]); }
-HType&       updH(SBTreePositionCache& pc) const
+HType&       updH(SBTreePositionCache_<T>& pc) const
 {   return HType::updAs(&pc.storageForH_PB_G[2*uIndex]); }
 
     // Velocity
 
 // CAUTION: our H definition is transposed from Jain and Schwieters.
-const HType& getHDot_FM(const SBTreeVelocityCache& vc) const
+const HType& getHDot_FM(const SBTreeVelocityCache_<T>& vc) const
 {   return HType::getAs(&vc.storageForHDot_FM[2*uIndex]); }
-HType&       updHDot_FM(SBTreeVelocityCache& vc) const
+HType&       updHDot_FM(SBTreeVelocityCache_<T>& vc) const
 {   return HType::updAs(&vc.storageForHDot_FM[2*uIndex]); }
 
 // CAUTION: our H definition is transposed from Jain and Schwieters.
-const HType& getHDot(const SBTreeVelocityCache& vc) const
+const HType& getHDot(const SBTreeVelocityCache_<T>& vc) const
 {   return HType::getAs(&vc.storageForHDot[2*uIndex]); }
-HType&       updHDot(SBTreeVelocityCache& vc) const
+HType&       updHDot(SBTreeVelocityCache_<T>& vc) const
 {   return HType::updAs(&vc.storageForHDot[2*uIndex]); }
 
     // Dynamics
 
 // These are calculated with articulated body inertias.
-const Mat<dof,dof>& getD(const SBArticulatedBodyInertiaCache& abc) const 
+const Mat<dof,dof,T>& getD(const SBArticulatedBodyInertiaCache_<T>& abc) const 
 {   return fromUSq(abc.storageForD); }
-Mat<dof,dof>&       updD(SBArticulatedBodyInertiaCache&       abc) const 
+Mat<dof,dof,T>&       updD(SBArticulatedBodyInertiaCache_<T>&       abc) const 
 {   return toUSq  (abc.storageForD); }
 
-const Mat<dof,dof>& getDI(const SBArticulatedBodyInertiaCache& abc) const 
+const Mat<dof,dof,T>& getDI(const SBArticulatedBodyInertiaCache_<T>& abc) const 
 {   return fromUSq(abc.storageForDI); }
-Mat<dof,dof>&       updDI(SBArticulatedBodyInertiaCache&       abc) const 
+Mat<dof,dof,T>&       updDI(SBArticulatedBodyInertiaCache_<T>&       abc) const 
 {   return toUSq  (abc.storageForDI); }
 
-const Mat<2,dof,Vec3>& getG(const SBArticulatedBodyInertiaCache& abc) const
-{   return Mat<2,dof,Vec3>::getAs(&abc.storageForG[2*uIndex]); }
-Mat<2,dof,Vec3>&       updG(SBArticulatedBodyInertiaCache&       abc) const
-{   return Mat<2,dof,Vec3>::updAs(&abc.storageForG[2*uIndex]); }
+const Mat<2,dof,Vec3P>& getG(const SBArticulatedBodyInertiaCache_<T>& abc) const
+{   return Mat<2,dof,Vec3P>::getAs(&abc.storageForG[2*uIndex]); }
+Mat<2,dof,Vec3P>&       updG(SBArticulatedBodyInertiaCache_<T>&       abc) const
+{   return Mat<2,dof,Vec3P>::updAs(&abc.storageForG[2*uIndex]); }
 
-const Vec<dof>& getTau(const SBInstanceCache& ic, const Real* tau) const {
+const Vec<dof,T>& getTau(const SBInstanceCache_<T>& ic, const RealP* tau) const {
     const PresForcePoolIndex tauIx = 
         ic.getMobodInstanceInfo(nodeNum).firstPresForce;
     assert(tauIx.isValid());
-    return Vec<dof>::getAs(&tau[tauIx]);
+    return Vec<dof,T>::getAs(&tau[tauIx]);
 }
-Vec<dof>& updTau(const SBInstanceCache& ic, Real* tau) const {
+Vec<dof,T>& updTau(const SBInstanceCache_<T>& ic, RealP* tau) const {
     const PresForcePoolIndex tauIx = 
         ic.getMobodInstanceInfo(nodeNum).firstPresForce;
     assert(tauIx.isValid());
-    return Vec<dof>::updAs(&tau[tauIx]);
+    return Vec<dof,T>::updAs(&tau[tauIx]);
 }
 
     // Acceleration
 
-const Vec<dof>& getEpsilon (const SBTreeAccelerationCache& ac) const
+const Vec<dof,T>& getEpsilon (const SBTreeAccelerationCache_<T>& ac) const
 {   return fromU (ac.epsilon); }
-Vec<dof>& updEpsilon (SBTreeAccelerationCache& ac) const
+Vec<dof,T>& updEpsilon (SBTreeAccelerationCache_<T>& ac) const
 {   return toU   (ac.epsilon); }
-const Real& get1Epsilon(const SBTreeAccelerationCache& ac) const
+const RealP& get1Epsilon(const SBTreeAccelerationCache_<T>& ac) const
 {   return from1U(ac.epsilon); }
-Real& upd1Epsilon(SBTreeAccelerationCache& ac) const
+RealP& upd1Epsilon(SBTreeAccelerationCache_<T>& ac) const
 {   return to1U  (ac.epsilon); }
 
 
 
 };
+
+// RigidBodyNodeSpec is the default Real precision version. The mobilizers
+// that are not (yet) templatized on the scalar type derive from this.
+template <int dof, bool noR_FM=false>
+using RigidBodyNodeSpec = RigidBodyNodeSpec_<Real, dof, noR_FM>;
+
+// The out-of-line methods are in RigidBodyNodeSpecDefs.h. They are
+// instantiated for Real in RigidBodyNodeSpec.cpp.
+extern template class RigidBodyNodeSpec_<Real, 1, false>;
+extern template class RigidBodyNodeSpec_<Real, 2, false>;
+extern template class RigidBodyNodeSpec_<Real, 3, false>;
+extern template class RigidBodyNodeSpec_<Real, 4, false>;
+extern template class RigidBodyNodeSpec_<Real, 5, false>;
+extern template class RigidBodyNodeSpec_<Real, 6, false>;
+extern template class RigidBodyNodeSpec_<Real, 1, true>;
+extern template class RigidBodyNodeSpec_<Real, 3, true>;
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_H_

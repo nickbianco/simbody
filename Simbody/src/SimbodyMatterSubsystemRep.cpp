@@ -29,8 +29,8 @@
 #include "simbody/internal/ConditionalConstraint.h"
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "SimbodyTreeState.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
 #include "MultibodySystemRep.h"
 #include "MobilizedBodyImpl.h"
 #include "ConstraintImpl.h"

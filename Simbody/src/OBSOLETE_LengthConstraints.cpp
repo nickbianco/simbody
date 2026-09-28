@@ -48,7 +48,7 @@ void dummySymbolToAvoidWarningInLengthConstraints() {}
 using namespace SimTK;
 
 #include "LengthConstraints.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
 #include "SimbodyMatterSubsystemRep.h"
 
 #include "newtonRaphson.h"

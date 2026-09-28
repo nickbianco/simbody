@@ -29,7 +29,7 @@
 using namespace SimTK;
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "SimbodyTreeState.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
 
 #include "newtonRaphson.h"
 

@@ -35,6 +35,7 @@
 #include "SimTKcommon/Orientation.h"
 
 #include <iostream>
+#include <type_traits>
 
 namespace SimTK {
 /** Spatial vectors are used for (rotation,translation) quantities and 
@@ -521,6 +522,10 @@ UnitInertia_<P>& updAsUnitInertia()
 // the same set of tests as run by the isValidInertiaMatrix() method above.
 void errChk(const char* methodName) const {
 #ifndef NDEBUG
+    // These checks depend on the numerical values of the elements, so they
+    // can be made only for the built-in floating point types (not, e.g., for
+    // symbolic scalar types).
+    if constexpr (std::is_floating_point<P>::value) {
     SimTK_ERRCHK(!isNaN(), methodName,
         "Inertia matrix contains a NaN.");
 
@@ -553,6 +558,7 @@ void errChk(const char* methodName) const {
                  && Izz+Slop>=std::abs(2*Ixy),
         methodName,
         "The magnitude of a product of inertia was too large to be physical.");
+    }
 #endif
 }
 
@@ -1010,8 +1016,10 @@ SpatialInertia_(RealP mass, const Vec3P& com, const UnitInertiaP& gyration)
 // default copy constructor, copy assignment, destructor
 
 SpatialInertia_& setMass(RealP mass)
-{   SimTK_ERRCHK1(mass >= 0, "SpatialInertia::setMass()",
-        "Negative mass %g is illegal.", (double)mass);
+{   if constexpr (std::is_floating_point<P>::value) {
+        SimTK_ERRCHK1(mass >= 0, "SpatialInertia::setMass()",
+            "Negative mass %g is illegal.", (double)mass);
+    }
     m=mass; return *this; }
 SpatialInertia_& setMassCenter(const Vec3P& com)
 {   p=com; return *this;} 
@@ -1035,8 +1043,10 @@ InertiaP calcInertia() const {return m*G;}
 /// the same point but there is no way for this method to check.
 /// Cost is about 40 flops.
 SpatialInertia_& operator+=(const SpatialInertia_& src) {
-    SimTK_ERRCHK(m+src.m != 0, "SpatialInertia::operator+=()",
-        "The combined mass cannot be zero.");
+    if constexpr (std::is_floating_point<P>::value) {
+        SimTK_ERRCHK(m+src.m != 0, "SpatialInertia::operator+=()",
+            "The combined mass cannot be zero.");
+    }
     const RealP mtot = m+src.m, oomtot = 1/mtot;                    // ~11 flops
     p = oomtot*(calcMassMoment() + src.calcMassMoment());           // 10 flops
     G.setFromUnitInertia(oomtot*(calcInertia()+src.calcInertia())); // 19 flops
@@ -1049,8 +1059,10 @@ SpatialInertia_& operator+=(const SpatialInertia_& src) {
 /// the same point but there is no way for this method to check.
 /// Cost is about 40 flops.
 SpatialInertia_& operator-=(const SpatialInertia_& src) {
-    SimTK_ERRCHK(m != src.m, "SpatialInertia::operator-=()",
-        "The combined mass cannot be zero.");
+    if constexpr (std::is_floating_point<P>::value) {
+        SimTK_ERRCHK(m != src.m, "SpatialInertia::operator-=()",
+            "The combined mass cannot be zero.");
+    }
     const RealP mtot = m-src.m, oomtot = 1/mtot;                    // ~11 flops
     p = oomtot*(calcMassMoment() - src.calcMassMoment());           // 10 flops
     G.setFromUnitInertia(oomtot*(calcInertia()-src.calcInertia())); // 19 flops
@@ -1342,6 +1354,78 @@ operator+(const ArticulatedInertia_<P>& l, const ArticulatedInertia_<P>& r)
 template <class P> inline ArticulatedInertia_<P>
 operator-(const ArticulatedInertia_<P>& l, const ArticulatedInertia_<P>& r)
 {   return ArticulatedInertia_<P>(l) -= r; }
+
+
+namespace ArticulatedInertiaDetail {
+// Calculate the lower half of vx*F where vx is the cross product matrix
+// of v and F is a full 3x3 matrix. This result would normally be a full 
+// 3x3 but for the uses below we know we're only going to need the diagonal 
+// and lower triangle so we can save some flops by working this out by hand.
+// The method is templatized so that it will work on a transposed matrix
+// as efficiently as an untransposed one. (18 flops)
+template <class P, int CS, int RS> 
+inline SymMat<3,P>
+halfCross(const Vec<3,P>& v, const Mat<3,3,P,CS,RS>& F) {
+    return SymMat<3,P>
+      ( v[1]*F(2,0)-v[2]*F(1,0),
+        v[2]*F(0,0)-v[0]*F(2,0), v[2]*F(0,1)-v[0]*F(2,1),
+        v[0]*F(1,0)-v[1]*F(0,0), v[0]*F(1,1)-v[1]*F(0,1), v[0]*F(1,2)-v[1]*F(0,2) );
+}
+
+// Calculate the lower half of G*vx where G is a full 3x3 matrix and vx
+// is the cross product matrix of v. See comment above for details.
+// (18 flops)
+template <class P, int CS, int RS> 
+inline SymMat<3,P>
+halfCross(const Mat<3,3,P,CS,RS>& G, const Vec<3,P>& v) {
+    return SymMat<3,P>
+      ( v[2]*G(0,1)-v[1]*G(0,2),
+        v[2]*G(1,1)-v[1]*G(1,2), v[0]*G(1,2)-v[2]*G(1,0),
+        v[2]*G(2,1)-v[1]*G(2,2), v[0]*G(2,2)-v[2]*G(2,0), v[1]*G(2,0)-v[0]*G(2,1) );
+}
+
+// This method computes the lower half of the difference vx*F-G*vx using
+// the same methods as above, but done together in order to pull out the
+// common v terms. This is 33 flops, down from 42 if you call the two
+// methods above and add them.
+template <class P, int CS1, int RS1, int CS2, int RS2>
+inline SymMat<3,P>
+halfCrossDiff(const Vec<3,P>& v, const Mat<3,3,P,CS1,RS1>& F, const Mat<3,3,P,CS2,RS2>& G) {
+    return SymMat<3,P>
+      ( v[1]*(F(2,0)+G(0,2)) - v[2]*(F(1,0)+G(0,1)),
+        v[2]*(F(0,0)-G(1,1)) - v[0]*F(2,0) + v[1]*G(1,2), 
+                v[2]*(F(0,1)+G(1,0)) - v[0]*(F(2,1)+G(1,2)),
+        v[0]*F(1,0) - v[2]*G(2,1) - v[1]*(F(0,0)-G(2,2)), 
+                v[0]*(F(1,1)-G(2,2)) - v[1]*F(0,1) + v[2]*G(2,0), 
+                        v[0]*(F(1,2)+G(2,1)) - v[1]*(F(0,2)+G(2,0)) );
+}
+} // namespace ArticulatedInertiaDetail
+
+// We're computing
+//      P' =  [ J'  F' ]  =  [ 1  sx ] [ J  F ] [ 1  0 ]
+//            [~F'  M  ]     [ 0  1  ] [~F  M ] [-sx 1 ]
+// like this:
+//      F' = F + sx*M
+//      J' = J + (sx*~F - F'*sx)
+// where the parenthesized quantity is symmetric although its
+// individual terms are not. Unfortunately this is a shift by -s rather than s.
+// Cost is 72 flops.
+template <class P> inline ArticulatedInertia_<P>
+ArticulatedInertia_<P>::shift(const Vec3P& s) const {
+    const Mat33P    Fp = F + s % M; // same meaning as sx*M but faster (33 flops)
+    const SymMat33P Jp = J + ArticulatedInertiaDetail::halfCrossDiff(s, ~F, Fp); // sx*~F - F'*sx (39 flops)
+    return ArticulatedInertia_(M, Fp, Jp);
+}
+
+// Same as above but perform the shift in place. Same flop count but less copying.
+template <class P> inline ArticulatedInertia_<P>&
+ArticulatedInertia_<P>::shiftInPlace(const Vec3P& s) {
+    const Mat33P Fp = F + s % M;   // same meaning as sx*M but faster (33 flops)
+    J += ArticulatedInertiaDetail::halfCrossDiff(s, ~F, Fp); // J + (sx*~F - F'*sx) (39 flops)
+    F = Fp;
+    // M doesn't change
+    return *this;
+}
 
 
 // -----------------------------------------------------------------------------
