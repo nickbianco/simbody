@@ -29,8 +29,8 @@
  */
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "RigidBodyNode.h"
-#include "RigidBodyNodeSpec.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec.h"
 
 /* This is a mobilizer whose generalized coordinates are directly interpretable
 as a spherical coordinate system in this order: azimuth (longitude), zenith 

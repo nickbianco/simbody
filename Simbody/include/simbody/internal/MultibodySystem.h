@@ -85,6 +85,26 @@ public:
         return calcPotentialEnergy(s)+calcKineticEnergy(s);
     }
 
+    /// @name Other scalar types
+    /// A ScalarState<T> holds this system's time and continuous variables, and
+    /// its subsystems' computed quantities, with a scalar type T other than
+    /// Real, such as an automatic differentiation or symbolic type (e.g.
+    /// casadi::SX); see SimTKcommon/internal/ScalarState.h. This is a member
+    /// template whose definition is in
+    /// simbody/internal/tree/MultibodyScalarImpl.h.
+    /// @{
+
+    /// Realize a ScalarState<T>, created from a State of this system, through
+    /// \a stage, which can be no higher than Stage::Velocity: force
+    /// subsystems don't yet support other scalar types. Realizing
+    /// Stage::Instance creates the matter subsystem's T-typed RigidBodyNodes,
+    /// and Position and Velocity compute its kinematics.
+    template <class T>
+    void realize(const ScalarState<T>& state,
+                 Stage stage = Stage::Velocity) const;
+    using System::realize;
+    /// @}
+
     // These methods are for use by our constituent subsystems to communicate 
     // with each other and with the MultibodySystem as a whole.
 

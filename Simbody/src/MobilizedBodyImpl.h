@@ -40,7 +40,12 @@
 #include "BodyRep.h"
 #include "MotionImpl.h"
 
-class RigidBodyNode;
+template <class P> class RigidBodyNode_;
+typedef RigidBodyNode_<Real> RigidBodyNode;
+namespace SimTK {
+class RigidBodyNodeFactory;
+struct RigidBodyNodeInfo;
+}
 
 namespace SimTK {
 
@@ -110,6 +115,13 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const = 0;
+
+    // This creates a rigid body node for a scalar type other than Real, by
+    // calling the factory's method for this mobilizer type (a visitor). See
+    // simbody/internal/tree/RigidBodyNodeFactory.h. Called by
+    // SimbodyMatterSubsystem::createRigidBodyNodes().
+    virtual void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                                     const RigidBodyNodeInfo& info) const = 0;
 
     virtual void realizeTopologyVirtual     (State&)        const {}
     virtual void realizeModelVirtual        (State&)        const {}
@@ -556,6 +568,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -579,6 +593,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -601,6 +617,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -623,6 +641,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -645,6 +665,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -667,6 +689,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -701,6 +725,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -729,6 +755,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -763,6 +791,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==6, 
@@ -786,6 +816,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -824,6 +856,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -860,6 +894,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -882,6 +918,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==7||nq==6, 
@@ -911,6 +949,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -936,6 +976,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==7||nq==6, 
@@ -965,6 +1007,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==0, 
@@ -986,6 +1030,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==0, 
@@ -1014,6 +1060,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -1041,6 +1089,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3,
@@ -1179,6 +1229,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
     
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==getImplementation().getImpl().getNQ() || nq==getImplementation().getImpl().getNQ()-1, 

@@ -29,7 +29,6 @@
  * Torsion or Revolute joint.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
 
@@ -40,23 +39,29 @@
 // rotational freedom about a particular axis, the z axis of the parent's F 
 // frame, which is aligned forever with the z axis of the body's M frame. In 
 // addition, the origin points Mo of M and Fo of F are identical forever.
-class RBNodeTorsion : public RigidBodyNodeSpec<1, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeTorsion_ : public RigidBodyNodeSpec_<T, 1, false> {
 public:
-virtual const char* type() { return "torsion"; }
-typedef typename RigidBodyNodeSpec<1, false>::HType HType;
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 1, false> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "torsion"; }
 
-RBNodeTorsion(const MassProperties&   mProps_B,
+RBNodeTorsion_(const MassProperties_<T>&  mProps_B,
                 bool                  isReversed,
                 UIndex&               nextUSlot,
                 USquaredIndex&        nextUSqSlot,
                 QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<1, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
-                         isReversed)
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed,
+         isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
 }
 
+// These are available only for the default Real precision.
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM, 
                            Vector& q) const {
     // The only rotation our pin joint can handle is about z.
@@ -97,21 +102,21 @@ int calcQPoolSize(const SBModelVars&) const
 {   return PoolSize; }
 
 // Precalculation of sin/cos costs around 50 flops.
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q, int nq,
-                             Real* qCache,  int nQCache,
-                             Real* qErr,    int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q, int nq,
+                             RealP* qCache,  int nQCache,
+                             RealP* qErr,    int nQErr) const
 {
     assert(q && nq==1 && qCache && nQCache==PoolSize && nQErr==0);
-    qCache[CosQ] = std::cos(q[0]);
-    qCache[SinQ] = std::sin(q[0]);
+    qCache[CosQ] = cos(q[0]);
+    qCache[SinQ] = sin(q[0]);
 }
 
 // This is nearly free since we already calculated sin/cos.
-void calcX_FM(const SBStateDigest& sbs,
-                const Real* q,      int nq,
-                const Real* qCache, int nQCache,
-                Transform&  X_FM) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+                const RealP* q,      int nq,
+                const RealP* qCache, int nQCache,
+                TransformP&  X_FM) const
 {
     assert(q && nq==1 && qCache && nQCache==PoolSize);
     X_FM.updR().setRotationFromAngleAboutZ(qCache[CosQ], qCache[SinQ]);
@@ -121,39 +126,42 @@ void calcX_FM(const SBStateDigest& sbs,
 // The generalized speed is the angular velocity of M in the F frame,
 // about F's z axis, expressed in F. (This axis is also constant in M.)
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
-    H_FM(0) = SpatialVec( Vec3(0,0,1), Vec3(0) );
+    H_FM(0) = SpatialVecP( Vec3P(0,0,1), Vec3P(0) );
 }
 
 
 // Since H_FM above is constant in F, its time derivative in F is zero.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0) );
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
 }
 
 // Override the computation of reverse-H for this simple mobilizer.
 void calcReverseMobilizerH_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
-    H_FM(0) = SpatialVec( Vec3(0,0,-1), Vec3(0) );
+    H_FM(0) = SpatialVecP( Vec3P(0,0,-1), Vec3P(0) );
 }
 
 // Override the computation of reverse-HDot for this simple mobilizer.
 void calcReverseMobilizerHDot_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
     // doesn't get better than this!
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0) ); 
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) ); 
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodeTorsion_<Real> RBNodeTorsion;
 
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_PIN_H_

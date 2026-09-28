@@ -34,7 +34,7 @@ represent the built-in constraint types. **/
 #include "simbody/internal/SimbodyMatterSubsystem.h"
 #include "simbody/internal/SimbodyMatterSubtree.h"
 
-#include "SimbodyTreeState.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
 
 #include <map>
 #include <utility>  // std::pair

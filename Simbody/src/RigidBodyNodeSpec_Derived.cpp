@@ -26,8 +26,8 @@
  * RigidBodyNodeSpec that aren't defined in the headers.
  */
 
-#include "RigidBodyNodeSpec_Pin.h"
-#include "RigidBodyNodeSpec_Slider.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Pin.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Slider.h"
 #include "RigidBodyNodeSpec_Cylinder.h"
 #include "RigidBodyNodeSpec_SphericalCoords.h"
 #include "RigidBodyNodeSpec_Ball.h"
@@ -53,6 +53,7 @@
 // These probably don't belong here.
 
 #include "MobilizedBodyImpl.h"
+#include "simbody/internal/tree/RigidBodyNodeFactory.h"
 
 RigidBodyNode* MobilizedBody::PinImpl::createRigidBodyNode(
     UIndex&        nextUSlot,
@@ -286,3 +287,38 @@ RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(
     }
 }
 
+
+    //////////////////////////////////////////////////////////////////////////
+    // MobilizedBodyImpl::createRigidBodyNode(RigidBodyNodeFactory&) visitors //
+    //////////////////////////////////////////////////////////////////////////
+
+// These create the RigidBodyNode for a scalar type other than Real by calling
+// the factory's method for each mobilizer type. See
+// simbody/internal/tree/RigidBodyNodeFactory.h.
+#define SimTK_RBNODE_FACTORY_VISIT(Mobilizer)                                  \
+void MobilizedBody::Mobilizer##Impl::createRigidBodyNode(                     \
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const       \
+{   factory.create##Mobilizer(info); }
+
+SimTK_RBNODE_FACTORY_VISIT(Ground)
+SimTK_RBNODE_FACTORY_VISIT(Weld)
+SimTK_RBNODE_FACTORY_VISIT(Pin)
+SimTK_RBNODE_FACTORY_VISIT(Slider)
+SimTK_RBNODE_FACTORY_VISIT(Universal)
+SimTK_RBNODE_FACTORY_VISIT(Cylinder)
+SimTK_RBNODE_FACTORY_VISIT(BendStretch)
+SimTK_RBNODE_FACTORY_VISIT(Planar)
+SimTK_RBNODE_FACTORY_VISIT(SphericalCoords)
+SimTK_RBNODE_FACTORY_VISIT(Gimbal)
+SimTK_RBNODE_FACTORY_VISIT(Bushing)
+SimTK_RBNODE_FACTORY_VISIT(Ball)
+SimTK_RBNODE_FACTORY_VISIT(Ellipsoid)
+SimTK_RBNODE_FACTORY_VISIT(Translation)
+SimTK_RBNODE_FACTORY_VISIT(Free)
+SimTK_RBNODE_FACTORY_VISIT(LineOrientation)
+SimTK_RBNODE_FACTORY_VISIT(FreeLine)
+SimTK_RBNODE_FACTORY_VISIT(Screw)
+SimTK_RBNODE_FACTORY_VISIT(CantileverFreeBeam)
+SimTK_RBNODE_FACTORY_VISIT(Custom)
+
+#undef SimTK_RBNODE_FACTORY_VISIT

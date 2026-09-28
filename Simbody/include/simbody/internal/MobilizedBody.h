@@ -347,6 +347,17 @@ spatial velocity vector V_GB = {w_GB, v_GB}. This response is available at
 Velocity stage. **/
 const SpatialVec& getBodyVelocity(const State& state) const;        // V_GB
 
+/** The body transform X_GB for a ScalarState<T> with a scalar type T other
+than Real, available at Stage::Position. See MultibodySystem::realize(const
+ScalarState<T>&, Stage). **/
+template <class T>
+const Transform_<T>& getBodyTransform(const ScalarState<T>& state) const;
+/** The body spatial velocity V_GB for a ScalarState<T> with a scalar type T
+other than Real, available at Stage::Velocity. See MultibodySystem::realize(const
+ScalarState<T>&, Stage). **/
+template <class T>
+const SpatialVec_<T>& getBodyVelocity(const ScalarState<T>& state) const;
+
 /** Extract from the state cache the already-calculated inertial angular
 velocity vector w_GB of this body B, measured with respect to the Ground frame
 and expressed in the Ground frame. This response is available at Velocity 

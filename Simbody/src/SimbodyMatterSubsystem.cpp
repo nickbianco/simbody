@@ -31,7 +31,9 @@
 
 #include "MobilizedBodyImpl.h"
 #include "SimbodyMatterSubsystemRep.h"
-class RigidBodyNode;
+#include "simbody/internal/tree/RigidBodyNodeFactory.h"
+template <class P> class RigidBodyNode_;
+typedef RigidBodyNode_<Real> RigidBodyNode;
 
 #include <string>
 #include <iostream>
@@ -54,6 +56,37 @@ SimbodyMatterSubsystem::downcast(const Subsystem& s) {
 SimbodyMatterSubsystem::updDowncast(Subsystem& s) {
     assert(isInstanceOf(s));
     return static_cast<SimbodyMatterSubsystem&>(s);
+}
+
+//==============================================================================
+//                         CREATE RIGID BODY NODES
+//==============================================================================
+// Visit each mobilized body with the given factory, to create this subsystem's
+// RigidBodyNodes for a scalar type other than Real. See
+// simbody/internal/tree/RigidBodyNodeFactory.h.
+void SimbodyMatterSubsystem::
+createRigidBodyNodes(RigidBodyNodeFactory& factory, const State& state) const {
+    SimTK_STAGECHECK_GE_ALWAYS(state.getSubsystemStage(getMySubsystemIndex()),
+        Stage::Instance, "SimbodyMatterSubsystem::createRigidBodyNodes()");
+    const SimbodyMatterSubsystemRep& rep = getRep();
+    factory.beginTree(rep.getMatterTopologyCache(), rep.getModelVars(state),
+                      rep.getModelCache(state), rep.getInstanceVars(state),
+                      rep.getInstanceCache(state));
+    // In order of MobilizedBodyIndex, so parents come before children.
+    for (MobilizedBodyIndex b(0); b < getNumBodies(); ++b) {
+        const RigidBodyNode& node = rep.getRigidBodyNode(b);
+        RigidBodyNodeInfo info;
+        info.index          = b;
+        if (node.getParent()) info.parent = node.getParent()->getNodeNum();
+        info.level          = node.getLevel();
+        info.massProperties = node.getMassProperties_OB_B();
+        info.isReversed     = node.isReversed();
+        info.uIndex         = node.getUIndex();
+        info.uSqIndex       = node.getUSqIndex();
+        info.qIndex         = node.getQIndex();
+        getMobilizedBody(b).getImpl().createRigidBodyNode(factory, info);
+    }
+    factory.endTree();
 }
 
 const SimbodyMatterSubsystemRep& 

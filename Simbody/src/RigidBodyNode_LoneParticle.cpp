@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
 #include "MobilizedBodyImpl.h"
 #include "RigidBodyNodeSpec_Translation.h"
 

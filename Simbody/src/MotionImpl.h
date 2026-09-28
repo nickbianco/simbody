@@ -28,7 +28,7 @@
 #include "simbody/internal/common.h"
 #include "simbody/internal/Motion.h"
 
-#include "SimbodyTreeState.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
 
 namespace SimTK {
 

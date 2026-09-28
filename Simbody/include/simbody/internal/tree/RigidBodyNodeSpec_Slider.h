@@ -29,7 +29,6 @@
  * Sliding or Prismatic joint.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
 
@@ -38,25 +37,31 @@
 // Sliding joint (1 dof translation). The translation is along the x
 // axis of the parent body's F frame, with M=F when the coordinate
 // is zero and the orientation of M in F frozen at 0 forever.
-class RBNodeSlider : public RigidBodyNodeSpec<1, true> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeSlider_ : public RigidBodyNodeSpec_<T, 1, true> {
 public:
-typedef typename RigidBodyNodeSpec<1, true>::HType HType;
-virtual const char* type() { return "slider"; }
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 1, true> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "slider"; }
 
-RBNodeSlider(const MassProperties&    mProps_B,
+RBNodeSlider_(const MassProperties_<T>&  mProps_B,
                 bool                  isReversed,
                 UIndex&               nextUSlot,
                 USquaredIndex&        nextUSqSlot,
                 QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<1, true>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
-                         isReversed)
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed,
+         isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
 }
 
     // Implementations of virtual methods.
 
+// These are available only for the default Real precision.
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM, 
                            Vector& q) const {
     // The only rotation a slider can represent is identity.
@@ -85,61 +90,64 @@ int calcQPoolSize(const SBModelVars&) const
 {   return 0; }
 
 // Nothing to precalculate.
-void performQPrecalculations(const SBStateDigest& sbs,
-                                const Real* q, int nq,
-                                Real* qCache,  int nQCache,
-                                Real* qErr,    int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                                const RealP* q, int nq,
+                                RealP* qCache,  int nQCache,
+                                RealP* qErr,    int nQErr) const
 {
     assert(q && nq==1 && nQCache==0 && nQErr==0);
 }
 
 // This is free.
-void calcX_FM(const SBStateDigest& sbs,
-                const Real* q,      int nq,
-                const Real* qCache, int nQCache,
-                Transform&  X_FM) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+                const RealP* q,      int nq,
+                const RealP* qCache, int nQCache,
+                TransformP&  X_FM) const
 {
     assert(q && nq==1 && nQCache==0);
     // Translation vector q is expressed in F (and M since they have same 
     // orientation). A sliding joint can't change orientation, and only 
     // translates along x. 
-    X_FM = Transform(Rotation(), Vec3(q[0],0,0));
+    X_FM = TransformP(RotationP(), Vec3P(q[0],0,0));
 }
 
 // The generalized speed is the velocity of M's origin in the F frame,
 // along F's x axis, expressed in F.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
-    H_FM(0) = SpatialVec( Vec3(0), Vec3(1,0,0) );
+    H_FM(0) = SpatialVecP( Vec3P(0), Vec3P(1,0,0) );
 }
 
 // Since the Jacobian above is constant in F, its time derivative is zero.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0) );
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
 }
 
 // Override the computation of reverse-H for this simple mobilizer.
 void calcReverseMobilizerH_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
-    H_FM(0) = SpatialVec( Vec3(0), Vec3(-1,0,0) );
+    H_FM(0) = SpatialVecP( Vec3P(0), Vec3P(-1,0,0) );
 }
 
 // Override the computation of reverse-HDot for this simple mobilizer.
 void calcReverseMobilizerHDot_FM(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0) );
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodeSlider_<Real> RBNodeSlider;
 
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_SLIDER_H_
