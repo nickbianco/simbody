@@ -662,6 +662,286 @@ void testCantileverFreeBeamEnergyConservation() {
     }
 }
 
+// ---------------------------------------------------------------------------
+//                      MIRRORED ELLIPSOID MOBILIZER
+// ---------------------------------------------------------------------------
+// MobilizedBody::Ellipsoid can be built as the mirror image of the standard
+// joint about one of the axes of its inboard frame F. The helpers below
+// re-derive the expected sign conventions independently of the implementation:
+// mirroring about axis k reflects linear quantities measured in F with
+// S=diag(s), s[k]=-1, and angular ones with -S, which negates every measure
+// number except the one about axis k. Thus
+//
+//      R_FM -> S R_FM S      p_FM -> S p_FM      w_FM -> -S w_FM
+//
+// while the q's, the u's, and N(q) are the same as for the standard joint.
+
+static Vec3 mirrorLinear(const Vec3& v_F, int k) {
+    Vec3 out = v_F; out[k] = -out[k]; return out;
+}
+
+static Vec3 mirrorAngular(const Vec3& w_F, int k) {
+    Vec3 out = -w_F; out[k] = w_F[k]; return out;
+}
+
+static Rotation mirrorRotation(const Rotation& R_FM, int k) {
+    Mat33 R = R_FM.asMat33();   // element (i,j) picks up s[i]*s[j]
+    for (int i = 0; i < 3; ++i)
+        if (i != k) { R(k,i) = -R(k,i); R(i,k) = -R(i,k); }
+    return Rotation(R, true);
+}
+
+static Transform mirrorTransform(const Transform& X_FM, int k) {
+    return Transform(mirrorRotation(X_FM.R(), k), mirrorLinear(X_FM.p(), k));
+}
+
+static SpatialVec mirrorVelocity(const SpatialVec& V_FM, int k) {
+    return SpatialVec(mirrorAngular(V_FM[0], k), mirrorLinear(V_FM[1], k));
+}
+
+// Copy one mobilizer's q's and u's onto another one that has the same
+// mobilizer type, so that both joints are driven by identical coordinates. We
+// can't use setQ()/setU() here because those are Vec4/Vec3 specific and we also
+// want to run in Euler angle mode, where the Ellipsoid has only three q's.
+static void copyQAndU(const MobilizedBody& from, const MobilizedBody& to,
+                      State& state) {
+    const int nq = from.getNumQ(state), nu = from.getNumU(state);
+    SimTK_TEST(to.getNumQ(state) == nq && to.getNumU(state) == nu);
+    const QIndex qf = from.getFirstQIndex(state), qt = to.getFirstQIndex(state);
+    const UIndex uf = from.getFirstUIndex(state), ut = to.getFirstUIndex(state);
+    for (int i = 0; i < nq; ++i) state.updQ()[qt+i] = state.getQ()[qf+i];
+    for (int i = 0; i < nu; ++i) state.updU()[ut+i] = state.getU()[uf+i];
+}
+
+// A mirrored Ellipsoid driven by the same q and u as a standard one must
+// produce exactly the reflected cross-mobilizer transform and velocity, and
+// must leave qdot=N(q)*u alone.
+void testEllipsoidMirroredKinematics() {
+    const Vec3      radii(0.8, 1.5, 1.0);   // deliberately not a sphere
+    const Transform X_PF(Rotation(0.3, Vec3(1,-2,3)), Vec3(0.1, 0.5, -1));
+    const Transform X_BM(Rotation(-0.7, Vec3(2,1,-1)), Vec3(0.2, -0.2, 0.05));
+
+    for (int useEulerAngles = 0; useEulerAngles <= 1; ++useEulerAngles)
+    for (int k = 0; k < 3; ++k) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        Body::Rigid body(MassProperties(3.1, Vec3(.1,.2,.3),
+                         UnitInertia(1.2,1.1,1.3,.01,.02,.03)));
+
+        MobilizedBody::Ellipsoid standard(matter.updGround(), X_PF,
+                                          body, X_BM, radii);
+        MobilizedBody::Ellipsoid mirrored(matter.updGround(), X_PF,
+                                          body, X_BM, radii, CoordinateAxis(k));
+
+        SimTK_TEST(!standard.isMirrored());
+        SimTK_TEST(mirrored.isMirrored());
+        SimTK_TEST(mirrored.getMirrorAxis() == CoordinateAxis(k));
+
+        system.realizeTopology();
+        State state = system.getDefaultState();
+        matter.setUseEulerAngles(state, useEulerAngles != 0);
+        system.realizeModel(state);
+
+        // Put the standard joint somewhere arbitrary and copy its coordinates
+        // onto the mirrored one.
+        standard.setQToFitRotation(state, Rotation(Pi/5, Vec3(1.1,-2.2,3.4)));
+        standard.setUToFitAngularVelocity(state, Vec3(-3, .4, -.7));
+        copyQAndU(standard, mirrored, state);
+        system.realize(state, Stage::Velocity);
+
+        const Transform&  X_FM_std = standard.getMobilizerTransform(state);
+        const Transform&  X_FM_mir = mirrored.getMobilizerTransform(state);
+        const SpatialVec& V_FM_std = standard.getMobilizerVelocity(state);
+        const SpatialVec& V_FM_mir = mirrored.getMobilizerVelocity(state);
+
+        SimTK_TEST_EQ(X_FM_mir, mirrorTransform(X_FM_std, k));
+        SimTK_TEST_EQ(V_FM_mir, mirrorVelocity(V_FM_std, k));
+
+        // The mirrored M origin must still lie on the ellipsoid surface.
+        const Vec3 p = X_FM_mir.p();
+        SimTK_TEST_EQ(square(p[0]/radii[0]) + square(p[1]/radii[1])
+                                            + square(p[2]/radii[2]), Real(1));
+
+        // The generalized speeds remain those of the standard joint, so the
+        // mirrored joint's actual angular velocity is -S*u.
+        const Vec3 u = Vec3::getAs(&state.getU()[mirrored.getFirstUIndex(state)]);
+        SimTK_TEST_EQ(V_FM_std[0], u);
+        SimTK_TEST_EQ(V_FM_mir[0], mirrorAngular(u, k));
+
+        // N(q) is unaffected by mirroring, so with identical q and u the two
+        // joints must produce identical qdot.
+        const int nq = standard.getNumQ(state);
+        const QIndex qs = standard.getFirstQIndex(state);
+        const QIndex qm = mirrored.getFirstQIndex(state);
+        for (int i = 0; i < nq; ++i)
+            SimTK_TEST_EQ(state.getQDot()[qm+i], state.getQDot()[qs+i]);
+    }
+}
+
+// Check H_FM and HDot_FM of a mirrored Ellipsoid against finite differences.
+// Holding u fixed and marching q along qdot=N(q)*u, the cross-mobilizer
+// transforms must differentiate to V_FM=H_FM*u, and the body spatial
+// velocities V_GB=J*u must differentiate to the accelerations A_GB=Jdot*u that
+// the subsystem reports for udot=0.
+void testEllipsoidMirroredJacobians() {
+    const Transform X_PF(Rotation(0.3, Vec3(1,-2,3)), Vec3(0.1, 0.5, -1));
+    const Transform X_BM(Rotation(-0.7, Vec3(2,1,-1)), Vec3(0.2, -0.2, 0.05));
+
+    for (int useEulerAngles = 0; useEulerAngles <= 1; ++useEulerAngles)
+    for (int k = 0; k < 3; ++k) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        Body::Rigid body(MassProperties(3.1, Vec3(.1,.2,.3),
+                         UnitInertia(1.2,1.1,1.3,.01,.02,.03)));
+
+        // Two mirrored ellipsoids in series, so that the second one's F frame
+        // is moving and the velocity Jacobian terms couple across bodies.
+        MobilizedBody::Ellipsoid mobod1(matter.updGround(), X_PF, body, X_BM,
+                                        Vec3(0.8, 1.5, 1.0), CoordinateAxis(k));
+        MobilizedBody::Ellipsoid mobod2(mobod1, X_BM, body, X_PF,
+                                        Vec3(1.4, 0.6, 0.9), CoordinateAxis(k));
+
+        system.realizeTopology();
+        State state = system.getDefaultState();
+        matter.setUseEulerAngles(state, useEulerAngles != 0);
+        system.realizeModel(state);
+
+        mobod1.setQToFitRotation(state, Rotation(Pi/5, Vec3(1.1,-2.2,3.4)));
+        mobod2.setQToFitRotation(state, Rotation(-1.1, Vec3(-3, 2, 4)));
+        mobod1.setUToFitAngularVelocity(state, Vec3(-3, .4, -.7));
+        mobod2.setUToFitAngularVelocity(state, Vec3(1.3, -2.1, .9));
+        system.realize(state, Stage::Velocity);
+
+        // A_GB = Jdot*u, that is, the time derivative of V_GB at constant u.
+        Vector_<SpatialVec> A_GB;
+        matter.calcBodyAccelerationFromUDot(state,
+            Vector(matter.getNumMobilities(), Real(0)), A_GB);
+
+        // Step q along qdot, leaving u alone.
+        const Real h = Real(1e-6);
+        const Vector q0 = state.getQ(), qdot = state.getQDot();
+        State sp = state, sm = state;
+        sp.updQ() = q0 + h*qdot;
+        sm.updQ() = q0 - h*qdot;
+        system.realize(sp, Stage::Velocity);
+        system.realize(sm, Stage::Velocity);
+
+        const MobilizedBody* mobods[2] = {&mobod1, &mobod2};
+        for (int b = 0; b < 2; ++b) {
+            const MobilizedBody& mobod = *mobods[b];
+
+            // d/dt X_FM must be V_FM = H_FM*u. The angular velocity comes from
+            // Rdot = [w]*R, so [w] = Rdot*~R.
+            const Transform& Xp = mobod.getMobilizerTransform(sp);
+            const Transform& Xm = mobod.getMobilizerTransform(sm);
+            const Mat33 Rdot = (Xp.R().asMat33() - Xm.R().asMat33()) / (2*h);
+            const Mat33 wx   = Rdot * ~mobod.getMobilizerTransform(state)
+                                            .R().asMat33();
+            const SpatialVec V_FM_fd(Vec3(wx(2,1), wx(0,2), wx(1,0)),
+                                     (Xp.p() - Xm.p()) / (2*h));
+            SimTK_TEST_EQ_TOL(V_FM_fd, mobod.getMobilizerVelocity(state), 1e-6);
+
+            // d/dt V_GB at constant u must be A_GB.
+            const SpatialVec A_GB_fd =
+                (mobod.getBodyVelocity(sp) - mobod.getBodyVelocity(sm)) / (2*h);
+            SimTK_TEST_EQ_TOL(A_GB_fd, A_GB[mobod.getMobilizedBodyIndex()],
+                              1e-5);
+        }
+    }
+}
+
+// The methods that work in terms of X_FM and V_FM rather than q and u must
+// account for the mirroring. The Ellipsoid's translation and linear velocity
+// fits are only approximate even for the standard joint, so rather than
+// checking them against the request we check that fitting the mirrored joint
+// to a reflected request lands on exactly the reflected result.
+void testEllipsoidMirroredFitMethods() {
+    const Vec3      radii(0.8, 1.5, 1.0);
+    const Rotation  R_FM(-1.9, Vec3(-3, 2, 4));
+    const Vec3      p_FM(-0.33, 0.66, -0.99);
+    const SpatialVec V_FM(Vec3(-3, .4, -.7), Vec3(1, .2, .3));
+
+    for (int k = 0; k < 3; ++k) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        Body::Rigid body(MassProperties(1.0, Vec3(0), Inertia(1)));
+
+        MobilizedBody::Ellipsoid standard(matter.updGround(), body, radii);
+        MobilizedBody::Ellipsoid mirrored(matter.updGround(), body, radii,
+                                          CoordinateAxis(k));
+
+        // setDefaultRotation() speaks the actual R_FM, so it must store the
+        // unmirrored rotation and report the mirrored one back.
+        mirrored.setDefaultRotation(R_FM);
+        standard.setDefaultRotation(mirrorRotation(R_FM, k));
+        SimTK_TEST_EQ(mirrored.getDefaultRotation(), R_FM);
+        SimTK_TEST_EQ(mirrored.getDefaultQ().asVec4(),
+                      standard.getDefaultQ().asVec4());
+
+        system.realizeTopology();
+        State state = system.getDefaultState();
+        system.realizeModel(state);
+
+        // A rotation is exactly representable, so this one must come back.
+        mirrored.setQToFitRotation(state, R_FM);
+        system.realize(state, Stage::Position);
+        SimTK_TEST_EQ(mirrored.getMobilizerTransform(state).R(), R_FM);
+
+        // The remaining fits are approximate, so compare the two joints
+        // instead: reflected requests must give identical coordinates.
+        standard.setQToFitTransform(state, Transform(R_FM, p_FM));
+        mirrored.setQToFitTransform(state,
+            mirrorTransform(Transform(R_FM, p_FM), k));
+        standard.setUToFitVelocity(state, V_FM);
+        mirrored.setUToFitVelocity(state, mirrorVelocity(V_FM, k));
+        SimTK_TEST_EQ(mirrored.getQ(state), standard.getQ(state));
+        SimTK_TEST_EQ(mirrored.getU(state), standard.getU(state));
+
+        system.realize(state, Stage::Velocity);
+        SimTK_TEST_EQ(mirrored.getMobilizerTransform(state),
+            mirrorTransform(standard.getMobilizerTransform(state), k));
+        SimTK_TEST_EQ(mirrored.getMobilizerVelocity(state),
+            mirrorVelocity(standard.getMobilizerVelocity(state), k));
+    }
+}
+
+// A mirrored Ellipsoid pendulum must conserve energy. HDot_FM enters the
+// equations of motion through the Coriolis terms, so an error there shows up
+// here even though it is invisible to the position-level checks above.
+void testEllipsoidMirroredEnergyConservation() {
+    for (int k = 0; k < 3; ++k) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        GeneralForceSubsystem forces(system);
+        Force::UniformGravity gravity(forces, matter, Vec3(0, -9.81, 0));
+
+        Body::Rigid body(MassProperties(3.1, Vec3(.1,.2,.3),
+                         UnitInertia(1.2,1.1,1.3,.01,.02,.03)));
+
+        MobilizedBody::Ellipsoid pendulum(matter.updGround(),
+            Transform(Rotation(Pi/7, Vec3(1,2,-1)), Vec3(0, 1, 0)),
+            body, Transform(Vec3(0.1, -0.2, 0.3)),
+            Vec3(0.8, 1.5, 1.0), CoordinateAxis(k));
+
+        State state = system.realizeTopology();
+        pendulum.setQToFitRotation(state, Rotation(Pi/5, Vec3(1.1,-2.2,3.4)));
+        pendulum.setU(state, Vec3(1.5, -0.7, 2.1));
+        system.realize(state, Stage::Dynamics);
+        const Real initialEnergy = system.calcEnergy(state);
+
+        RungeKuttaMersonIntegrator integ(system);
+        integ.setAccuracy(1e-10);
+        TimeStepper ts(system, integ);
+        ts.initialize(state);
+
+        for (int i = 1; i <= 200; ++i) {
+            ts.stepTo(i*Real(1e-2));
+            SimTK_TEST_EQ_TOL(initialEnergy,
+                              system.calcEnergy(ts.getState()), 1e-8);
+        }
+    }
+}
+
 void testVariableMobilizerFrames() {
 
     // Create a system with two bodies.
@@ -717,6 +997,10 @@ int main() {
         SimTK_SUBTEST(testBushing);
         SimTK_SUBTEST(testCantileverFreeBeam);
         SimTK_SUBTEST(testCantileverFreeBeamEnergyConservation);
+        SimTK_SUBTEST(testEllipsoidMirroredKinematics);
+        SimTK_SUBTEST(testEllipsoidMirroredJacobians);
+        SimTK_SUBTEST(testEllipsoidMirroredFitMethods);
+        SimTK_SUBTEST(testEllipsoidMirroredEnergyConservation);
         SimTK_SUBTEST(testVariableMobilizerFrames);
     SimTK_END_TEST();
 }

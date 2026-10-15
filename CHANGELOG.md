@@ -8,6 +8,9 @@ PRs and issues that were included in a particular release.
 
 3.9 (in development)
 --------------------
+* `MobilizedBody::Ellipsoid` can now be constructed as the mirror image of the
+  standard joint about an axis of its inboard frame F, for building left/right
+  joint pairs driven by the same coordinates.
 * Added support for variable mobilizer inboard and outboard frames (PR #859)
 * `MobilizedBody::Translation` "lone particle" support has been removed  (PR #859)
 * Add MobilizedBody::CantileverFreeBeam, a mobilizer for modeling spinal joints and
