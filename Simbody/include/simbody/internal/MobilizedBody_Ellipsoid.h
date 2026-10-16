@@ -97,6 +97,16 @@ where diag(-S,S) is a 6x6 block diagonal sign matrix:
     diag(-S,S) = [        ]
                  [  0   S ]     S mirrors the linear (v_FM) rows
 </pre>
+
+The figure below shows a mirrored joint alongside its unmirrored partner; drag to
+orbit it. (If you are not reading the HTML documentation, it is the separate
+page <a href="EllipsoidMobilizer.html">EllipsoidMobilizer.html</a>.)
+
+@htmlonly
+<iframe src="EllipsoidMobilizer.html" title="Ellipsoid mobilizer mirroring"
+        width="1050" height="930" loading="lazy"
+        style="border:0; max-width:100%"></iframe>
+@endhtmlonly
 **/
 class SimTK_SIMBODY_EXPORT MobilizedBody::Ellipsoid : public MobilizedBody {
 public:

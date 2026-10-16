@@ -176,6 +176,18 @@ static void mirrorTransform(Transform& X_FM, int mirrorAxis) {
     mirrorLinear(X_FM.updP(), mirrorAxis);
 }
 
+// Recover axis j of the standard joint's M frame from the mirrored one, in
+// place. Column j of S*R*S is s[j]*S*(column j of R), so a single M axis
+// mirrors as an ordinary linear quantity, plus an overall sign change when it
+// is the mirrored axis itself. That saves forming S*R*S just to read one
+// column back out of it. Like the others this map is its own inverse.
+// (1 flop, or 4 when j is the mirrored axis)
+static void mirrorAxisOfM(Vec3& axis_F, int j, int mirrorAxis) {
+    if (mirrorAxis < 0) return;
+    mirrorLinear(axis_F, mirrorAxis);
+    if (j == mirrorAxis) axis_F = -axis_F;
+}
+
 // H -> diag(-S,S)*H for a hinge matrix H or its time derivative HDot. (6 flops)
 static void mirrorH(HType& H_F0M0, int mirrorAxis) {
     if (mirrorAxis < 0) return;
@@ -188,9 +200,8 @@ static void mirrorH(HType& H_F0M0, int mirrorAxis) {
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
                        Vector& q) const 
 {
-    // The q's parameterize the unmirrored rotation R(q), whose mirrored
-    // counterpart is S*R(q)*S. So to make the mobilizer's actual rotation come
-    // out as R_FM we have to fit the standard joint to S*R_FM*S instead.
+    // The coordinates are associated with an unmirrored rotation, so apply the
+    // mirroring operation beforce extracting the q's.
     Rotation R_F0M0 = R_FM;
     mirrorRotation(R_F0M0, mirrorAxis);
 
@@ -220,8 +231,8 @@ void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
 void setQToFitTranslationImpl(const SBStateDigest& sbs, const Vec3& p_FM, Vector& q) const {
     if (p_FM.norm() < Eps) return;
 
-    // As in setQToFitRotationImpl(), fit the standard joint to the unmirrored
-    // position S*p_FM.
+    // The coordinates are associated with an unmirrored rotation, so apply the
+    // mirroring operation beforce extracting the q's.
     Vec3 p_F0M0 = p_FM;
     mirrorLinear(p_F0M0, mirrorAxis);
 
@@ -254,8 +265,7 @@ void setQToFitTranslationImpl(const SBStateDigest& sbs, const Vec3& p_FM, Vector
 void setUToFitAngularVelocityImpl(const SBStateDigest& sbs, const Vector& q, const Vec3& w_FM,
                               Vector& u) const
 {
-    // The generalized speeds are the relative angular velocity of the
-    // *unmirrored* joint, which is -S*w_FM (and -S is its own inverse).
+    // If mirrored, u = -S*w_FM.
     Vec3 w_F0M0 = w_FM;
     mirrorAngular(w_F0M0, mirrorAxis);
     this->toU(u) = w_F0M0;
@@ -354,8 +364,7 @@ void calcX_FM(const SBStateDigest& sbs,
     const Vec3& n = X_F0M0.z(); // just calculated above
     X_F0M0.updP() = Vec3(semi[0]*n[0], semi[1]*n[1], semi[2]*n[2]);
 
-    // Mirroring, if any, is applied to the finished standard transform.
-    // (5 flops)
+    // Apply mirroring, if any. (5 flops)
     mirrorTransform(X_F0M0, mirrorAxis);
 }
 
@@ -370,16 +379,15 @@ void calcAcrossJointVelocityJacobian(
     // The normal is M's z axis, expressed in F but only in the frames we
     // used to *define* this mobilizer, not necessarily the ones used after
     // handling mobilizer reversal. We also want the normal of the standard
-    // (unmirrored) joint, so undo any mirroring here.
-    Transform X_F0M0 = this->findX_F0M0(pc);
-    mirrorTransform(X_F0M0, mirrorAxis);
-    const Vec3 n = X_F0M0.z();
+    // (unmirrored) joint, which is just a sign flip away from the mirrored one.
+    Vec3 n = this->findX_F0M0(pc).z();
+    mirrorAxisOfM(n, ZAxis, mirrorAxis);
 
     H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
     H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
     H_FM(2) = SpatialVec( Vec3(0,0,1), Vec3(-n[1]*semi[0], n[0]*semi[1],       0     ) );
 
-    // H_FM = diag(-S,S)*H(q) when mirrored. (6 flops)
+    // Apply mirroring, if any. (6 flops)
     mirrorH(H_FM, mirrorAxis);
 }
 
@@ -396,19 +404,18 @@ void calcAcrossJointVelocityJacobianDot(
     // using to compute it it (if it has been reversed). As in
     // calcAcrossJointVelocityJacobian() we also undo any mirroring so that we
     // are working with the standard joint, whose angular velocity is the u's.
-    Transform        X_F0M0 = this->findX_F0M0(pc);
+    Vec3             n      = this->findX_F0M0(pc).z();
     Vec3             w_F0M0 = this->find_w_F0M0(pc, vc);
-    mirrorTransform(X_F0M0, mirrorAxis);
+    mirrorAxisOfM(n, ZAxis, mirrorAxis);
     mirrorAngular(w_F0M0, mirrorAxis);
 
-    const Vec3       n      = X_F0M0.z();
     const Vec3       ndot   = w_F0M0 % n; // w_FM x n (9 flops)
 
     HDot_FM(0) = SpatialVec( Vec3(0), Vec3(      0,         -ndot[2]*semi[1], ndot[1]*semi[2]) );
     HDot_FM(1) = SpatialVec( Vec3(0), Vec3( ndot[2]*semi[0],       0,        -ndot[0]*semi[2]) );
     HDot_FM(2) = SpatialVec( Vec3(0), Vec3(-ndot[1]*semi[0], ndot[0]*semi[1],       0        ) );
 
-    // HDot_FM = diag(-S,S)*HDot(q,u) when mirrored. (6 flops)
+    // Apply mirroring, if any. (6 flops)
     mirrorH(HDot_FM, mirrorAxis);
 }
 
