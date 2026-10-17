@@ -120,7 +120,7 @@ RBNodeEllipsoid(const MassProperties& mProps_B,
 //                     [              |        ]
 //     X_FM_mirrored = [   S*R_FM*S   | S*p_FM ]
 //                     [..............|........]
-//                      0    0    0      1    ]
+//                     [ 0    0    0      1    ]
 //
 // The generalized coordinates and parameterize an unmirrored rotation and
 // generalized speeds the angular velocity of the unmirrored joint, so that N(q)
@@ -174,18 +174,6 @@ static void mirrorRotation(Rotation& R_FM, int mirrorAxis) {
 static void mirrorTransform(Transform& X_FM, int mirrorAxis) {
     mirrorRotation(X_FM.updR(), mirrorAxis);
     mirrorLinear(X_FM.updP(), mirrorAxis);
-}
-
-// Recover axis j of the standard joint's M frame from the mirrored one, in
-// place. Column j of S*R*S is s[j]*S*(column j of R), so a single M axis
-// mirrors as an ordinary linear quantity, plus an overall sign change when it
-// is the mirrored axis itself. That saves forming S*R*S just to read one
-// column back out of it. Like the others this map is its own inverse.
-// (1 flop, or 4 when j is the mirrored axis)
-static void mirrorAxisOfM(Vec3& axis_F, int j, int mirrorAxis) {
-    if (mirrorAxis < 0) return;
-    mirrorLinear(axis_F, mirrorAxis);
-    if (j == mirrorAxis) axis_F = -axis_F;
 }
 
 // H -> diag(-S,S)*H for a hinge matrix H or its time derivative HDot. (6 flops)
@@ -378,10 +366,14 @@ void calcAcrossJointVelocityJacobian(
 
     // The normal is M's z axis, expressed in F but only in the frames we
     // used to *define* this mobilizer, not necessarily the ones used after
-    // handling mobilizer reversal. We also want the normal of the standard
-    // (unmirrored) joint, which is just a sign flip away from the mirrored one.
+    // handling mobilizer reversal.
     Vec3 n = this->findX_F0M0(pc).z();
-    mirrorAxisOfM(n, ZAxis, mirrorAxis);
+
+    // We want the normal of the unmirrored joint. If the mirror is about the
+    // Z-axis, then the mirrored normal will point into the ellipsoid, which
+    // requires an additional negation.
+    mirrorLinear(n, mirrorAxis);      // 1 flop
+    if (mirrorAxis == ZAxis) n = -n;  // 3 flops
 
     H_FM(0) = SpatialVec( Vec3(1,0,0), Vec3(      0,      -n[2]*semi[1], n[1]*semi[2]) );
     H_FM(1) = SpatialVec( Vec3(0,1,0), Vec3( n[2]*semi[0],       0,     -n[0]*semi[2]) );
@@ -401,12 +393,14 @@ void calcAcrossJointVelocityJacobianDot(
 
     // We need the normal and cross-joint velocity in the frames we're 
     // using to *define* the mobilizer, not necessarily the frames we're 
-    // using to compute it it (if it has been reversed). As in
-    // calcAcrossJointVelocityJacobian() we also undo any mirroring so that we
-    // are working with the standard joint, whose angular velocity is the u's.
+    // using to compute it it (if it has been reversed).
     Vec3             n      = this->findX_F0M0(pc).z();
     Vec3             w_F0M0 = this->find_w_F0M0(pc, vc);
-    mirrorAxisOfM(n, ZAxis, mirrorAxis);
+
+    // As in calcAcrossJointVelocityJacobian(), undo any mirroring both in the
+    // normal vector and the angular velocity.
+    mirrorLinear(n, mirrorAxis);
+    if (mirrorAxis == ZAxis) n = -n;
     mirrorAngular(w_F0M0, mirrorAxis);
 
     const Vec3       ndot   = w_F0M0 % n; // w_FM x n (9 flops)
