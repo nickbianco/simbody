@@ -38,8 +38,10 @@ the resulting tau against calcResidualForceIgnoringConstraints(). */
 
 #include "SimTKsimbody.h"
 
+#include <chrono>
 #include <cstdio>
 #include <iostream>
+#include <vector>
 
 using namespace SimTK;
 using std::cout;
@@ -47,6 +49,12 @@ using std::endl;
 
 
 static const Vec3 GravityVec(0, -9.81, 0);
+
+// Jain's Htilde*_w applied to a single spatial vector: the angular-only
+// cross-product operator diag(w~, w~).
+static SpatialVec angularCross(const Vec3& w, const SpatialVec& X) {
+    return SpatialVec(w % X[0], w % X[1]);
+}
 
 
 //==============================================================================
@@ -207,10 +215,35 @@ public:
             mc.mass             = mp.getMass();
             mc.com_B            = mp.getMassCenter();
             mc.unitInertia_Bo_B = mp.getUnitInertia();
+            mc.p_BoMo_B         = mobod.getOutboardFrame(state).p();
             mc.qx = mobod.getFirstQIndex(state);
             mc.ux = mobod.getFirstUIndex(state);
             mc.nu = mobod.getNumU(state);
         }
+
+        const int nb = pendulum.getNumBodies();
+        m_subtree.resize(nb);
+        m_path.resize(nb);
+        for (MobilizedBodyIndex k(1); k < nb; ++k)
+            for (MobilizedBodyIndex b = k; b != 0; b = m_cache[b].parent)
+                m_subtree[b].push_back(k);
+        for (MobilizedBodyIndex i(1); i < nb; ++i)
+            for (MobilizedBodyIndex b = m_cache[i].parent; b != 0;
+                 b = m_cache[b].parent)
+                m_path[i].push_back(b);
+
+        const SpatialVec zeroV(Vec3(0), Vec3(0));
+        const SpatialMat zeroM(Mat33(0), Mat33(0), Mat33(0), Mat33(0));
+        m_dPhi.resize(nb); m_dM.resize(nb);
+        m_dV.resize(nb); m_dA.resize(nb); m_dF.resize(nb);
+        m_eV.resize(nb); m_eA.resize(nb); m_eF.resize(nb);
+        for (MobilizedBodyIndex k(0); k < nb; ++k) {
+            m_dPhi[k] = m_dM[k] = zeroM;
+            m_dV[k] = m_dA[k] = m_dF[k] = zeroV;
+            m_eV[k] = m_eA[k] = m_eF[k] = zeroV;
+        }
+        m_dH.resize(nu);
+        for (UIndex ux(0); ux < nu; ++ux) m_dH[ux] = zeroV;
     }
 
     void realizePosition(const Vector& q) {
@@ -224,6 +257,7 @@ public:
     }
 
     void realizeVelocity(const Vector& u) {
+        m_u = u;
         const SpatialVec zero(Vec3(0), Vec3(0));
         m_cache[MobilizedBodyIndex(0)].V_GB = zero;
         m_cache[MobilizedBodyIndex(0)].totalCoriolisAcceleration = zero;
@@ -261,6 +295,30 @@ public:
             calcInverseDynamicsPass2Inward(mbx, mobilityForces, bodyForces, tau);
     }
 
+    // Derivatives of tau with respect to q and u. Requires realizePosition(),
+    // realizeVelocity() and calcInverseDynamics() to have run: this reuses
+    // their cached Phi, H, Mk_mat, V_GB, A_GB and the composite transmitted
+    // force F. Column (i,d) of each Jacobian is the derivative along that
+    // coordinate; row ux is the affected mobility.
+    //
+    // Two things make this cheaper than calling a per-direction routine nu
+    // times. First, everything depending only on (q,u,udot) is computed once by
+    // the passes above instead of being rebuilt for each column -- the naive
+    // version repeats a full acceleration pass and a full force pass per
+    // column. Second, every primitive sensitivity carries an i >= k condition,
+    // so for a perturbation at joint i they all vanish outside the subtree
+    // rooted at i, and dF is nonzero only on that subtree plus i's path to
+    // Ground. The sweeps visit exactly those bodies rather than all nb.
+    void calcInverseDynamicsDerivatives(const Vector& knownUdot,
+                                        Matrix& dtau_dq, Matrix& dtau_du) {
+        const int nu = (int)m_H.size();
+        dtau_dq.resize(nu, nu); dtau_dq.setToZero();
+        dtau_du.resize(nu, nu); dtau_du.setToZero();
+        for (MobilizedBodyIndex i(1); i < m_cache.size(); ++i)
+            for (int d = 0; d < m_cache[i].nu; ++d)
+                calcDerivativeColumn(i, d, knownUdot, dtau_dq, dtau_du);
+    }
+
     const SpatialVec& getH(UIndex ux) const {return m_H[ux];}
     const SpatialVec& getV_GB(MobilizedBodyIndex mbx) const
     {   return m_cache[mbx].V_GB; }
@@ -288,6 +346,7 @@ private:
         Real                mass{NaN};
         Vec3                com_B{NaN, NaN, NaN};
         UnitInertia         unitInertia_Bo_B;
+        Vec3                p_BoMo_B;
         QIndex              qx;
         UIndex              ux;
         int                 nu{0};
@@ -297,6 +356,8 @@ private:
         PhiMatrix           Phi;
         Vec3                COM_G;
         SpatialInertia      Mk_G;
+        SpatialMat          Mk_mat;   // Mk_G as a dense 6x6, built once
+        Vec3                rho_G;    // p_BoMo in Ground, fixed in this body
 
         // Velocity.
         SpatialVec          V_FM, V_PB_G, VD_PB_G, V_GB;
@@ -306,6 +367,150 @@ private:
         // Acceleration.
         SpatialVec          A_GB, F;
     };
+
+    // One column of dtau/dq and dtau/du, for the d-th free mode of joint i.
+    void calcDerivativeColumn(MobilizedBodyIndex i, int d,
+                              const Vector& knownUdot,
+                              Matrix& dtau_dq, Matrix& dtau_du) {
+        const SpatialVec zeroV(Vec3(0), Vec3(0));
+        const SpatialMat zeroM(Mat33(0), Mat33(0), Mat33(0), Mat33(0));
+        const UIndex col(m_cache[i].ux + d);
+        const SpatialVec& H_i = m_H[col];
+        const Vec3&       w_i = H_i[0];
+
+        // Reset only what this column writes.
+        for (MobilizedBodyIndex k : m_subtree[i]) {
+            m_dPhi[k] = m_dM[k] = zeroM;
+            m_dV[k] = m_dA[k] = m_dF[k] = zeroV;
+            m_eV[k] = m_eA[k] = m_eF[k] = zeroV;
+            for (int e = 0; e < m_cache[k].nu; ++e)
+                m_dH[UIndex(m_cache[k].ux+e)] = zeroV;
+        }
+        for (MobilizedBodyIndex k : m_path[i]) {
+            m_dV[k] = m_dA[k] = m_dF[k] = zeroV;
+            m_eV[k] = m_eA[k] = m_eF[k] = zeroV;
+        }
+        m_dF[MobilizedBodyIndex(0)] = m_eF[MobilizedBodyIndex(0)] = zeroV;
+
+        // Jain's Htilde*_w(i), shared by 18.29a and 18.29c.
+        const SpatialMat Wi(crossMat(w_i), Mat33(0), Mat33(0), crossMat(w_i));
+
+        //---- outward over the subtree, base to tip -------------------------
+        for (MobilizedBodyIndex k : m_subtree[i]) {
+            MobodCache& mc = m_cache[k];
+            const MobodCache& pc = m_cache[mc.parent];
+            const bool self = (k == i);   // inside the subtree, k != i => i > k
+
+            // 18.29a, 18.29b, 18.29c.
+            const SpatialMat PhiMat = mc.Phi.toSpatialMat();
+            m_dPhi[k] = self ? SpatialMat(Mat33(0), crossMat(H_i[1]),
+                                          Mat33(0), Mat33(0))
+                             : SpatialMat(Wi*PhiMat - PhiMat*Wi);
+            m_dM[k] = Wi*mc.Mk_mat - mc.Mk_mat*Wi;
+            for (int e = 0; e < mc.nu; ++e) {
+                const UIndex ux(mc.ux+e);
+                const SpatialVec& H_ke = m_H[ux];
+                m_dH[ux] = self
+                    ? SpatialVec(Vec3(0), -(H_ke[0] % (w_i % mc.rho_G)))
+                    : SpatialVec(w_i % H_ke[0], w_i % H_ke[1]);
+            }
+
+            // dV/dq and dV/du, with their cross-mobilizer increments.
+            SpatialVec dV  = (~m_dPhi[k]) * pc.V_GB + (~mc.Phi) * m_dV[mc.parent];
+            SpatialVec dVr = zeroV;
+            for (int e = 0; e < mc.nu; ++e) {
+                const UIndex ux(mc.ux+e);
+                dVr += m_dH[ux] * m_u[ux];
+            }
+            dV += dVr;
+            m_dV[k] = dV;
+
+            SpatialVec eV = (~mc.Phi) * m_eV[mc.parent];
+            if (self) eV += H_i;
+            m_eV[k] = eV;
+            const SpatialVec eVr = self ? H_i : zeroV;
+
+            // da_c, from the closed form for the cross-mobilizer Coriolis term.
+            const SpatialVec& Vr = mc.V_PB_G;
+            const Vec3& wp  = pc.V_GB[0];
+            const Vec3& wr  = Vr[0];
+            const Vec3& dwp = m_dV[mc.parent][0];
+            const Vec3& ewp = m_eV[mc.parent][0];
+            const Vec3  dwr = dVr[0], ewr = eVr[0];
+            const Vec3  dr  = w_i % mc.rho_G;   // k is in subtree(i) throughout
+
+            const SpatialVec da_c =
+                  SpatialVec(Vec3(0), dwp % (mc.V_GB[1] - pc.V_GB[1])
+                                    + wp  % (m_dV[k][1] - m_dV[mc.parent][1]))
+                + SpatialVec(dwp % Vr[0] + wp % dVr[0],
+                             dwp % Vr[1] + wp % dVr[1])
+                + SpatialVec(Vec3(0), -(dwr % (wr % mc.rho_G))
+                                      -(wr  % (dwr % mc.rho_G))
+                                      -(wr  % (wr  % dr)));
+
+            SpatialVec dA = (~m_dPhi[k]) * pc.A_GB
+                          + (~mc.Phi) * m_dA[mc.parent] + da_c;
+            for (int e = 0; e < mc.nu; ++e) {
+                const UIndex ux(mc.ux+e);
+                dA += m_dH[ux] * knownUdot[ux];
+            }
+            m_dA[k] = dA;
+
+            // The u-side drops the dr term (rho is configuration-only).
+            const SpatialVec ea_c =
+                  SpatialVec(Vec3(0), ewp % (mc.V_GB[1] - pc.V_GB[1])
+                                    + wp  % (m_eV[k][1] - m_eV[mc.parent][1]))
+                + SpatialVec(ewp % Vr[0] + wp % eVr[0],
+                             ewp % Vr[1] + wp % eVr[1])
+                + SpatialVec(Vec3(0), -(ewr % (wr % mc.rho_G))
+                                      -(wr  % (ewr % mc.rho_G)));
+            m_eA[k] = (~mc.Phi) * m_eA[mc.parent] + ea_c;
+        }
+
+        //---- inward over the subtree, tip to base ---------------------------
+        for (int n = (int)m_subtree[i].size()-1; n >= 0; --n) {
+            const MobilizedBodyIndex k = m_subtree[i][n];
+            MobodCache& mc = m_cache[k];
+            const SpatialMat& M = mc.Mk_mat;
+            const Vec3& w  = mc.V_GB[0];
+            const Vec3& dw = m_dV[k][0];
+            const Vec3& ew = m_eV[k][0];
+
+            // b = W(w)[M (w,0)], so db and db/du follow from dV and 18.29c.
+            const SpatialVec P  = M * SpatialVec(w, Vec3(0));
+            const SpatialVec dP = m_dM[k] * SpatialVec(w, Vec3(0))
+                                + M * SpatialVec(dw, Vec3(0));
+            const SpatialVec eP = M * SpatialVec(ew, Vec3(0));
+            const SpatialVec db = angularCross(dw, P) + angularCross(w, dP);
+            const SpatialVec eb = angularCross(ew, P) + angularCross(w, eP);
+
+            m_dF[k] += m_dM[k] * mc.A_GB + M * m_dA[k] + db;
+            m_eF[k] += M * m_eA[k] + eb;
+
+            for (int e = 0; e < mc.nu; ++e) {
+                const UIndex ux(mc.ux+e);
+                dtau_dq(ux, col) = dot(m_dH[ux], mc.F) + dot(m_H[ux], m_dF[k]);
+                dtau_du(ux, col) = dot(m_H[ux], m_eF[k]);
+            }
+
+            m_dF[mc.parent] += m_dPhi[k] * mc.F + mc.Phi * m_dF[k];
+            m_eF[mc.parent] += mc.Phi * m_eF[k];
+        }
+
+        //---- continue up i's path to Ground ---------------------------------
+        // Above i the body terms all vanish, and dPhi does too, so only the
+        // transmitted force keeps propagating.
+        for (MobilizedBodyIndex k : m_path[i]) {
+            const MobodCache& mc = m_cache[k];
+            for (int e = 0; e < mc.nu; ++e) {
+                const UIndex ux(mc.ux+e);
+                dtau_dq(ux, col) = dot(m_H[ux], m_dF[k]);
+                dtau_du(ux, col) = dot(m_H[ux], m_eF[k]);
+            }
+            m_dF[mc.parent] += mc.Phi * m_dF[k];
+            m_eF[mc.parent] += mc.Phi * m_eF[k];
+        }
+    }
 
     static SpatialVec reexpress(const Rotation& R, const SpatialVec& H)
     {   return SpatialVec(R*H[0], R*H[1]); }
@@ -416,7 +621,9 @@ private:
         const UnitInertia G_Bo_G = mc.unitInertia_Bo_B.reexpress(~R_GB);
         const Vec3 p_BBc_G = R_GB * mc.com_B;
         mc.COM_G = mc.X_GB.p() + p_BBc_G;
-        mc.Mk_G  = SpatialInertia(mc.mass, p_BBc_G, G_Bo_G);
+        mc.Mk_G   = SpatialInertia(mc.mass, p_BBc_G, G_Bo_G);
+        mc.Mk_mat = mc.Mk_G.toSpatialMat();
+        mc.rho_G  = R_GB * mc.p_BoMo_B;
     }
 
     // V_GB, the gyroscopic force b, and the velocity-dependent remainder
@@ -473,6 +680,19 @@ private:
     const SimbodyMatterSubsystem&          m_matter;
     Array_<MobodCache, MobilizedBodyIndex> m_cache;
     Array_<SpatialVec, UIndex>             m_H_FM, m_H, m_HDot_FM, m_HDot;
+    Vector                                 m_u;
+
+    // Topology, precomputed once. m_subtree[i] lists the bodies k for which i
+    // is an ancestor (inclusive), in ascending index order, which is also
+    // base-to-tip order. m_path[i] lists i's strict ancestors below Ground,
+    // ordered away from i. Every derivative sweep is restricted to these.
+    std::vector<std::vector<MobilizedBodyIndex>> m_subtree, m_path;
+
+    // Per-column scratch, allocated once and reset only over the touched set.
+    Array_<SpatialMat, MobilizedBodyIndex> m_dPhi, m_dM;
+    Array_<SpatialVec, UIndex>             m_dH;
+    Array_<SpatialVec, MobilizedBodyIndex> m_dV, m_dA, m_dF;
+    Array_<SpatialVec, MobilizedBodyIndex> m_eV, m_eA, m_eF;
 };
 
 
@@ -485,6 +705,7 @@ private:
 //==============================================================================
 
 
+
 struct Derivatives {
     Vector_<SpatialVec> dVw_dqdot;          // 18.28a
     Vector_<SpatialVec> dVwParent_dqdot;    // 18.28b
@@ -494,6 +715,15 @@ struct Derivatives {
 
     Vector_<SpatialMat> dPhi_dq;            // 18.29a
     Vector_<SpatialVec> dH_dq;              // 18.29b
+    Vector_<SpatialMat> dM_dq;              // 18.29c
+
+    Vector_<SpatialVec> dV_dq;
+    Vector_<SpatialVec> dA_dq;
+    Vector              dtau_dq;
+
+    Vector_<SpatialVec> dV_du;
+    Vector_<SpatialVec> dA_du;
+    Vector              dtau_du;
 
     Derivatives(int nb, int nu)
     :   dVw_dqdot(nb, SpatialVec(Vec3(0), Vec3(0))),
@@ -502,20 +732,46 @@ struct Derivatives {
         dDeltaVv_dqdot(nb, SpatialVec(Vec3(0), Vec3(0))),
         dDeltaV_dqdot(nb, SpatialVec(Vec3(0), Vec3(0))),
         dPhi_dq(nb, SpatialMat(Mat33(0), Mat33(0), Mat33(0), Mat33(0))),
-        dH_dq(nu, SpatialVec(Vec3(0), Vec3(0))) {}
+        dH_dq(nu, SpatialVec(Vec3(0), Vec3(0))),
+        dM_dq(nb, SpatialMat(Mat33(0), Mat33(0), Mat33(0), Mat33(0))),
+        dV_dq(nb, SpatialVec(Vec3(0), Vec3(0))),
+        dA_dq(nb, SpatialVec(Vec3(0), Vec3(0))),
+        dtau_dq(nu, Real(0)),
+        dV_du(nb, SpatialVec(Vec3(0), Vec3(0))),
+        dA_du(nb, SpatialVec(Vec3(0), Vec3(0))),
+        dtau_du(nu, Real(0)) {}
 
-    static const int NumIdentities = 7;
+    static const int NumIdentities = 14;
+    // Columns [0,NumJainIdentities) are Jain's; the rest are Singh's.
+    static const int NumJainIdentities = 8;
 
     // Max |this - other| per identity, in the column order main() prints.
+    // Filled element-wise: Vec has no 11-argument constructor.
     Vec<NumIdentities> compare(const Derivatives& other) const {
-        return Vec<NumIdentities>(
-            maxAbsDiff(dVw_dqdot,       other.dVw_dqdot),
-            maxAbsDiff(dVwParent_dqdot, other.dVwParent_dqdot),
-            maxAbsDiff(dDeltaVw_dqdot,  other.dDeltaVw_dqdot),
-            maxAbsDiff(dDeltaVv_dqdot,  other.dDeltaVv_dqdot),
-            maxAbsDiff(dDeltaV_dqdot,   other.dDeltaV_dqdot),
-            maxAbsDiff(dPhi_dq,         other.dPhi_dq),
-            maxAbsDiff(dH_dq,           other.dH_dq));
+        Vec<NumIdentities> e;
+        e[0]  = maxAbsDiff(dVw_dqdot,       other.dVw_dqdot);
+        e[1]  = maxAbsDiff(dVwParent_dqdot, other.dVwParent_dqdot);
+        e[2]  = maxAbsDiff(dDeltaVw_dqdot,  other.dDeltaVw_dqdot);
+        e[3]  = maxAbsDiff(dDeltaVv_dqdot,  other.dDeltaVv_dqdot);
+        e[4]  = maxAbsDiff(dDeltaV_dqdot,   other.dDeltaV_dqdot);
+        e[5]  = maxAbsDiff(dPhi_dq,         other.dPhi_dq);
+        e[6]  = maxAbsDiff(dH_dq,           other.dH_dq);
+        e[7]  = maxAbsDiff(dM_dq,           other.dM_dq);
+        e[8]  = maxAbsDiff(dV_dq,           other.dV_dq);
+        e[9]  = maxAbsDiff(dA_dq,           other.dA_dq);
+        e[10] = maxAbsDiff(dtau_dq,         other.dtau_dq);
+        e[11] = maxAbsDiff(dV_du,           other.dV_du);
+        e[12] = maxAbsDiff(dA_du,           other.dA_du);
+        e[13] = maxAbsDiff(dtau_du,         other.dtau_du);
+        return e;
+    }
+
+    // Max |this| per identity, same column order. Reported alongside the
+    // errors so an identity that agrees only because both sides are zero is
+    // distinguishable from one that actually carries signal.
+    Vec<NumIdentities> magnitude() const {
+        const Derivatives zero(dVw_dqdot.size(), dH_dq.size());
+        return zero.compare(*this);
     }
 
     // Max over bodies and components. A sum would let errors of opposite sign
@@ -527,6 +783,13 @@ struct Derivatives {
             for (int r = 0; r < 2; ++r)
                 for (int c = 0; c < 3; ++c)
                     e = std::max(e, std::abs(a[k][r][c] - b[k][r][c]));
+        return e;
+    }
+
+    static Real maxAbsDiff(const Vector& a, const Vector& b) {
+        Real e = 0;
+        for (int k = 0; k < a.size(); ++k)
+            e = std::max(e, std::abs(a[k] - b[k]));
         return e;
     }
 
@@ -546,6 +809,9 @@ struct Derivatives {
 
 Derivatives calcFiniteDifferences(const SimbodyMatterSubsystem& matter,
                                   const State& state,
+                                  const Vector& knownUdot,
+                                  const Vector& mobilityForces,
+                                  const Vector_<SpatialVec>& bodyForces,
                                   MobilizedBodyIndex i, int d) {
 
     const MobilizedBody& mobod_i = matter.getMobilizedBody(i);
@@ -575,6 +841,21 @@ Derivatives calcFiniteDifferences(const SimbodyMatterSubsystem& matter,
     state_qm.updQ() -= h*Ne;
     matter.getSystem().realize(state_qp, Stage::Velocity);
     matter.getSystem().realize(state_qm, Stage::Velocity);
+
+    // Body accelerations at the perturbed configurations, holding udot FIXED.
+    // That is the right semantics for inverse dynamics: udot is a given input,
+    // not something recomputed from the dynamics at each perturbed q. Only
+    // Stage::Velocity is required.
+    Vector_<SpatialVec> A_qp, A_qm;
+    matter.calcBodyAccelerationFromUDot(state_qp, knownUdot, A_qp);
+    matter.calcBodyAccelerationFromUDot(state_qm, knownUdot, A_qm);
+
+    // The same at the u-perturbed states, for the dtau/du half. udot is held
+    // fixed here too: tau is a function of (q, u, udot) and we want the partial
+    // in u alone.
+    Vector_<SpatialVec> A_up, A_um;
+    matter.calcBodyAccelerationFromUDot(state_up, knownUdot, A_up);
+    matter.calcBodyAccelerationFromUDot(state_um, knownUdot, A_um);
 
     // Compute finite differences.
     const int nb = matter.getNumBodies();
@@ -633,13 +914,51 @@ Derivatives calcFiniteDifferences(const SimbodyMatterSubsystem& matter,
             derivatives.dH_dq[uxk] = (mobod_k.getHCol(state_qp, me)
                                     - mobod_k.getHCol(state_qm, me)) / (2*h);
         }
+
+        // dM(k) / dq_{i,d} (18.29c)
+        derivatives.dM_dq[k] =
+            (mobod_k.getBodySpatialInertiaInGround(state_qp).toSpatialMat()
+           - mobod_k.getBodySpatialInertiaInGround(state_qm).toSpatialMat())
+            / (2*h);
+
+        // dV(k) / dq_{i,d}
+        derivatives.dV_dq[k] = (mobod_k.getBodyVelocity(state_qp)
+                              - mobod_k.getBodyVelocity(state_qm)) / (2*h);
+
+        // dA(k) / dq_{i,d}
+        derivatives.dA_dq[k] = (A_qp[k] - A_qm[k]) / (2*h);
+
+        // dV(k) / du_{i,d} and dA(k) / du_{i,d}
+        derivatives.dV_du[k] = (mobod_k.getBodyVelocity(state_up)
+                              - mobod_k.getBodyVelocity(state_um)) / (2*h);
+        derivatives.dA_du[k] = (A_up[k] - A_um[k]) / (2*h);
     }
+
+    // dtau/dq_{i,d}
+    Vector tau_qp, tau_qm;
+    matter.calcResidualForceIgnoringConstraints(state_qp, mobilityForces,
+                                                bodyForces, knownUdot, tau_qp);
+    matter.calcResidualForceIgnoringConstraints(state_qm, mobilityForces,
+                                                bodyForces, knownUdot, tau_qm);
+    for (int ux = 0; ux < matter.getNumMobilities(); ++ux)
+        derivatives.dtau_dq[UIndex(ux)] = (tau_qp[ux] - tau_qm[ux]) / (2*h);
+
+    // dtau/du_{i,d}
+    Vector tau_up, tau_um;
+    matter.calcResidualForceIgnoringConstraints(state_up, mobilityForces,
+                                                bodyForces, knownUdot, tau_up);
+    matter.calcResidualForceIgnoringConstraints(state_um, mobilityForces,
+                                                bodyForces, knownUdot, tau_um);
+    for (int ux = 0; ux < matter.getNumMobilities(); ++ux)
+        derivatives.dtau_du[UIndex(ux)] = (tau_up[ux] - tau_um[ux]) / (2*h);
 
     return derivatives;
 }
 
 Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
                               const State& state,
+                              const Vector& knownUdot,
+                              const Vector_<SpatialVec>& bodyForces,
                               MobilizedBodyIndex i, int d) {
 
     auto isAncestorOf = [&](MobilizedBodyIndex i, MobilizedBodyIndex k) {
@@ -658,14 +977,19 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
 
     const SpatialVec& H_i = mobod_i.getHCol(state, MobilizerUIndex(d));
 
+    Vector_<SpatialVec> A_GB;
+    matter.calcBodyAccelerationFromUDot(state, knownUdot, A_GB);
+
     const int nb = matter.getNumBodies();
     Derivatives derivatives(nb, matter.getNumMobilities());
     for (MobilizedBodyIndex k(1); k < nb; ++k) {
         const MobilizedBody& mobod_k = matter.getMobilizedBody(k);
         const MobilizedBody& parent_k = mobod_k.getParentMobilizedBody();
         const MobilizedBodyIndex p_k = parent_k.getMobilizedBodyIndex();
-        const Vec3 p_PB_G = mobod_k.getBodyOriginLocation(state) -
-                            parent_k.getBodyOriginLocation(state);
+        const Transform X_PB = mobod_k.getInboardFrame(state)
+                             * mobod_k.getMobilizerTransform(state)
+                             * ~mobod_k.getOutboardFrame(state);
+        const Vec3 p_PB_G = parent_k.getBodyRotation(state) * X_PB.p();
         const PhiMatrix Phi(p_PB_G);
 
         // dV^w(k) / dqdot_{i,d} = H*_w(i) 1_[i >= k]            (18.28a)
@@ -693,6 +1017,10 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
             derivatives.dDeltaV_dqdot[k] = H_i;
         }
 
+        // Htilde*_w(i)
+        const SpatialMat tilde_Hw(crossMat(H_i[0]), Mat33(0),
+                                  Mat33(0),         crossMat(H_i[0]));
+
         // dPhi(p(k), k) / dq_{i,d}                              (18.29a)
         if (i == k) {
             derivatives.dPhi_dq[k] =
@@ -700,8 +1028,6 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
                            Mat33(0), Mat33(0));
 
         } else if (isAncestorOf(i, p_k)) {
-            SpatialMat tilde_Hw(crossMat(H_i[0]), Mat33(0),
-                                Mat33(0),         crossMat(H_i[0]));
             derivatives.dPhi_dq[k] = tilde_Hw*Phi - Phi*tilde_Hw;
         }
 
@@ -720,6 +1046,162 @@ Derivatives calcSensitivities(const SimbodyMatterSubsystem& matter,
                     SpatialVec(Vec3(0), -(H_k[0] % (H_i[0] % p_BoMo_G)));
             }
         }
+
+        // dM(k) / dq_{i,d}                                      (18.29c)
+        if (isAncestorOf(i, k)) {
+            const SpatialMat Mk =
+                mobod_k.getBodySpatialInertiaInGround(state).toSpatialMat();
+            derivatives.dM_dq[k] = tilde_Hw*Mk - Mk*tilde_Hw;
+        }
+
+        // dV(k) / dq_{i,d}
+        const SpatialVec& V_GP = parent_k.getBodyVelocity(state);
+        SpatialVec dV = (~derivatives.dPhi_dq[k]) * V_GP
+                      + (~Phi) * derivatives.dV_dq[p_k];
+        for (int e = 0; e < mobod_k.getNumU(state); ++e) {
+            const UIndex uxk(mobod_k.getFirstUIndex(state) + e);
+            dV += derivatives.dH_dq[uxk] * state.getU()[uxk];
+        }
+        derivatives.dV_dq[k] = dV;
+
+        // dA(k) / dq_{i,d} at fixed udot
+        //
+        // Differentiate Simbody's own acceleration recursion
+        //     A(k) = ~Phi(p,k) A(p) + sum_e H(k,e) udot(k,e) + a_c(k)
+        //
+        // Simbody's a_c is exactly
+        //     a_c = (0, wp x (v_k - v_p)) + (wp x Vr[0], wp x Vr[1])
+        //                                 + (0, -wr x (wr x r))
+        const SpatialVec& Vp = V_GP;
+        const SpatialVec& dVp = derivatives.dV_dq[p_k];
+        const SpatialVec& Vk = mobod_k.getBodyVelocity(state);
+        const SpatialVec& dVk = derivatives.dV_dq[k];
+
+        SpatialVec Vr(Vec3(0), Vec3(0)), dVr(Vec3(0), Vec3(0));
+        for (int e = 0; e < mobod_k.getNumU(state); ++e) {
+            const UIndex uxk(mobod_k.getFirstUIndex(state) + e);
+            Vr  += mobod_k.getHCol(state, MobilizerUIndex(e))
+                   * state.getU()[uxk];
+            dVr += derivatives.dH_dq[uxk] * state.getU()[uxk];
+        }
+
+        const Vec3 r  = mobod_k.getBodyRotation(state)
+                        * mobod_k.getOutboardFrame(state).p();
+        const Vec3 dr = isAncestorOf(i, k) ? Vec3(H_i[0] % r) : Vec3(0);
+
+        const Vec3& wp = Vp[0];  const Vec3& dwp = dVp[0];
+        const Vec3& wr = Vr[0];  const Vec3& dwr = dVr[0];
+
+        const SpatialVec da_c =
+              SpatialVec(Vec3(0), dwp % (Vk[1] - Vp[1])
+                                + wp  % (dVk[1] - dVp[1]))
+            + SpatialVec(dwp % Vr[0] + wp % dVr[0],
+                         dwp % Vr[1] + wp % dVr[1])
+            + SpatialVec(Vec3(0), -(dwr % (wr % r))
+                                - (wr % (dwr % r))
+                                - (wr % (wr % dr)));
+
+        SpatialVec dA = (~derivatives.dPhi_dq[k]) * A_GB[p_k]
+                      + (~Phi) * derivatives.dA_dq[p_k]
+                      + da_c;
+        for (int e = 0; e < mobod_k.getNumU(state); ++e) {
+            const UIndex uxk(mobod_k.getFirstUIndex(state) + e);
+            dA += derivatives.dH_dq[uxk] * knownUdot[uxk];
+        }
+        derivatives.dA_dq[k] = dA;
+
+        // dV(k)/du_{i,d} and dA(k)/du_{i,d}
+        //
+        // The u-side is structurally the same sweep but with fewer terms: M,
+        // Phi, H and r depend on q alone, so none of them contributes, and
+        // udot is a fixed input. Differentiating the same two recursions,
+        //     dV(k)/du = ~Phi dV(p)/du + H(k,d) 1[i == k]
+        //     dA(k)/du = ~Phi dA(p)/du + da_c(k)/du
+        // and da_c/du drops the dr term of \eqref{da_c/dq} because r is
+        // configuration-only.
+        const SpatialVec& eVp = derivatives.dV_du[p_k];
+        SpatialVec eVk = (~Phi) * eVp;
+        if (i == k) eVk += H_i;
+        derivatives.dV_du[k] = eVk;
+
+        SpatialVec eVr(Vec3(0), Vec3(0));
+        if (i == k) eVr = H_i;   // dVr/du_{i,d} = H(k,d) when i == k
+
+        const Vec3& ewp = eVp[0];
+        const Vec3& ewr = eVr[0];
+
+        const SpatialVec da_c_du =
+              SpatialVec(Vec3(0), ewp % (Vk[1] - Vp[1])
+                                + wp  % (eVk[1] - eVp[1]))
+            + SpatialVec(ewp % Vr[0] + wp % eVr[0],
+                         ewp % Vr[1] + wp % eVr[1])
+            + SpatialVec(Vec3(0), -(ewr % (wr % r))
+                                - (wr % (ewr % r)));
+
+        derivatives.dA_du[k] = (~Phi) * derivatives.dA_du[p_k] + da_c_du;
+    }
+
+    // Inward pass: the composite transmitted force and dtau/dq.
+    //
+    // Differentiating Simbody's second inverse-dynamics pass,
+    //     F(k)     = M(k) A(k) + b(k) - f_app(k) + sum_c Phi(k,c) F(c)
+    //     tau(k,e) = H(k,e) . F(k) - tau_app(k,e)
+    // term by term gives
+    //     dF(k)     = dM(k) A(k) + M(k) dA(k) + db(k)
+    //                 + sum_c [ dPhi(k,c) F(c) + Phi(k,c) dF(c) ]
+    //     dtau(k,e) = dH(k,e) . F(k) + H(k,e) . dF(k)
+    Vector_<SpatialVec> F(nb, SpatialVec(Vec3(0), Vec3(0)));
+    Vector_<SpatialVec> dF(nb, SpatialVec(Vec3(0), Vec3(0)));
+    Vector_<SpatialVec> eF(nb, SpatialVec(Vec3(0), Vec3(0)));  // d/du
+    for (int kk = nb-1; kk >= 1; --kk) {
+        const MobilizedBodyIndex k(kk);
+        const MobilizedBody& mb_k = matter.getMobilizedBody(k);
+        const MobilizedBodyIndex pk =
+            mb_k.getParentMobilizedBody().getMobilizedBodyIndex();
+
+        const SpatialMat M =
+            mb_k.getBodySpatialInertiaInGround(state).toSpatialMat();
+        const SpatialMat& dM = derivatives.dM_dq[k];
+        const Vec3& w  = mb_k.getBodyVelocity(state)[0];
+        const Vec3& dw = derivatives.dV_dq[k][0];
+
+        // Gyroscopic force. Simbody's b(k) is exactly W(w) (M (w,0)), verified
+        // to 3e-17 against getGyroscopicForce, which is what lets db(k) be
+        // built from dV and 18.29c with no further primitives.
+        const SpatialVec P  = M * SpatialVec(w, Vec3(0));
+        const SpatialVec dP = dM * SpatialVec(w, Vec3(0))
+                            + M  * SpatialVec(dw, Vec3(0));
+        const SpatialVec b  = angularCross(w, P);
+        const SpatialVec db = angularCross(dw, P) + angularCross(w, dP);
+
+        // Same force, differentiated in u. M carries no u-dependence, so db/du
+        // keeps only the two terms in which w itself varies.
+        const Vec3& ew = derivatives.dV_du[k][0];
+        const SpatialVec eP = M * SpatialVec(ew, Vec3(0));
+        const SpatialVec eb = angularCross(ew, P) + angularCross(w, eP);
+
+        F[k]  += M * A_GB[k] + b - bodyForces[k];
+        dF[k] += dM * A_GB[k] + M * derivatives.dA_dq[k] + db;
+        eF[k] += M * derivatives.dA_du[k] + eb;
+
+        for (int e = 0; e < mb_k.getNumU(state); ++e) {
+            const UIndex uxk(mb_k.getFirstUIndex(state) + e);
+            const SpatialVec H_ke = mb_k.getHCol(state, MobilizerUIndex(e));
+            derivatives.dtau_dq[uxk] =
+                  dot(derivatives.dH_dq[uxk], F[k])
+                + dot(H_ke, dF[k]);
+            // No [dH/du].F term: H depends on q alone.
+            derivatives.dtau_du[uxk] = dot(H_ke, eF[k]);
+        }
+
+        const Transform X_PB_k = mb_k.getInboardFrame(state)
+                               * mb_k.getMobilizerTransform(state)
+                               * ~mb_k.getOutboardFrame(state);
+        const PhiMatrix PhiK(matter.getMobilizedBody(pk).getBodyRotation(state)
+                             * X_PB_k.p());
+        F[pk]  += PhiK * F[k];
+        dF[pk] += derivatives.dPhi_dq[k] * F[k] + PhiK * dF[k];
+        eF[pk] += PhiK * eF[k];   // Phi is configuration-only
     }
 
     return derivatives;
@@ -748,37 +1230,127 @@ int main() {
     matter.calcResidualForceIgnoringConstraints(state, mobilityForces,
                                                 bodyForces, knownUdot, tauRef);
 
+    // The optimized in-class Jacobians, checked against the per-direction
+    // reference implementation. They evaluate the same expressions, differing
+    // only in what is hoisted out of the column loop and in skipping bodies
+    // whose sensitivities are structurally zero, so they should agree to a few
+    // ulp -- not bit-exact, because the products are associated differently and
+    // the force accumulation sums the same terms in a different order. Anything
+    // larger than ~1e-14 would mean the subtree restriction dropped a term that
+    // is not actually zero.
+    {
+        Matrix dtau_dq_opt, dtau_du_opt;
+        id.calcInverseDynamicsDerivatives(knownUdot, dtau_dq_opt, dtau_du_opt);
+
+        Real worstQ = 0, worstU = 0;
+        for (MobilizedBodyIndex i(1); i < matter.getNumBodies(); ++i) {
+            const MobilizedBody& mb = matter.getMobilizedBody(i);
+            for (int d = 0; d < mb.getNumU(state); ++d) {
+                const int col = mb.getFirstUIndex(state) + d;
+                const Derivatives ref =
+                    calcSensitivities(matter, state, knownUdot, bodyForces,
+                                      i, d);
+                for (int ux = 0; ux < matter.getNumMobilities(); ++ux) {
+                    worstQ = std::max(worstQ,
+                        std::abs(dtau_dq_opt(ux,col)-ref.dtau_dq[UIndex(ux)]));
+                    worstU = std::max(worstU,
+                        std::abs(dtau_du_opt(ux,col)-ref.dtau_du[UIndex(ux)]));
+                }
+            }
+        }
+        printf("\n  optimized vs per-direction reference:"
+               "  dtau/dq %9.2e   dtau/du %9.2e\n", worstQ, worstU);
+    }
+
+    // Timing. The reference path is what the optimized method replaces:
+    // one full sweep per perturbation direction, each rebuilding the
+    // acceleration and force passes from scratch. Note the reference also
+    // allocates a Derivatives per call, so the ratio below conflates allocation
+    // with arithmetic and overstates the arithmetic win on a model this small.
+    {
+        using Clock = std::chrono::steady_clock;
+        const int reps = 2000;
+
+        auto t0 = Clock::now();
+        volatile Real sink = 0;
+        for (int r = 0; r < reps; ++r)
+            for (MobilizedBodyIndex i(1); i < matter.getNumBodies(); ++i) {
+                const MobilizedBody& mb = matter.getMobilizedBody(i);
+                for (int d = 0; d < mb.getNumU(state); ++d) {
+                    const Derivatives ref = calcSensitivities(
+                        matter, state, knownUdot, bodyForces, i, d);
+                    sink = sink + ref.dtau_dq[UIndex(0)];
+                }
+            }
+        auto t1 = Clock::now();
+
+        Matrix dq, du;
+        for (int r = 0; r < reps; ++r) {
+            id.calcInverseDynamics(knownUdot, mobilityForces, bodyForces, tau);
+            id.calcInverseDynamicsDerivatives(knownUdot, dq, du);
+            sink = sink + dq(0,0);
+        }
+        auto t2 = Clock::now();
+
+        const Real usRef = std::chrono::duration<Real, std::micro>(t1-t0).count()
+                           / reps;
+        const Real usOpt = std::chrono::duration<Real, std::micro>(t2-t1).count()
+                           / reps;
+        printf("  full Jacobian per call:  reference %7.2f us   optimized"
+               " %7.2f us   (%.1fx)\n", usRef, usOpt, usRef/usOpt);
+    }
+
     static const char* names[Derivatives::NumIdentities] =
-        {"18.28a", "18.28b", "18.28c", "18.28d", "18.28e", "18.29a", "18.29b"};
+        {"18.28a", "18.28b", "18.28c", "18.28d", "18.28e", "18.29a", "18.29b",
+         "18.29c", "dV/dq", "dA/dq", "dtau/dq",
+         "dV/du", "dA/du", "dtau/du"};
 
-    printf("\n  max|analytic - fd| over all bodies, per coordinate\n\n");
-    printf("    i  d");
-    for (int t = 0; t < Derivatives::NumIdentities; ++t)
-        printf("  %10s", names[t]);
-    printf("\n");
-
-    Vec<Derivatives::NumIdentities> worst(0);
+    Array_<Vec<Derivatives::NumIdentities>> errs, mags;
+    Array_<std::pair<int,int>> coords;
+    Vec<Derivatives::NumIdentities> worst(0), scale(0);
     for (MobilizedBodyIndex i(1); i < matter.getNumBodies(); ++i) {
         const MobilizedBody& mobod = matter.getMobilizedBody(i);
         for (int d = 0; d < mobod.getNumU(state); ++d) {
-            const Derivatives analytical = calcSensitivities(matter, state, i, d);
-            const Derivatives fd = calcFiniteDifferences(matter, state, i, d);
+            const Derivatives analytical =
+                calcSensitivities(matter, state, knownUdot, bodyForces, i, d);
+            const Derivatives fd =
+                calcFiniteDifferences(matter, state, knownUdot, mobilityForces,
+                                      bodyForces, i, d);
             const Vec<Derivatives::NumIdentities> e = analytical.compare(fd);
-
-            printf("   %2d %2d", (int)i, d);
+            const Vec<Derivatives::NumIdentities> m = analytical.magnitude();
+            errs.push_back(e); mags.push_back(m);
+            coords.push_back(std::make_pair((int)i, d));
             for (int t = 0; t < Derivatives::NumIdentities; ++t) {
-                printf("  %10.2e", e[t]);
                 worst[t] = std::max(worst[t], e[t]);
+                scale[t] = std::max(scale[t], m[t]);
             }
-            printf("\n");
         }
     }
 
-    printf("   -----");
-    for (int t = 0; t < Derivatives::NumIdentities; ++t) printf("  ----------");
-    printf("\n    max ");
-    for (int t = 0; t < Derivatives::NumIdentities; ++t)
-        printf("  %10.2e", worst[t]);
-    printf("\n\n");
+    const int groups[3] = {0, Derivatives::NumJainIdentities,
+                           Derivatives::NumIdentities};
+    const char* titles[2] = {"Jain operator sensitivities",
+                             "Assembled quantities (Simbody convention)"};
+    for (int g = 0; g < 2; ++g) {
+        const int first = groups[g], last = groups[g+1];
+        printf("\n  %s\n  max|analytic - fd| over all bodies, per coordinate"
+               "\n\n    i  d", titles[g]);
+        for (int t = first; t < last; ++t) printf("  %10s", names[t]);
+        printf("\n");
+        for (unsigned r = 0; r < errs.size(); ++r) {
+            printf("   %2d %2d", coords[r].first, coords[r].second);
+            for (int t = first; t < last; ++t) printf("  %10.2e", errs[r][t]);
+            printf("\n");
+        }
+        printf("   -----");
+        for (int t = first; t < last; ++t) printf("  ----------");
+        printf("\n    max ");
+        for (int t = first; t < last; ++t) printf("  %10.2e", worst[t]);
+        printf("\n  scale");
+        for (int t = first; t < last; ++t) printf("  %10.2e", scale[t]);
+        printf("\n");
+    }
+    printf("\n  'scale' is max|analytic| over all i,d -- an identity whose\n"
+           "  error and scale are both tiny is not actually being tested.\n\n");
 
 }
