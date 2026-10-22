@@ -99,8 +99,6 @@ public:
         m_state = m_system.realizeTopology();
     }
 
-    // Set through the mobilizer-level fitting methods rather than by writing q
-    // directly, so the Free and Ball quaternions come out normalized.
     void setArbitraryState() {
         m_link1.setQToFitTransform(m_state,
             Transform(Rotation(BodyRotationSequence,
@@ -127,8 +125,6 @@ public:
         return udot;
     }
 
-    // One spatial force per body (moment about Bo, force at Bo, expressed in
-    // Ground), Ground being body zero.
     void calcGravityBodyForces(const State& state,
                                Vector_<SpatialVec>& bodyForces) const {
         bodyForces.resize(getNumBodies());
@@ -143,8 +139,6 @@ public:
         }
     }
 
-    // Gravity, a point force on the tip of link3, and a torque on every
-    // mobility, so no applied-force path goes untested.
     void calcAppliedForces(const State& state, Vector& mobilityForces,
                            Vector_<SpatialVec>& bodyForces) const {
         mobilityForces.resize(getNumMobilities());
@@ -233,12 +227,9 @@ public:
                 m_path[i].push_back(b);
 
         const SpatialVec zeroV(Vec3(0), Vec3(0));
-        const SpatialMat zeroM(Mat33(0), Mat33(0), Mat33(0), Mat33(0));
-        m_dPhi.resize(nb); m_dM.resize(nb);
         m_dV.resize(nb); m_dA.resize(nb); m_dF.resize(nb);
         m_eV.resize(nb); m_eA.resize(nb); m_eF.resize(nb);
         for (MobilizedBodyIndex k(0); k < nb; ++k) {
-            m_dPhi[k] = m_dM[k] = zeroM;
             m_dV[k] = m_dA[k] = m_dF[k] = zeroV;
             m_eV[k] = m_eA[k] = m_eF[k] = zeroV;
         }
@@ -279,7 +270,6 @@ public:
         }
     }
 
-    // Requires realizePosition() and realizeVelocity().
     void calcInverseDynamics(const Vector&              knownUdot,
                              const Vector&              mobilityForces,
                              const Vector_<SpatialVec>& bodyForces,
@@ -297,18 +287,17 @@ public:
 
     // Derivatives of tau with respect to q and u. Requires realizePosition(),
     // realizeVelocity() and calcInverseDynamics() to have run: this reuses
-    // their cached Phi, H, Mk_mat, V_GB, A_GB and the composite transmitted
+    // their cached Phi, H, Mk_G, V_GB, A_GB and the composite transmitted
     // force F. Column (i,d) of each Jacobian is the derivative along that
     // coordinate; row ux is the affected mobility.
     //
     // Two things make this cheaper than calling a per-direction routine nu
     // times. First, everything depending only on (q,u,udot) is computed once by
-    // the passes above instead of being rebuilt for each column -- the naive
-    // version repeats a full acceleration pass and a full force pass per
-    // column. Second, every primitive sensitivity carries an i >= k condition,
-    // so for a perturbation at joint i they all vanish outside the subtree
-    // rooted at i, and dF is nonzero only on that subtree plus i's path to
-    // Ground. The sweeps visit exactly those bodies rather than all nb.
+    // the passes above instead of being rebuilt for each column. Second, every
+    // primitive sensitivity carries an i >= k condition, so for a perturbation
+    // at joint i they all vanish outside the subtree rooted at i, and dF is
+    // nonzero only on that subtree plus i's path to Ground. The sweeps visit
+    // exactly those bodies rather than all nb.
     void calcInverseDynamicsDerivatives(const Vector& knownUdot,
                                         Matrix& dtau_dq, Matrix& dtau_du) {
         const int nu = (int)m_H.size();
@@ -356,31 +345,45 @@ private:
         PhiMatrix           Phi;
         Vec3                COM_G;
         SpatialInertia      Mk_G;
-        SpatialMat          Mk_mat;   // Mk_G as a dense 6x6, built once
-        Vec3                rho_G;    // p_BoMo in Ground, fixed in this body
+        Vec3                rho_G;
 
         // Velocity.
         SpatialVec          V_FM, V_PB_G, VD_PB_G, V_GB;
         SpatialVec          gyroscopicForce, mobilizerCoriolisAcceleration,
                             totalCoriolisAcceleration, totalCentrifugalForces;
+        SpatialVec          Mw;       // Mk_G * (w_GB, 0), reused by every column
 
         // Acceleration.
         SpatialVec          A_GB, F;
+        SpatialVec          MA;       // Mk_G * A_GB, reused by every column
     };
 
     // One column of dtau/dq and dtau/du, for the d-th free mode of joint i.
+    //
+    // Every primitive sensitivity in this file is a commutator with the
+    // angular cross operator W(w_i) = diag(w_i~, w_i~). Singh's restructuring
+    // observation is that such commutators never need to be formed, only
+    // applied: for any operator X and spatial vector y,
+    //     [W X - X W] y = W(X y) - X(W y)
+    // which replaces a 6x6 construction plus two 6x6 products with two cross
+    // products and one structured application of X. No dense 6x6 appears
+    // below. This is a re-association of the verified per-column expressions,
+    // not a different algorithm; see the note in main() on why Singh's Eq. 27
+    // itself cannot be transcribed under Simbody's free-mode convention.
     void calcDerivativeColumn(MobilizedBodyIndex i, int d,
                               const Vector& knownUdot,
                               Matrix& dtau_dq, Matrix& dtau_du) {
         const SpatialVec zeroV(Vec3(0), Vec3(0));
-        const SpatialMat zeroM(Mat33(0), Mat33(0), Mat33(0), Mat33(0));
         const UIndex col(m_cache[i].ux + d);
         const SpatialVec& H_i = m_H[col];
-        const Vec3&       w_i = H_i[0];
+        const Vec3&       w_i = H_i[0];    // the mode's angular direction
+        const Vec3&       v_i = H_i[1];    // and its linear part
 
-        // Reset only what this column writes.
+        //---- Scratch reset --------------------------------------------------
+        // Only the subtree of i, i's path to Ground, and Ground itself are ever
+        // written, so only those are cleared; a short reset is the whole point
+        // of restricting the sweeps.
         for (MobilizedBodyIndex k : m_subtree[i]) {
-            m_dPhi[k] = m_dM[k] = zeroM;
             m_dV[k] = m_dA[k] = m_dF[k] = zeroV;
             m_eV[k] = m_eA[k] = m_eF[k] = zeroV;
             for (int e = 0; e < m_cache[k].nu; ++e)
@@ -392,114 +395,140 @@ private:
         }
         m_dF[MobilizedBodyIndex(0)] = m_eF[MobilizedBodyIndex(0)] = zeroV;
 
-        // Jain's Htilde*_w(i), shared by 18.29a and 18.29c.
-        const SpatialMat Wi(crossMat(w_i), Mat33(0), Mat33(0), crossMat(w_i));
-
-        //---- outward over the subtree, base to tip -------------------------
+        //---- Outward sweep, base to tip -------------------------------------
         for (MobilizedBodyIndex k : m_subtree[i]) {
             MobodCache& mc = m_cache[k];
             const MobodCache& pc = m_cache[mc.parent];
-            const bool self = (k == i);   // inside the subtree, k != i => i > k
+            const bool self = (k == i);   // within subtree(i), k != i => i > k
 
-            // 18.29a, 18.29b, 18.29c.
-            const SpatialMat PhiMat = mc.Phi.toSpatialMat();
-            m_dPhi[k] = self ? SpatialMat(Mat33(0), crossMat(H_i[1]),
-                                          Mat33(0), Mat33(0))
-                             : SpatialMat(Wi*PhiMat - PhiMat*Wi);
-            m_dM[k] = Wi*mc.Mk_mat - mc.Mk_mat*Wi;
+            // Hinge-matrix sensitivity.                        [Jain 18.29b]
+            // dH = W(w_i) H for i > k; for k == i the modes are fixed in the
+            // parent frame F while their line of action passes through Mo, so
+            //     dH = (0, -H_w x (w_i x rho_k)).
             for (int e = 0; e < mc.nu; ++e) {
                 const UIndex ux(mc.ux+e);
                 const SpatialVec& H_ke = m_H[ux];
                 m_dH[ux] = self
                     ? SpatialVec(Vec3(0), -(H_ke[0] % (w_i % mc.rho_G)))
-                    : SpatialVec(w_i % H_ke[0], w_i % H_ke[1]);
+                    : angularCross(w_i, H_ke);
             }
 
-            // dV/dq and dV/du, with their cross-mobilizer increments.
-            SpatialVec dV  = (~m_dPhi[k]) * pc.V_GB + (~mc.Phi) * m_dV[mc.parent];
+            // Shift-operator sensitivity, applied not formed.  [Jain 18.29a]
+            // For i > k, dPhi = W Phi - Phi W, so
+            //     (~dPhi) y = W(~Phi y) - ~Phi(W y).
+            // For k == i only the joint's own translation enters, dPhi =
+            // [[0, v_i~],[0,0]], whose transpose sends y to (0, -v_i x y_w).
+            auto dPhiT = [&](const SpatialVec& y) -> SpatialVec {
+                return self ? SpatialVec(Vec3(0), -(v_i % y[0]))
+                            : angularCross(w_i, (~mc.Phi) * y)
+                              - (~mc.Phi) * angularCross(w_i, y);
+            };
+
+            // Velocity sensitivity, q and u sides.
+            //     dV = (~dPhi) V_p + ~Phi dV_p + sum_e dH u
+            //     eV = ~Phi eV_p + H_i 1[i == k]
             SpatialVec dVr = zeroV;
-            for (int e = 0; e < mc.nu; ++e) {
-                const UIndex ux(mc.ux+e);
-                dVr += m_dH[ux] * m_u[ux];
-            }
-            dV += dVr;
-            m_dV[k] = dV;
+            for (int e = 0; e < mc.nu; ++e)
+                dVr += m_dH[UIndex(mc.ux+e)] * m_u[UIndex(mc.ux+e)];
+            m_dV[k] = dPhiT(pc.V_GB) + (~mc.Phi) * m_dV[mc.parent] + dVr;
 
-            SpatialVec eV = (~mc.Phi) * m_eV[mc.parent];
-            if (self) eV += H_i;
-            m_eV[k] = eV;
             const SpatialVec eVr = self ? H_i : zeroV;
+            m_eV[k] = (~mc.Phi) * m_eV[mc.parent] + eVr;
 
-            // da_c, from the closed form for the cross-mobilizer Coriolis term.
+            // Coriolis-acceleration sensitivity. a_c has the closed form
+            //     a_c = (0, wp x (v_k - v_p)) + W(wp) Vr + (0, -wr x (wr x rho))
+            // so differentiating it needs only dV, dVr and d(rho), the last
+            // being w_i x rho since rho is fixed in body k.   [as Jain 18.29c]
             const SpatialVec& Vr = mc.V_PB_G;
             const Vec3& wp  = pc.V_GB[0];
             const Vec3& wr  = Vr[0];
             const Vec3& dwp = m_dV[mc.parent][0];
             const Vec3& ewp = m_eV[mc.parent][0];
             const Vec3  dwr = dVr[0], ewr = eVr[0];
-            const Vec3  dr  = w_i % mc.rho_G;   // k is in subtree(i) throughout
+            const Vec3  drho = w_i % mc.rho_G;
 
             const SpatialVec da_c =
                   SpatialVec(Vec3(0), dwp % (mc.V_GB[1] - pc.V_GB[1])
                                     + wp  % (m_dV[k][1] - m_dV[mc.parent][1]))
-                + SpatialVec(dwp % Vr[0] + wp % dVr[0],
-                             dwp % Vr[1] + wp % dVr[1])
+                + angularCross(dwp, Vr) + angularCross(wp, dVr)
                 + SpatialVec(Vec3(0), -(dwr % (wr % mc.rho_G))
                                       -(wr  % (dwr % mc.rho_G))
-                                      -(wr  % (wr  % dr)));
+                                      -(wr  % (wr  % drho)));
 
-            SpatialVec dA = (~m_dPhi[k]) * pc.A_GB
-                          + (~mc.Phi) * m_dA[mc.parent] + da_c;
-            for (int e = 0; e < mc.nu; ++e) {
-                const UIndex ux(mc.ux+e);
-                dA += m_dH[ux] * knownUdot[ux];
-            }
-            m_dA[k] = dA;
-
-            // The u-side drops the dr term (rho is configuration-only).
+            // The u side drops the d(rho) term: rho is configuration-only.
             const SpatialVec ea_c =
                   SpatialVec(Vec3(0), ewp % (mc.V_GB[1] - pc.V_GB[1])
                                     + wp  % (m_eV[k][1] - m_eV[mc.parent][1]))
-                + SpatialVec(ewp % Vr[0] + wp % eVr[0],
-                             ewp % Vr[1] + wp % eVr[1])
+                + angularCross(ewp, Vr) + angularCross(wp, eVr)
                 + SpatialVec(Vec3(0), -(ewr % (wr % mc.rho_G))
                                       -(wr  % (ewr % mc.rho_G)));
+
+            // Acceleration sensitivity.
+            //     dA = (~dPhi) A_p + ~Phi dA_p + sum_e dH udot + da_c
+            //     eA = ~Phi eA_p + ea_c          (H is q-only, so no eH term)
+            SpatialVec dA = dPhiT(pc.A_GB) + (~mc.Phi) * m_dA[mc.parent] + da_c;
+            for (int e = 0; e < mc.nu; ++e)
+                dA += m_dH[UIndex(mc.ux+e)] * knownUdot[UIndex(mc.ux+e)];
+            m_dA[k] = dA;
             m_eA[k] = (~mc.Phi) * m_eA[mc.parent] + ea_c;
         }
 
-        //---- inward over the subtree, tip to base ---------------------------
+        //---- Inward sweep, tip to base --------------------------------------
         for (int n = (int)m_subtree[i].size()-1; n >= 0; --n) {
             const MobilizedBodyIndex k = m_subtree[i][n];
             MobodCache& mc = m_cache[k];
-            const SpatialMat& M = mc.Mk_mat;
+            const bool self = (k == i);
             const Vec3& w  = mc.V_GB[0];
             const Vec3& dw = m_dV[k][0];
             const Vec3& ew = m_eV[k][0];
 
-            // b = W(w)[M (w,0)], so db and db/du follow from dV and 18.29c.
-            const SpatialVec P  = M * SpatialVec(w, Vec3(0));
-            const SpatialVec dP = m_dM[k] * SpatialVec(w, Vec3(0))
-                                + M * SpatialVec(dw, Vec3(0));
-            const SpatialVec eP = M * SpatialVec(ew, Vec3(0));
-            const SpatialVec db = angularCross(dw, P) + angularCross(w, dP);
-            const SpatialVec eb = angularCross(ew, P) + angularCross(w, eP);
+            // Inertia sensitivity, applied not formed.         [Jain 18.29c]
+            // dM = W M - M W, hence dM y = W(M y) - M(W y). Both uses below
+            // are of that form, with M y precomputed per body (MA and Mw).
+            const SpatialVec dMA = angularCross(w_i, mc.MA)
+                                 - mc.Mk_G * angularCross(w_i, mc.A_GB);
+            const SpatialVec dMw = angularCross(w_i, mc.Mw)
+                                 - mc.Mk_G * SpatialVec(w_i % w, Vec3(0));
 
-            m_dF[k] += m_dM[k] * mc.A_GB + M * m_dA[k] + db;
-            m_eF[k] += M * m_eA[k] + eb;
+            // Gyroscopic-force sensitivity. b = W(w)[M (w,0)], so
+            //     db = W(dw)[M(w,0)] + W(w)[dM(w,0) + M(dw,0)]
+            // and the u side drops the dM term.
+            const SpatialVec db =
+                  angularCross(dw, mc.Mw)
+                + angularCross(w, dMw + mc.Mk_G * SpatialVec(dw, Vec3(0)));
+            const SpatialVec eb =
+                  angularCross(ew, mc.Mw)
+                + angularCross(w, mc.Mk_G * SpatialVec(ew, Vec3(0)));
 
+            // Transmitted-force sensitivity.
+            //     dF += dM A + M dA + db ;  eF += M eA + eb
+            m_dF[k] += dMA + mc.Mk_G * m_dA[k] + db;
+            m_eF[k] += mc.Mk_G * m_eA[k] + eb;
+
+            // Generalized-force sensitivity.                   [Singh J3]
+            //     dtau = [dH] . F + H . dF ;  etau = H . eF
+            // The first term is J3's residue and is nonzero only for multi-DoF
+            // joints; there is no [eH] . F counterpart since H is q-only.
             for (int e = 0; e < mc.nu; ++e) {
                 const UIndex ux(mc.ux+e);
                 dtau_dq(ux, col) = dot(m_dH[ux], mc.F) + dot(m_H[ux], m_dF[k]);
                 dtau_du(ux, col) = dot(m_H[ux], m_eF[k]);
             }
 
-            m_dF[mc.parent] += m_dPhi[k] * mc.F + mc.Phi * m_dF[k];
+            // Push to the parent. The dPhi action on a force runs the other
+            // way: dPhi F = W(Phi F) - Phi(W F), or (v_i x f, 0) when k == i.
+            const SpatialVec dPhiF = self
+                ? SpatialVec(v_i % mc.F[1], Vec3(0))
+                : angularCross(w_i, mc.Phi * mc.F)
+                  - mc.Phi * angularCross(w_i, mc.F);
+            m_dF[mc.parent] += dPhiF + mc.Phi * m_dF[k];
             m_eF[mc.parent] += mc.Phi * m_eF[k];
         }
 
-        //---- continue up i's path to Ground ---------------------------------
-        // Above i the body terms all vanish, and dPhi does too, so only the
-        // transmitted force keeps propagating.
+        //---- Continuation above i -------------------------------------------
+        // Outside subtree(i) every body term vanishes and so does dPhi, since
+        // dPhi(k,c) needs i >= c; only the transmitted force keeps propagating,
+        // and dH is zero so dtau loses its first term.
         for (MobilizedBodyIndex k : m_path[i]) {
             const MobodCache& mc = m_cache[k];
             for (int e = 0; e < mc.nu; ++e) {
@@ -517,12 +546,6 @@ private:
 
     static Vec3 unitVec(int i) {Vec3 e(0); e[i] = 1; return e;}
 
-    //--------------------------------------------------------------------------
-    // Mobilizer-specific. These are the only three methods that need to know
-    // which kind of mobilizer this is.
-    //--------------------------------------------------------------------------
-    // Ball and Free are quaternion-parameterized: q = [quat(4)] and
-    // q = [quat(4), p_FM(3)] respectively, with p_FM along the F axes.
     void calcX_FM(MobilizedBodyIndex mbx, const Vector& q) {
         MobodCache& mc = m_cache[mbx];
         const QIndex qx = mc.qx;
@@ -542,11 +565,6 @@ private:
         }
     }
 
-    // H_FM maps u to the cross-mobilizer velocity V_FM = (w_FM, v_FMo),
-    // expressed in F and referred to Mo. For all three of these mobilizers the
-    // generalized speeds ARE the measure numbers of w_FM and v_FMo in F, so
-    // H_FM is a constant selection matrix -- which is also why HDot_FM below is
-    // zero. A mobilizer with q-dependent H_FM would need more.
     void calcAcrossJointVelocityJacobian(MobilizedBodyIndex mbx) {
         const MobodCache& mc = m_cache[mbx];
         switch (mc.type) {
@@ -572,9 +590,6 @@ private:
             m_HDot_FM[UIndex(mc.ux+d)] = SpatialVec(Vec3(0), Vec3(0));
     }
 
-    //--------------------------------------------------------------------------
-    // Same for all mobilizers.
-    //--------------------------------------------------------------------------
     void calcBodyTransforms(MobilizedBodyIndex mbx) {
         MobodCache& mc = m_cache[mbx];
         const Transform X_FB = mc.X_FM * mc.X_MB;
@@ -582,8 +597,6 @@ private:
         mc.X_GB = m_cache[mc.parent].X_GB * mc.X_PB;
     }
 
-    // H (== H_PB_G) maps u to the cross-body relative spatial velocity of B in
-    // P, expressed in Ground and referred to Bo.
     void calcParentToChildVelocityJacobianInGround(MobilizedBodyIndex mbx) {
         const MobodCache& mc = m_cache[mbx];
         const Rotation R_GF = m_cache[mc.parent].X_GB.R() * mc.X_PF.R();
@@ -611,7 +624,6 @@ private:
         }
     }
 
-    // Phi, and the spatial mass properties about Bo expressed in Ground.
     void calcJointIndependentKinematicsPos(MobilizedBodyIndex mbx) {
         MobodCache& mc = m_cache[mbx];
         const Vec3 p_PB_G = m_cache[mc.parent].X_GB.R() * mc.X_PB.p();
@@ -622,13 +634,9 @@ private:
         const Vec3 p_BBc_G = R_GB * mc.com_B;
         mc.COM_G = mc.X_GB.p() + p_BBc_G;
         mc.Mk_G   = SpatialInertia(mc.mass, p_BBc_G, G_Bo_G);
-        mc.Mk_mat = mc.Mk_G.toSpatialMat();
         mc.rho_G  = R_GB * mc.p_BoMo_B;
     }
 
-    // V_GB, the gyroscopic force b, and the velocity-dependent remainder
-    // Jdot*u split into this mobilizer's incremental contribution and the
-    // running total.
     void calcJointIndependentKinematicsVel(MobilizedBodyIndex mbx) {
         MobodCache& mc = m_cache[mbx];
         const MobodCache& pc = m_cache[mc.parent];
@@ -650,9 +658,9 @@ private:
                                      + mc.mobilizerCoriolisAcceleration;
         mc.totalCentrifugalForces = mc.Mk_G * mc.totalCoriolisAcceleration
                                   + mc.gyroscopicForce;
+        mc.Mw = mc.Mk_G * SpatialVec(w_GB, Vec3(0));
     }
 
-    // A_GB = ~Phi*A_GP + H*udot + a. Base to tip.
     void calcBodyAccelerationsFromUdotOutward(MobilizedBodyIndex mbx,
                                               const Vector& knownUdot) {
         MobodCache& mc = m_cache[mbx];
@@ -662,14 +670,13 @@ private:
         mc.A_GB = A + mc.mobilizerCoriolisAcceleration;
     }
 
-    // F = Mk_G*A_GB + b - F_applied + sum_children Phi*F_child, then
-    // tau = ~H*F - f_applied. Tip to base.
     void calcInverseDynamicsPass2Inward(MobilizedBodyIndex         mbx,
                                         const Vector&              mobilityForces,
                                         const Vector_<SpatialVec>& bodyForces,
                                         Vector&                    tau) {
         MobodCache& mc = m_cache[mbx];
-        mc.F += mc.Mk_G * mc.A_GB + mc.gyroscopicForce - bodyForces[mbx];
+        mc.MA = mc.Mk_G * mc.A_GB;
+        mc.F += mc.MA + mc.gyroscopicForce - bodyForces[mbx];
         for (int d=0; d < mc.nu; ++d) {
             const UIndex ux(mc.ux+d);
             tau[ux] = dot(m_H[ux], mc.F) - mobilityForces[ux];
@@ -682,14 +689,8 @@ private:
     Array_<SpatialVec, UIndex>             m_H_FM, m_H, m_HDot_FM, m_HDot;
     Vector                                 m_u;
 
-    // Topology, precomputed once. m_subtree[i] lists the bodies k for which i
-    // is an ancestor (inclusive), in ascending index order, which is also
-    // base-to-tip order. m_path[i] lists i's strict ancestors below Ground,
-    // ordered away from i. Every derivative sweep is restricted to these.
     std::vector<std::vector<MobilizedBodyIndex>> m_subtree, m_path;
 
-    // Per-column scratch, allocated once and reset only over the touched set.
-    Array_<SpatialMat, MobilizedBodyIndex> m_dPhi, m_dM;
     Array_<SpatialVec, UIndex>             m_dH;
     Array_<SpatialVec, MobilizedBodyIndex> m_dV, m_dA, m_dF;
     Array_<SpatialVec, MobilizedBodyIndex> m_eV, m_eA, m_eF;
@@ -701,9 +702,8 @@ private:
 
 
 //==============================================================================
-//                               OPERATOR SENSITIVITIES
+//                            OPERATOR SENSITIVITIES
 //==============================================================================
-
 
 
 struct Derivatives {
@@ -742,11 +742,8 @@ struct Derivatives {
         dtau_du(nu, Real(0)) {}
 
     static const int NumIdentities = 14;
-    // Columns [0,NumJainIdentities) are Jain's; the rest are Singh's.
     static const int NumJainIdentities = 8;
 
-    // Max |this - other| per identity, in the column order main() prints.
-    // Filled element-wise: Vec has no 11-argument constructor.
     Vec<NumIdentities> compare(const Derivatives& other) const {
         Vec<NumIdentities> e;
         e[0]  = maxAbsDiff(dVw_dqdot,       other.dVw_dqdot);
@@ -766,16 +763,11 @@ struct Derivatives {
         return e;
     }
 
-    // Max |this| per identity, same column order. Reported alongside the
-    // errors so an identity that agrees only because both sides are zero is
-    // distinguishable from one that actually carries signal.
     Vec<NumIdentities> magnitude() const {
         const Derivatives zero(dVw_dqdot.size(), dH_dq.size());
         return zero.compare(*this);
     }
 
-    // Max over bodies and components. A sum would let errors of opposite sign
-    // cancel and hide a real discrepancy.
     static Real maxAbsDiff(const Vector_<SpatialVec>& a,
                            const Vector_<SpatialVec>& b) {
         Real e = 0;
