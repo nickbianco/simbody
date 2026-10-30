@@ -271,6 +271,18 @@ public:
     // Here Ground is the last body processed. Although it has no mobility forces
     // we can still collect up all the forces from the base bodies to Ground
     // in case anyone cares.
+    void calcInverseDynamicsDerivativesInwardAbove
+       (const SBTreePositionCache& pc,
+        InverseDynamicsDerivativesWorkspace& w,
+        int col, Matrix& dTauDQ, Matrix& dTauDU) const override
+    {
+        const MobilizedBodyIndex k = getNodeNum();
+        const MobilizedBodyIndex p = parent->getNodeNum();
+        const PhiMatrix& Phi = getPhi(pc);
+        w.dF[p] += Phi * w.dF[k];   // no rows, no dPhi above the perturbed body
+        w.eF[p] += Phi * w.eF[k];
+    }
+
     void calcInverseDynamicsPass2Inward(
         const SBTreePositionCache&  pc,
         const SBTreeVelocityCache&  vc,
@@ -575,6 +587,95 @@ public:
         const SpatialVec A_GP = ~getPhi(pc) * allA_GB[parent->getNodeNum()];
 
         A_GB = A_GP + getMobilizerCoriolisAcceleration(vc); // no udot for weld
+    }
+
+    // Inverse dynamics derivatives, dof == 0 specialization. An immobile body
+    // contributes no columns of its own, but it still carries inertia and
+    // transmits force, so it must take part in every sweep. With no mobilities
+    // the cross-mobilizer velocity Vr vanishes, which kills the W(wp)Vr and
+    // -wr x (wr x rho) terms of the Coriolis acceleration, leaving only
+    //     a_c = (0, wp x (v_k - v_p)).
+    // selfMode is always -1 here: a body with no modes can never be the
+    // perturbed one.
+    void calcInverseDynamicsDerivativesOutward
+       (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+        const SpatialVec& H_col, int selfMode,
+        InverseDynamicsDerivativesWorkspace& w) const override
+    {
+        const MobilizedBodyIndex k = getNodeNum();
+        const MobilizedBodyIndex p = parent->getNodeNum();
+        const Vec3& w_i = H_col[0];
+
+        const PhiMatrix&  Phi = getPhi(pc);
+        const SpatialVec& V_p = getV_GP(vc);
+        const SpatialVec& V_k = getV_GB(vc);
+        const SpatialVec& A_p = w.A_GB[p];
+
+        // (~dPhi) y = W(~Phi y) - ~Phi(W y); see RigidBodyNodeSpec.
+        const SpatialVec sV = ~Phi * V_p, sA = ~Phi * A_p;
+        const SpatialVec dPhiT_V = SpatialVec(w_i % sV[0], w_i % sV[1])
+            - ~Phi * SpatialVec(w_i % V_p[0], w_i % V_p[1]);
+        const SpatialVec dPhiT_A = SpatialVec(w_i % sA[0], w_i % sA[1])
+            - ~Phi * SpatialVec(w_i % A_p[0], w_i % A_p[1]);
+
+        w.dV[k] = dPhiT_V + ~Phi * w.dV[p];
+        w.eV[k] = ~Phi * w.eV[p];
+
+        const Vec3& wp  = V_p[0];
+        const Vec3& dwp = w.dV[p][0];
+        const Vec3& ewp = w.eV[p][0];
+        const SpatialVec da_c(Vec3(0), dwp % (V_k[1] - V_p[1])
+                                     + wp  % (w.dV[k][1] - w.dV[p][1]));
+        const SpatialVec ea_c(Vec3(0), ewp % (V_k[1] - V_p[1])
+                                     + wp  % (w.eV[k][1] - w.eV[p][1]));
+
+        w.dA[k] = dPhiT_A + ~Phi * w.dA[p] + da_c;
+        w.eA[k] = ~Phi * w.eA[p] + ea_c;
+    }
+
+    void calcInverseDynamicsDerivativesInward
+       (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+        const SpatialVec& H_col, int selfMode,
+        InverseDynamicsDerivativesWorkspace& w,
+        int col, Matrix& dTauDQ, Matrix& dTauDU) const override
+    {
+        const MobilizedBodyIndex k = getNodeNum();
+        const MobilizedBodyIndex p = parent->getNodeNum();
+        const Vec3& w_i = H_col[0];
+
+        const PhiMatrix&      Phi = getPhi(pc);
+        const SpatialInertia& M   = getMk_G(pc);
+        const Vec3&           wk  = getV_GB(vc)[0];
+        const Vec3&           dw  = w.dV[k][0];
+        const Vec3&           ew  = w.eV[k][0];
+
+        // dM y = W(M y) - M(W y), with M y precomputed per body.
+        const SpatialVec& MA = w.MA[k];
+        const SpatialVec& Mw = w.Mw[k];
+        const SpatialVec& A  = w.A_GB[k];
+        const SpatialVec dMA = SpatialVec(w_i % MA[0], w_i % MA[1])
+                             - M * SpatialVec(w_i % A[0], w_i % A[1]);
+        const SpatialVec dMw = SpatialVec(w_i % Mw[0], w_i % Mw[1])
+                             - M * SpatialVec(w_i % wk, Vec3(0));
+
+        const SpatialVec Mdw = M * SpatialVec(dw, Vec3(0));
+        const SpatialVec Mew = M * SpatialVec(ew, Vec3(0));
+        const SpatialVec db = SpatialVec(dw % Mw[0], dw % Mw[1])
+                            + SpatialVec(wk % (dMw[0]+Mdw[0]),
+                                         wk % (dMw[1]+Mdw[1]));
+        const SpatialVec eb = SpatialVec(ew % Mw[0], ew % Mw[1])
+                            + SpatialVec(wk % Mew[0], wk % Mew[1]);
+
+        w.dF[k] += dMA + M * w.dA[k] + db;
+        w.eF[k] += M * w.eA[k] + eb;
+
+        // No tau rows; push to the parent. dPhi F = W(Phi F) - Phi(W F).
+        const SpatialVec& Fk = w.F[k];
+        const SpatialVec PhiF = Phi * Fk;
+        const SpatialVec dPhiF = SpatialVec(w_i % PhiF[0], w_i % PhiF[1])
+            - Phi * SpatialVec(w_i % Fk[0], w_i % Fk[1]);
+        w.dF[p] += dPhiF + Phi * w.dF[k];
+        w.eF[p] += Phi * w.eF[k];
     }
 
     void calcInverseDynamicsPass2Inward(

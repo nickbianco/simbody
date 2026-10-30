@@ -128,7 +128,24 @@ void calcAcrossJointVelocityJacobian(
 }
 
 
-// Since H_FM above is constant in F, its time derivative in F is zero.
+// HDot_FM is identically zero below, so H_FM is constant in F: every
+// dH_FM/dq partial vanishes, and so does every dHDot_FM/dq partial.
+bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest& sbs, int d,
+    Vec3* dH_FM_dqd) const override
+{   const SpatialVec zero(Vec3(0), Vec3(0));
+    HType& dH = HType::updAs(dH_FM_dqd);
+    dH(0) = zero;
+    return true; }
+
+bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const override
+{   const SpatialVec zero(Vec3(0), Vec3(0));
+    HType& dHDot = HType::updAs(dHDot_FM_dqd);
+    dHDot(0) = zero;
+    return true; }
+
 void calcAcrossJointVelocityJacobianDot(
     const SBStateDigest& sbs,
     HType&               HDot_FM) const

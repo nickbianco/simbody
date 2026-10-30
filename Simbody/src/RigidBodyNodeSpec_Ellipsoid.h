@@ -350,6 +350,57 @@ void calcAcrossJointVelocityJacobian(
     mirrorH(H_FM, mirrorAxis);
 }
 
+// Partials of H_FM and HDot_FM along the d-th free mode; see RigidBodyNode. The
+// angular parts of H_FM are the fixed unit vectors, so only the linear parts
+// vary, through the surface normal n which is fixed in M. Because the angular
+// parts are constant, dw_FM/dq_d vanishes, which is why the second partial
+// needs only w_F0M0 and not u. Mirroring follows calcAcrossJointVelocityJacobian
+// exactly: n and the mode direction are mirrored before use, the result after.
+bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest& sbs, int d,
+    Vec3* dH_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    Vec3 n   = this->findX_F0M0(pc).z();
+    Vec3 w_d = Vec3(d==0 ? 1 : 0, d==1 ? 1 : 0, d==2 ? 1 : 0);
+    mirrorLinear(n, mirrorAxis);
+    if (mirrorAxis == ZAxis) n = -n;
+    mirrorAngular(w_d, mirrorAxis);
+    const Vec3 dn = w_d % n;
+
+    HType& dH = HType::updAs(dH_FM_dqd);
+    dH(0) = SpatialVec( Vec3(0), Vec3(    0,        -dn[2]*semi[1], dn[1]*semi[2]) );
+    dH(1) = SpatialVec( Vec3(0), Vec3( dn[2]*semi[0],     0,       -dn[0]*semi[2]) );
+    dH(2) = SpatialVec( Vec3(0), Vec3(-dn[1]*semi[0], dn[0]*semi[1],     0       ) );
+    mirrorH(dH, mirrorAxis);
+    return true;
+}
+
+bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreeVelocityCache& vc = sbs.getTreeVelocityCache();
+    Vec3 n   = this->findX_F0M0(pc).z();
+    Vec3 w   = this->find_w_F0M0(pc, vc);
+    Vec3 w_d = Vec3(d==0 ? 1 : 0, d==1 ? 1 : 0, d==2 ? 1 : 0);
+    mirrorLinear(n, mirrorAxis);
+    if (mirrorAxis == ZAxis) n = -n;
+    mirrorAngular(w,   mirrorAxis);
+    mirrorAngular(w_d, mirrorAxis);
+
+    // ndot = w x n, so d(ndot)/dq_d = w x (w_d x n) since dw/dq_d is zero here.
+    const Vec3 dnd = w % (w_d % n);
+
+    HType& dHDot = HType::updAs(dHDot_FM_dqd);
+    dHDot(0) = SpatialVec( Vec3(0), Vec3(     0,        -dnd[2]*semi[1], dnd[1]*semi[2]) );
+    dHDot(1) = SpatialVec( Vec3(0), Vec3( dnd[2]*semi[0],     0,        -dnd[0]*semi[2]) );
+    dHDot(2) = SpatialVec( Vec3(0), Vec3(-dnd[1]*semi[0], dnd[0]*semi[1],     0        ) );
+    mirrorH(dHDot, mirrorAxis);
+    return true;
+}
+
 // Calculate time derivative of H_FM, which is *not* constant. (18 flops, or
 // 30 mirrored about F's x or y axis and 33 about its z axis)
 void calcAcrossJointVelocityJacobianDot(

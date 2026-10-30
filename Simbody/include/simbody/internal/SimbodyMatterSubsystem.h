@@ -2238,6 +2238,47 @@ void calcResidualForceIgnoringConstraints
     const Vector&              knownUdot,
     Vector&                    residualMobilityForces) const;
 
+/** Calculate the analytic first-order partial derivatives of the residual
+returned by calcResidualForceIgnoringConstraints(), with respect to the
+generalized coordinates q and the generalized speeds u.
+
+@param[in]  state       A State valid for this System, already realized to
+                        Stage::Velocity.
+@param[in]  appliedBodyForces
+                        The same applied body forces passed to
+                        calcResidualForceIgnoringConstraints(); may be zero
+                        length to mean all zero.
+@param[in]  knownUdot   The same known generalized accelerations; may be zero
+                        length to mean all zero.
+@param[out] dTauDQ      The nu X nu matrix of partials with respect to q.
+@param[out] dTauDU      The nu X nu matrix of partials with respect to u.
+
+Column (i,d) of each output holds the derivative along the d-th mobility of
+mobilized body i, and row ux the affected mobility. Both are resized if
+necessary.
+
+@note The applied forces and \a knownUdot are treated as fixed inputs, exactly
+as calcResidualForceIgnoringConstraints() treats them, so their own dependence
+on q and u is \e not included. A caller wanting a total derivative --- for
+instance one whose body forces are a configuration-dependent gravity wrench ---
+must add those terms separately. The applied mobility forces need not be passed
+at all, since they enter the residual additively and so drop out.
+
+@par Required stage
+  \c Stage::Velocity
+
+@throws An exception if any mobilizer's H_FM depends on q (for example
+Ellipsoid, Gimbal, or Custom mobilizers). Those require the individual
+dH_FM/dq partials, which are not currently available.
+
+@see calcResidualForceIgnoringConstraints() **/
+void calcResidualForceDerivativesIgnoringConstraints
+   (const State&               state,
+    const Vector_<SpatialVec>& appliedBodyForces,
+    const Vector&              knownUdot,
+    Matrix&                    dTauDQ,
+    Matrix&                    dTauDU) const;
+
 
 /** This is the inverse dynamics operator for when you know both the 
 accelerations and Lagrange multipliers for a constrained system. Prescribed

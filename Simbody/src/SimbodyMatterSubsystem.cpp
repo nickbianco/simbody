@@ -304,6 +304,56 @@ void SimbodyMatterSubsystem::calcResidualForceIgnoringConstraints
 }
 
 
+//==============================================================================
+//            CALC RESIDUAL FORCE DERIVATIVES IGNORING CONSTRAINTS
+//==============================================================================
+void SimbodyMatterSubsystem::calcResidualForceDerivativesIgnoringConstraints
+   (const State&               state,
+    const Vector_<SpatialVec>& appliedBodyForcesInG,
+    const Vector&              knownUdot,
+    Matrix&                    dTauDQ,
+    Matrix&                    dTauDU) const
+{
+    const SimbodyMatterSubsystemRep& rep = getRep();
+    const int nb = rep.getNumBodies();
+    const int nu = rep.getNU(state);
+
+    SimTK_APIARGCHECK2_ALWAYS(
+        appliedBodyForcesInG.size()==0 || appliedBodyForcesInG.size()==nb,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesIgnoringConstraints",
+        "Got %d appliedBodyForces but there are %d bodies (including Ground).",
+        appliedBodyForcesInG.size(), nb);
+    SimTK_APIARGCHECK2_ALWAYS(
+        knownUdot.size()==0 || knownUdot.size()==nu,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesIgnoringConstraints",
+        "Got %d knownUdots but there are %d mobilities.",
+        knownUdot.size(), nu);
+
+    // Assume at first that the input Vectors are contiguous.
+    const Vector_<SpatialVec>* cbodyForces = &appliedBodyForcesInG;
+    const Vector*              cudot       = &knownUdot;
+
+    Vector              contig_udot;
+    Vector_<SpatialVec> contig_bodyForces;
+
+    if (!appliedBodyForcesInG.hasContiguousData()) {
+        contig_bodyForces.resize(nb);                  // contiguous memory
+        contig_bodyForces(0, nb) = appliedBodyForcesInG; // copy, no realloc
+        cbodyForces = (const Vector_<SpatialVec>*)&contig_bodyForces;
+    }
+    if (!knownUdot.hasContiguousData()) {
+        contig_udot.resize(nu);                        // contiguous memory
+        contig_udot(0, nu) = knownUdot;                // copy, no realloc
+        cudot = (const Vector*)&contig_udot;
+    }
+
+    rep.calcTreeResidualForceDerivatives(state, *cbodyForces, *cudot,
+                                         dTauDQ, dTauDU);
+}
+
+
 
 //==============================================================================
 //                          CALC RESIDUAL FORCE 

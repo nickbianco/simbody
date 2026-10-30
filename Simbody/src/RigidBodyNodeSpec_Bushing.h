@@ -186,6 +186,78 @@ void calcAcrossJointVelocityJacobian(
     H_FM(5) = SpatialVec(         Vec3(0),        Vec3(0,0,1));
 }
 
+// Partials of H_FM and HDot_FM with respect to this mobilizer's own
+// coordinates, both along the d-th free mode; see RigidBodyNode. These
+// mobilizers orient by Euler angles with u == qdot, so a mode-d step moves q0
+// by (d==0) and q1 by (d==1), and "at fixed u" is the same as "at fixed qdot".
+//
+// Writing D for the mode-d derivative, the position pool differentiates as
+//     Dc0 = -s0*a, Ds0 = c0*a, Dc1 = -s1*b, Ds1 = c1*b
+// with a = (d==0), b = (d==1). The first partial is then the HDot_FM formula
+// below with (qd0,qd1) replaced by (a,b). The second partial differentiates
+// that same formula again, giving the mixed terms
+//     Ddc0 = -Ds0*qd0, Dds0 = Dc0*qd0, Ddc1 = -Ds1*qd1, Dds1 = Dc1*qd1
+// and then follows the product rule on each component.
+// Columns 3-5 are translations fixed in F, so they contribute nothing.
+bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest& sbs, int d,
+    Vec3* dH_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBModelCache& mc = sbs.getModelCache();
+    const Real* pool = this->getQPool(mc, pc);
+    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
+    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
+    const Real a = (d==0 ? Real(1) : Real(0));
+    const Real b = (d==1 ? Real(1) : Real(0));
+    const Real Dc0 = -s0*a, Dc1 = -s1*b;
+    const Real Ds0 =  c0*a, Ds1 =  c1*b;
+
+    HType& dH = HType::updAs(dH_FM_dqd);
+    dH(0) = SpatialVec(Vec3(0,        0,             0),       Vec3(0));
+    dH(1) = SpatialVec(Vec3(0,       Dc0,           Ds0),      Vec3(0));
+    dH(2) = SpatialVec(Vec3(Ds1, -Ds0*c1-s0*Dc1, Dc0*c1+c0*Dc1), Vec3(0));
+    dH(3) = SpatialVec(Vec3(0), Vec3(0));
+    dH(4) = SpatialVec(Vec3(0), Vec3(0));
+    dH(5) = SpatialVec(Vec3(0), Vec3(0));
+    return true;
+}
+
+bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBModelCache& mc = sbs.getModelCache();
+    const Real* pool = this->getQPool(mc, pc);
+    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
+    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
+    const int  ux0 = this->getUIndex();
+    const Real qd0 = u[ux0], qd1 = u[ux0+1];   // qdot == u here
+    const Real a = (d==0 ? Real(1) : Real(0));
+    const Real b = (d==1 ? Real(1) : Real(0));
+
+    const Real dc0 = -s0*qd0, dc1 = -s1*qd1;   // as in HDot_FM below
+    const Real ds0 =  c0*qd0, ds1 =  c1*qd1;
+    const Real Dc0 = -s0*a,   Dc1 = -s1*b;     // mode-d derivs of the pool
+    const Real Ds0 =  c0*a,   Ds1 =  c1*b;
+    const Real Ddc0 = -Ds0*qd0, Ddc1 = -Ds1*qd1;   // mixed
+    const Real Dds0 =  Dc0*qd0, Dds1 =  Dc1*qd1;
+
+    HType& dHDot = HType::updAs(dHDot_FM_dqd);
+    dHDot(0) = SpatialVec(Vec3(0, 0, 0), Vec3(0));
+    dHDot(1) = SpatialVec(Vec3(0, Ddc0, Dds0), Vec3(0));
+    dHDot(2) = SpatialVec(
+        Vec3(Dds1,
+             -(Dds0*c1 + ds0*Dc1) - (Ds0*dc1 + s0*Ddc1),
+              (Ddc0*c1 + dc0*Dc1) + (Dc0*dc1 + c0*Ddc1)),
+        Vec3(0));
+    dHDot(3) = SpatialVec(Vec3(0), Vec3(0));
+    dHDot(4) = SpatialVec(Vec3(0), Vec3(0));
+    dHDot(5) = SpatialVec(Vec3(0), Vec3(0));
+    return true;
+}
+
 // Differentiate H_FM to get HDot_FM. Note that this depends on qdot:
 //    d/dt cos(q0) = -sin(q0)*qdot0, etc.
 void calcAcrossJointVelocityJacobianDot(

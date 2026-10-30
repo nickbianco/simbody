@@ -162,6 +162,44 @@ void calcAcrossJointVelocityJacobian(
     H_FM(1) = SpatialVec(    R_FM.y()  , Vec3(0) );
 }
 
+// Partials of H_FM and HDot_FM with respect to this mobilizer's own
+// coordinates, both taken along the d-th free mode; see RigidBodyNode. Column 0
+// is fixed in F so it contributes nothing to either; column 1 is My_F, fixed in
+// M, so it rotates with the mobilizer.
+bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest& sbs, int d,
+    Vec3* dH_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const Rotation& R_FM = this->findX_F0M0(pc).R();
+    const Vec3      w_d  = this->getH_FM(pc)(d)[0];
+
+    HType& dH = HType::updAs(dH_FM_dqd);
+    dH(0) = SpatialVec(     Vec3(0)    , Vec3(0) );
+    dH(1) = SpatialVec( w_d % R_FM.y() , Vec3(0) );
+    return true;
+}
+
+bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreeVelocityCache& vc = sbs.getTreeVelocityCache();
+    const Rotation& R_FM = this->findX_F0M0(pc).R();
+    const Vec3      w_FM = this->find_w_F0M0(pc, vc);
+    const Vec3      w_d  = this->getH_FM(pc)(d)[0];
+    const Vec3      dMy  = w_d % R_FM.y();          // = dH_FM(1)_w
+
+    // dw_FM/dq_d at fixed u is sum_p dH_FM(p)_w u_p; only column 1 varies.
+    const Vec3 dw_FM = dMy * u[this->getUIndex()+1];
+
+    HType& dHDot = HType::updAs(dHDot_FM_dqd);
+    dHDot(0) = SpatialVec( Vec3(0), Vec3(0) );
+    dHDot(1) = SpatialVec( dw_FM % R_FM.y() + w_FM % dMy, Vec3(0) );
+    return true;
+}
+
 // Since the second row of the Jacobian H_FM above is not constant in F,
 // its time derivative is non zero. Here we use the fact that for
 // a vector r_B_A fixed in a moving frame B but expressed in another frame A,

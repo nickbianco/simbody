@@ -861,6 +861,285 @@ RigidBodyNodeSpec<dof, noR_FM>::calcEquivalentJointForces(
 }
 
 
+//==============================================================================
+//                      INVERSE DYNAMICS DERIVATIVES
+//==============================================================================
+// Analytic first-order partials of the inverse dynamics residual. These three
+// methods are the per-body halves of the operator driven by
+// SimbodyMatterSubsystemRep::calcTreeResidualForceDerivatives(); see
+// Simbody/tests/adhoc/InverseDynamicsSandbox.cpp for the derivation and its
+// numerical verification, and Jain, "Robot and Multibody Dynamics", Ch. 18 for
+// the operator sensitivities cited below.
+//
+// Spatial vectors are referred to each body's own origin Bo and expressed in
+// Ground, as everywhere else in Simbody. W(w) denotes the angular-only cross
+// operator diag(w~, w~), Jain's Htilde*_w. Each sensitivity is a commutator
+// with W, and commutators are applied rather than formed, using
+//     [W X - X W] y = W(X y) - X(W y),
+// which keeps every operation below to cross products and structured
+// applications of Phi and Mk_G.
+
+// Outward: dH, dV, dA and the u-side eV, eA for this body.
+template<int dof, bool noR_FM> void
+RigidBodyNodeSpec<dof, noR_FM>::calcInverseDynamicsDerivativesOutward
+   (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+    const SpatialVec& H_col, int selfMode, InverseDynamicsDerivativesWorkspace& w) const
+{
+    const MobilizedBodyIndex k = this->getNodeNum();
+    const MobilizedBodyIndex p = this->parent->getNodeNum();
+    const int                ux0 = this->getUIndex();
+
+    const Vec3& w_i = H_col[0];          // perturbing mode, angular part
+    const Vec3& v_i = H_col[1];          // and linear part
+    const PhiMatrix&  Phi = this->getPhi(pc);
+    const SpatialVec& V_p = this->getV_GP(vc);
+    const SpatialVec& V_k = this->getV_GB(vc);
+
+    // rho = p_BoMo in Ground, fixed in this body, and R_GF the orientation of
+    // the inboard frame; both are per-body and were built once by the caller.
+    // H_PB_G is built from H_FM by rotating with R_GF and shifting from Mo to
+    // Bo, and differentiating that construction gives the self-column term.
+    const Vec3&     rho  = w.rho[k];
+    const Rotation& R_GF = w.R_GF[k];
+
+    //--------------------------------------------------------------------------
+    // Hinge-matrix sensitivity.                                  [Jain 18.29b]
+    //   i > k : dH = W(w_i) H
+    //   i == k: the modes are fixed in F while their line of action passes
+    //           through Mo, which is material in this body, so differentiating
+    //           H_PB_G = R_GF (H_FM + H_MB_F) at fixed R_GF gives
+    //             dH = R_GF dH_FM + (0, -(w_d x rho_F) x H_FM_w
+    //                                   - r_MB_F x dH_FM_w)
+    //           which reduces to (0, -H_w x (w_i x rho)) when H_FM is constant.
+    //--------------------------------------------------------------------------
+    // Zero first, so that a mobilizer which cannot supply its partials degrades
+    // to the constant-H_FM formulas rather than reading garbage. The Rep
+    // validates the whole tree before any sweep runs, so a false return here
+    // means the node was driven directly.
+    Vec3 dHFMstore[2*dof], dHDotFMstore[2*dof];
+    for (int j=0; j < 2*dof; ++j) dHFMstore[j] = dHDotFMstore[j] = Vec3(0);
+    const HType& dH_FM    = HType::getAs(dHFMstore);
+    const HType& dHDot_FM = HType::getAs(dHDotFMstore);
+
+    const HType& H = this->getH(pc);
+    if (selfMode < 0) {
+        for (int e=0; e < dof; ++e)
+            w.dH[ux0+e] = SpatialVec(w_i % H(e)[0], w_i % H(e)[1]);
+    } else {
+        bool ok = this->calcAcrossJointVelocityJacobianPartial(
+                      *w.sbs, selfMode, dHFMstore);
+        ok = ok && this->calcAcrossJointVelocityJacobianDotPartial(
+                       *w.sbs, w.u, selfMode, dHDotFMstore);
+        assert(ok); (void)ok;
+        for (int e=0; e < dof; ++e) {
+            // Rotate dH_FM into Ground, then add the moving-Mo correction.
+            const SpatialVec dHr(R_GF*dH_FM(e)[0], R_GF*dH_FM(e)[1]);
+            w.dH[ux0+e] = dHr
+                + SpatialVec(Vec3(0), -(H(e)[0] % (w_i % rho))
+                                      + (rho % dHr[0]));
+        }
+    }
+
+    //--------------------------------------------------------------------------
+    // Shift-operator sensitivity, applied not formed.             [Jain 18.29a]
+    //   i > k : (~dPhi) y = W(~Phi y) - ~Phi(W y)
+    //   i == k: only this joint's own translation enters, dPhi =
+    //           [[0, v_i~],[0,0]], whose transpose sends y to (0, -v_i x y_w).
+    //--------------------------------------------------------------------------
+    const SpatialVec& A_p = w.A_GB[p];
+    SpatialVec dPhiT_V, dPhiT_A;
+    if (selfMode >= 0) {
+        dPhiT_V = SpatialVec(Vec3(0), -(v_i % V_p[0]));
+        dPhiT_A = SpatialVec(Vec3(0), -(v_i % A_p[0]));
+    } else {
+        const SpatialVec sV = ~Phi * V_p, sA = ~Phi * A_p;
+        dPhiT_V = SpatialVec(w_i % sV[0], w_i % sV[1])
+                - ~Phi * SpatialVec(w_i % V_p[0], w_i % V_p[1]);
+        dPhiT_A = SpatialVec(w_i % sA[0], w_i % sA[1])
+                - ~Phi * SpatialVec(w_i % A_p[0], w_i % A_p[1]);
+    }
+
+    //--------------------------------------------------------------------------
+    // Velocity sensitivity, q and u sides.
+    //   dV = (~dPhi) V_p + ~Phi dV_p + sum_e dH u
+    //   eV = ~Phi eV_p + H_col 1[i == k]
+    //--------------------------------------------------------------------------
+    SpatialVec dVr(Vec3(0), Vec3(0));
+    for (int e=0; e < dof; ++e) dVr += w.dH[ux0+e] * w.u[ux0+e];
+    w.dV[k] = dPhiT_V + ~Phi * w.dV[p] + dVr;
+
+    const SpatialVec eVr = (selfMode >= 0) ? H_col
+                                           : SpatialVec(Vec3(0), Vec3(0));
+    w.eV[k] = ~Phi * w.eV[p] + eVr;
+
+    //--------------------------------------------------------------------------
+    // Coriolis-acceleration sensitivity. Simbody's cross-mobilizer term has the
+    // closed form
+    //   a_c = (0, wp x (v_k - v_p)) + W(wp) Vr + (0, -wr x (wr x rho))
+    // with Vr the cross-mobilizer velocity, so differentiating it needs only
+    // dV, dVr and d(rho) = w_i x rho. The u side drops the d(rho) term since
+    // rho is configuration-only.
+    //--------------------------------------------------------------------------
+    const SpatialVec& Vr = this->getV_PB_G(vc);
+    const Vec3& wp = V_p[0];
+    const Vec3& wr = Vr[0];
+    const Vec3& dwp = w.dV[p][0];
+    const Vec3& ewp = w.eV[p][0];
+    const Vec3  dwr = dVr[0], ewr = eVr[0];
+    const Vec3  drho = w_i % rho;
+
+    // When H_FM depends on q the closed form above is incomplete: a_c also
+    // contains Z = R_GF*(HDot_FM u) together with its Mo shift (0, rho x Z_w).
+    // Z is per-body and zero for every mobilizer with HDot_FM identically zero,
+    // so the next few lines cost nothing in the common case.
+    const SpatialVec& Z = w.Z[k];
+    SpatialVec dZ, eZ(Vec3(0), Vec3(0));
+    if (selfMode < 0) {
+        // An ancestor's coordinate rotates Z rigidly; the F-local HDot_FM and u
+        // are untouched.
+        dZ = SpatialVec(w_i % Z[0], w_i % Z[1]);
+    } else {
+        // dZ/dq_d = R_GF*(sum_e dHDot_FM(e) u_e).
+        SpatialVec sd(Vec3(0), Vec3(0));
+        for (int e=0; e < dof; ++e) sd += dHDot_FM(e) * w.u[ux0+e];
+        dZ = SpatialVec(R_GF*sd[0], R_GF*sd[1]);
+
+        // HDot_FM u is quadratic in u, so differentiating it in u gives two
+        // terms: dZ/du_d = R_GF*(sum_e dH_FM(e) u_e + HDot_FM(d)).
+        SpatialVec se = this->getHDot_FM(vc)(selfMode);
+        for (int e=0; e < dof; ++e) se += dH_FM(e) * w.u[ux0+e];
+        eZ = SpatialVec(R_GF*se[0], R_GF*se[1]);
+    }
+
+    const SpatialVec da_c =
+          SpatialVec(Vec3(0), dwp % (V_k[1] - V_p[1])
+                            + wp  % (w.dV[k][1] - w.dV[p][1]))
+        + SpatialVec(dwp % Vr[0] + wp % dVr[0],
+                     dwp % Vr[1] + wp % dVr[1])
+        + SpatialVec(Vec3(0), -(dwr % (wr % rho))
+                              -(wr  % (dwr % rho))
+                              -(wr  % (wr  % drho)))
+        + dZ + SpatialVec(Vec3(0), drho % Z[0] + rho % dZ[0]);
+
+    const SpatialVec ea_c =
+          SpatialVec(Vec3(0), ewp % (V_k[1] - V_p[1])
+                            + wp  % (w.eV[k][1] - w.eV[p][1]))
+        + SpatialVec(ewp % Vr[0] + wp % eVr[0],
+                     ewp % Vr[1] + wp % eVr[1])
+        + SpatialVec(Vec3(0), -(ewr % (wr % rho))
+                              -(wr  % (ewr % rho)))
+        + eZ + SpatialVec(Vec3(0), rho % eZ[0]);
+
+    //--------------------------------------------------------------------------
+    // Acceleration sensitivity. H depends on q alone, so the u side has no
+    // dH udot term.
+    //--------------------------------------------------------------------------
+    SpatialVec dA = dPhiT_A + ~Phi * w.dA[p] + da_c;
+    for (int e=0; e < dof; ++e) dA += w.dH[ux0+e] * w.udot[ux0+e];
+    w.dA[k] = dA;
+    w.eA[k] = ~Phi * w.eA[p] + ea_c;
+}
+
+// Inward: dF, eF, this body's Jacobian rows, and the push to the parent.
+template<int dof, bool noR_FM> void
+RigidBodyNodeSpec<dof, noR_FM>::calcInverseDynamicsDerivativesInward
+   (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+    const SpatialVec& H_col, int selfMode, InverseDynamicsDerivativesWorkspace& w,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const
+{
+    const MobilizedBodyIndex k = this->getNodeNum();
+    const MobilizedBodyIndex p = this->parent->getNodeNum();
+    const int                ux0 = this->getUIndex();
+
+    const Vec3& w_i = H_col[0];
+    const Vec3& v_i = H_col[1];
+    const PhiMatrix&      Phi = this->getPhi(pc);
+    const SpatialInertia& M   = this->getMk_G(pc);
+    const HType&          H   = this->getH(pc);
+
+    const Vec3& wk = this->getV_GB(vc)[0];
+    const Vec3& dw = w.dV[k][0];
+    const Vec3& ew = w.eV[k][0];
+
+    //--------------------------------------------------------------------------
+    // Inertia sensitivity, applied not formed.                    [Jain 18.29c]
+    // dM = W M - M W, hence dM y = W(M y) - M(W y), with M y precomputed once
+    // per body as MA = M A_GB and Mw = M (w,0).
+    //--------------------------------------------------------------------------
+    const SpatialVec& MA = w.MA[k];
+    const SpatialVec& Mw = w.Mw[k];
+    const SpatialVec& A  = w.A_GB[k];
+    const SpatialVec dMA = SpatialVec(w_i % MA[0], w_i % MA[1])
+                         - M * SpatialVec(w_i % A[0], w_i % A[1]);
+    const SpatialVec dMw = SpatialVec(w_i % Mw[0], w_i % Mw[1])
+                         - M * SpatialVec(w_i % wk, Vec3(0));
+
+    //--------------------------------------------------------------------------
+    // Gyroscopic-force sensitivity. b = W(w)[M (w,0)], so
+    //   db = W(dw)[M(w,0)] + W(w)[dM(w,0) + M(dw,0)]
+    // and the u side drops the dM term.
+    //--------------------------------------------------------------------------
+    const SpatialVec Mdw = M * SpatialVec(dw, Vec3(0));
+    const SpatialVec Mew = M * SpatialVec(ew, Vec3(0));
+    const SpatialVec db = SpatialVec(dw % Mw[0], dw % Mw[1])
+                        + SpatialVec(wk % (dMw[0]+Mdw[0]),
+                                     wk % (dMw[1]+Mdw[1]));
+    const SpatialVec eb = SpatialVec(ew % Mw[0], ew % Mw[1])
+                        + SpatialVec(wk % Mew[0], wk % Mew[1]);
+
+    //--------------------------------------------------------------------------
+    // Transmitted-force sensitivity, then this body's Jacobian rows.
+    //   dF += dM A + M dA + db ;  eF += M eA + eb
+    //   dtau = [dH] . F + H . dF ;  etau = H . eF              [Singh J3]
+    // The [dH] . F term is J3's residue and is nonzero only for multi-DoF
+    // joints; there is no [eH] . F counterpart since H is q-only.
+    //--------------------------------------------------------------------------
+    w.dF[k] += dMA + M * w.dA[k] + db;
+    w.eF[k] += M * w.eA[k] + eb;
+
+    const SpatialVec& Fk = w.F[k];
+    for (int e=0; e < dof; ++e) {
+        dTauDQ(ux0+e, col) = dot(w.dH[ux0+e], Fk) + dot(H(e), w.dF[k]);
+        dTauDU(ux0+e, col) = dot(H(e), w.eF[k]);
+    }
+
+    //--------------------------------------------------------------------------
+    // Push to the parent. On a force the dPhi action runs the other way:
+    //   dPhi F = W(Phi F) - Phi(W F), or (v_i x f, 0) when i == k.
+    //--------------------------------------------------------------------------
+    const SpatialVec PhiF = Phi * Fk;
+    const SpatialVec dPhiF = (selfMode >= 0)
+        ? SpatialVec(v_i % Fk[1], Vec3(0))
+        : SpatialVec(w_i % PhiF[0], w_i % PhiF[1])
+          - Phi * SpatialVec(w_i % Fk[0], w_i % Fk[1]);
+    w.dF[p] += dPhiF + Phi * w.dF[k];
+    w.eF[p] += Phi * w.eF[k];
+}
+
+// Inward, above the perturbed body. Outside the perturbed subtree every body
+// term vanishes and so does dPhi, since dPhi(k,c) requires the perturbed joint
+// to be an ancestor of c; only the transmitted force keeps propagating, and dH
+// is zero so dtau loses its first term.
+template<int dof, bool noR_FM> void
+RigidBodyNodeSpec<dof, noR_FM>::calcInverseDynamicsDerivativesInwardAbove
+   (const SBTreePositionCache& pc, InverseDynamicsDerivativesWorkspace& w,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const
+{
+    const MobilizedBodyIndex k = this->getNodeNum();
+    const MobilizedBodyIndex p = this->parent->getNodeNum();
+    const int                ux0 = this->getUIndex();
+    const HType&             H   = this->getH(pc);
+    const PhiMatrix&         Phi = this->getPhi(pc);
+
+    for (int e=0; e < dof; ++e) {
+        dTauDQ(ux0+e, col) = dot(H(e), w.dF[k]);
+        dTauDU(ux0+e, col) = dot(H(e), w.eF[k]);
+    }
+    w.dF[p] += Phi * w.dF[k];
+    w.eF[p] += Phi * w.eF[k];
+}
+
+
     ////////////////////
     // INSTANTIATIONS //
     ////////////////////

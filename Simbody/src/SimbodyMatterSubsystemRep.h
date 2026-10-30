@@ -613,6 +613,21 @@ public:
         Vector_<SpatialVec>&        A_GB,
         Vector&                     residualMobilityForces) const;
 
+    // Analytic first-order partial derivatives of the residual computed by
+    // calcTreeResidualForces(), with respect to q and to u. The applied forces
+    // and knownUdot are treated as fixed inputs, so their own q- and
+    // u-dependence is excluded; a caller wanting a total derivative must add
+    // those terms. Both outputs are nu X nu, column (i,d) being the derivative
+    // along the d-th mobility of body i. Requires Stage::Velocity.
+    //
+    // Throws if any mobilizer cannot supply its dH_FM/dq partials; see
+    // RigidBodyNode::calcAcrossJointVelocityJacobianPartial().
+    void calcTreeResidualForceDerivatives(const State&,
+        const Vector_<SpatialVec>&  appliedBodyForces,
+        const Vector&               knownUdot,
+        Matrix&                     dTauDQ,
+        Matrix&                     dTauDU) const;
+
 
 
     // Must be in Stage::Position to calculate out_q = N(q)*in_u (e.g., qdot=N*u)

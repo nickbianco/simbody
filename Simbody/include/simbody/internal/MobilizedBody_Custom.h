@@ -276,6 +276,58 @@ public:
     /// calculated Transform, and getMobilizerVelocity(s) to get the already calculated velocity.
     virtual SpatialVec multiplyByHDotMatrix(const State& s, int nu, const Real* u) const = 0;
 
+    /// Optional: calculate out = (dH/dq_d)*u, the partial derivative of the
+    /// joint transition matrix H with respect to this mobilizer's d-th
+    /// generalized coordinate, multiplied by the given \a u.
+    ///
+    /// The derivative is a directional derivative along the d-th free mode: the
+    /// configuration is perturbed by qdot = N(q)*e_d, which for a mobilizer
+    /// whose u is qdot is just a step in q_d. The \a u argument is the vector
+    /// the resulting matrix multiplies; it is unrelated to the State's
+    /// generalized speeds.
+    ///
+    /// Return \c true if you computed the result. The default returns \c false,
+    /// meaning "I do not supply analytic partials", which is what keeps
+    /// existing Implementations working unchanged. Operators that need these
+    /// partials, such as
+    /// SimbodyMatterSubsystem::calcResidualForceDerivativesIgnoringConstraints(),
+    /// refuse to run for a mobilizer that returns \c false rather than
+    /// returning a wrong answer. If you implement one of this pair you must
+    /// implement both.
+    ///
+    /// The state is guaranteed to have been realized to at least Position
+    /// stage.
+    ///
+    /// @see multiplyByHDotPartialMatrix(), multiplyByHMatrix()
+    virtual bool multiplyByHPartialMatrix(const State& s, int d, int nu,
+                                          const Real* u,
+                                          SpatialVec& out) const
+    {   return false; }
+
+    /// Optional: calculate out = (dHDot/dq_d)*u, the partial derivative of
+    /// HDot with respect to this mobilizer's d-th generalized coordinate,
+    /// multiplied by the given \a u.
+    ///
+    /// IMPORTANT -- the derivative is taken holding the State's generalized
+    /// speeds \e u fixed, not holding qdot fixed. HDot is linear in qdot and
+    /// qdot = N(q)*u, so when N depends on q the two differ, and it is the
+    /// fixed-u version that is wanted here. As above, the \a u argument is
+    /// merely the vector the resulting matrix multiplies.
+    ///
+    /// This is needed in addition to multiplyByHPartialMatrix() because the
+    /// cross-mobilizer Coriolis acceleration contains HDot*u, whose
+    /// q-derivative is this quantity. Returning \c true from one of the pair
+    /// but not the other is an error.
+    ///
+    /// The state is guaranteed to have been realized to at least Velocity
+    /// stage.
+    ///
+    /// @see multiplyByHPartialMatrix(), multiplyByHDotMatrix()
+    virtual bool multiplyByHDotPartialMatrix(const State& s, int d, int nu,
+                                             const Real* u,
+                                             SpatialVec& out) const
+    {   return false; }
+
     /// Calculate f = ~HDot*F where F is a spatial vector and f is its mapping onto
     /// the mobilities.
     /// The state is guaranteed to have been realized to at least Velocity stage.

@@ -169,6 +169,56 @@ void calcAcrossJointVelocityJacobian(
     H_FM(1) = SpatialVec( Vec3(0),            Mx_F          );
 }
 
+// Partials of H_FM and HDot_FM along the d-th free mode; see RigidBodyNode.
+// Unlike the purely rotational mobilizers, HDot_FM here depends on the linear
+// part of the cross-mobilizer velocity as well as the angular part, so the
+// mode's linear part v_d enters too. The useful facts are
+//     d(p_FM)/dq_d = v_d   and   d(Mx_F)/dq_d = w_d x Mx_F,
+// which make the first partial the HDot_FM formula below evaluated at
+// V_F0M0 = H_FM(d), i.e. at u = e_d.
+bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest& sbs, int d,
+    Vec3* dH_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const Vec3&      Mx_F = this->findX_F0M0(pc).R().x();
+    const SpatialVec H_d  = this->getH_FM(pc)(d);
+    const Vec3&      w_d  = H_d[0];
+    const Vec3&      v_d  = H_d[1];
+
+    HType& dH = HType::updAs(dH_FM_dqd);
+    dH(0) = SpatialVec( Vec3(0), Vec3(0,0,1) % v_d );
+    dH(1) = SpatialVec( Vec3(0),    w_d % Mx_F    );
+    return true;
+}
+
+bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const override
+{
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBModelCache& mc = sbs.getModelCache();
+    const SBTreeVelocityCache& vc = sbs.getTreeVelocityCache();
+    const Vec3&      Mx_F   = this->findX_F0M0(pc).R().x();
+    const SpatialVec V_F0M0 = this->findV_F0M0(pc, vc);
+    const Vec3&      w_FM   = V_F0M0[0];
+    const Vec3       w_d    = this->getH_FM(pc)(d)[0];
+
+    // dV_FM/dq_d at fixed u is sum_p (dH_FM(p)/dq_d) u_p, so it follows from
+    // the first partial above.
+    Vec3 dHstore[4];                       // 2*dof Vec3's, dof == 2
+    calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dHstore);
+    const HType& dH = HType::getAs(dHstore);
+    const int ux0 = this->getUIndex();
+    SpatialVec dV(Vec3(0), Vec3(0));
+    for (int e=0; e < 2; ++e) dV += dH(e) * u[ux0+e];
+
+    HType& dHDot = HType::updAs(dHDot_FM_dqd);
+    dHDot(0) = SpatialVec( Vec3(0), Vec3(0,0,1) % dV[1] );
+    dHDot(1) = SpatialVec( Vec3(0), dV[0] % Mx_F + w_FM % (w_d % Mx_F) );
+    return true;
+}
+
 // Since the the Jacobian above is not constant in F,
 // its time derivative is non zero. Here we use the fact that for
 // a vector r_B_A fixed in a moving frame B but expressed in another frame A,

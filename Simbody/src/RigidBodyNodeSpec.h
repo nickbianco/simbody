@@ -550,6 +550,72 @@ virtual void calcReverseMobilizerHDot_FM(
     const SBStateDigest& sbs,
     HType&               HDot_FM) const;
 
+// Partial of H_FM with respect to this mobilizer's own d-th coordinate; see
+// RigidBodyNode for the contract. This is final: it screens out the cases the
+// per-mobilizer formulas do not cover and then delegates. A reversed mobilizer
+// builds its H_FM by post-processing the as-defined H_MF with a q-dependent
+// transform (see calcReverseMobilizerH_FM), so its partials are not the
+// reversal of the as-defined partials and are rejected here rather than
+// silently mishandled.
+bool calcAcrossJointVelocityJacobianPartial
+   (const SBStateDigest& sbs, int d, Vec3* dH_FM_dqd) const final
+{   if (this->isReversed()) return false;
+    return calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dH_FM_dqd); }
+
+// Per-mobilizer partial, as defined (never reversed). The default reports that
+// it is unavailable; a zero default would be silently wrong for the mobilizers
+// whose H_FM really does depend on q.
+//
+// For every mobilizer that implements this, the partial is exactly its own
+// HDot_FM formula evaluated with the cross-mobilizer velocity replaced by the
+// d-th column of H_FM -- that is, at u = e_d. This is not a coincidence:
+// HDot_FM = sum_p (dH_FM/dq_p) qdot_p, so evaluating it at u = e_d picks out
+// the single term dH_FM/dq_d. Keep each implementation in step with the
+// HDot_FM method beside it.
+virtual bool calcAcrossJointVelocityJacobianPartialImpl
+   (const SBStateDigest&, int d, Vec3* dH_FM_dqd) const
+{   return false; }
+
+SpatialVec calcHDotFMTimesU
+   (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+    const Real* u, const Rotation& R_GF) const override
+{   const HType& HDot_FM = this->getHDot_FM(vc);
+    const int ux0 = this->getUIndex();
+    SpatialVec s(Vec3(0), Vec3(0));
+    for (int e=0; e < dof; ++e) s += HDot_FM(e) * u[ux0+e];
+    return SpatialVec(R_GF*s[0], R_GF*s[1]); }
+
+// Second-order partial; see RigidBodyNode for the contract. Same final/Impl
+// split, for the same reason.
+bool calcAcrossJointVelocityJacobianDotPartial
+   (const SBStateDigest& sbs, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const final
+{   if (this->isReversed()) return false;
+    return calcAcrossJointVelocityJacobianDotPartialImpl(sbs, u, d,
+                                                         dHDot_FM_dqd); }
+
+virtual bool calcAcrossJointVelocityJacobianDotPartialImpl
+   (const SBStateDigest&, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const
+{   return false; }
+
+
+// The three inverse dynamics derivative sweeps; see RigidBodyNode for what
+// each one does. Implemented in RigidBodyNodeSpec.cpp.
+void calcInverseDynamicsDerivativesOutward
+   (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+    const SpatialVec& H_col, int selfMode,
+    InverseDynamicsDerivativesWorkspace& w) const override;
+
+void calcInverseDynamicsDerivativesInward
+   (const SBTreePositionCache& pc, const SBTreeVelocityCache& vc,
+    const SpatialVec& H_col, int selfMode, InverseDynamicsDerivativesWorkspace& w,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const override;
+
+void calcInverseDynamicsDerivativesInwardAbove
+   (const SBTreePositionCache& pc, InverseDynamicsDerivativesWorkspace& w,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const override;
+
 // This routine is NOT joint specific, but cannot be called until the across-joint
 // transform X_FM has been calculated and is available in the State cache.
 void calcBodyTransforms(

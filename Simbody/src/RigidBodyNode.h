@@ -593,6 +593,95 @@ virtual const SpatialVec& getHCol(const SBTreePositionCache&, int j) const
 virtual const SpatialVec& getH_FMCol(const SBTreePositionCache&, int j) const 
 {SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "getH_FMCol");}
 
+// Partial derivative of this mobilizer's H_FM with respect to its own d-th
+// generalized coordinate, taken as a directional derivative along the d-th free
+// mode. Returns false if this mobilizer cannot supply it, in which case the
+// analytic inverse dynamics derivative operators refuse to run rather than
+// return a wrong answer. Mobilizers whose H_FM is constant in F -- that is,
+// whose HDot_FM is identically zero, which is the case whenever the generalized
+// speeds are defined directly in terms of F -- return a zero matrix and true.
+//
+// A zero default would be silently wrong for the mobilizers that do have a
+// q-dependent H_FM, so the default is the conservative one. This is also the
+// capability query: a caller that only wants to know whether the analytic
+// derivatives are available calls it and ignores the output.
+virtual bool calcAcrossJointVelocityJacobianPartial
+   (const SBStateDigest&, int d, Vec3* dH_FM_dqd) const {return false;}
+
+// Partial derivative of this mobilizer's HDot_FM with respect to its own d-th
+// generalized coordinate, taken along the d-th free mode and at FIXED u (not at
+// fixed qdot; HDot_FM is linear in qdot and qdot = N(q)u, so the distinction
+// matters whenever N depends on q). Returns false if unavailable.
+//
+// This is needed in addition to the first partial above because the
+// cross-mobilizer Coriolis acceleration contains R_GF*(HDot_FM u), whose
+// q-derivative is this quantity. A mobilizer with HDot_FM identically zero
+// returns a zero matrix and true.
+virtual bool calcAcrossJointVelocityJacobianDotPartial
+   (const SBStateDigest&, const Real* u, int d,
+    Vec3* dHDot_FM_dqd) const {return false;}
+
+// Returns R_GF*(HDot_FM*u) for this mobilizer, the term the cross-mobilizer
+// Coriolis acceleration picks up when H_FM depends on q. Zero for a mobilizer
+// whose HDot_FM is identically zero, which is most of them.
+virtual SpatialVec calcHDotFMTimesU
+   (const SBTreePositionCache&, const SBTreeVelocityCache&,
+    const Real* u, const Rotation& R_GF) const
+{   return SpatialVec(Vec3(0), Vec3(0)); }
+
+// Workspace shared by the inverse dynamics derivative sweeps below. The const
+// members are configuration- and velocity-dependent quantities computed once
+// per operator call; the rest is per-column scratch. All arrays are indexed by
+// MobilizedBodyIndex except dH, which is indexed by UIndex.
+struct InverseDynamicsDerivativesWorkspace {
+    const SBStateDigest*   sbs; // the mobilizer partials take the whole
+                                //   digest, which also gives Custom mobilizers
+                                //   the State their Implementation needs
+    const SBInstanceCache* ic;  // needed for the fixed X_MB
+    const SpatialVec*   A_GB;   // body accelerations implied by knownUdot
+    const SpatialVec*   F;      // composite transmitted forces
+    const SpatialVec*   MA;     // Mk_G*A_GB, per body
+    const SpatialVec*   Mw;     // Mk_G*(w_GB,0), per body
+    const Vec3*         rho;    // p_BoMo in Ground, per body
+    const Rotation*     R_GF;   // orientation of the inboard frame, per body
+    const SpatialVec*   Z;      // R_GF*(HDot_FM u), per body; zero unless the
+                                //   mobilizer's H_FM depends on q
+    const Real*         u;
+    const Real*         udot;
+    SpatialVec*         dH;     // dH(k,e)/dq for the current column
+    SpatialVec*         dV;  SpatialVec* dA;  SpatialVec* dF;
+    SpatialVec*         eV;  SpatialVec* eA;  SpatialVec* eF;
+};
+
+// Outward (base to tip) half of one column of the inverse dynamics
+// derivatives: fills dH, dV, dA and their u-side counterparts eV, eA for this
+// body. H_col is the perturbing mode, expressed in Ground and referred to the
+// perturbing body's own origin; selfMode is the mode's index within this
+// mobilizer when this body *is* the perturbed one, and -1 otherwise.
+virtual void calcInverseDynamicsDerivativesOutward
+   (const SBTreePositionCache&, const SBTreeVelocityCache&,
+    const SpatialVec& H_col, int selfMode, InverseDynamicsDerivativesWorkspace&) const
+{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+              "calcInverseDynamicsDerivativesOutward");}
+
+// Inward (tip to base) half: accumulates dF and eF for this body, writes its
+// rows of the two Jacobians, and pushes the transmitted-force sensitivities to
+// the parent.
+virtual void calcInverseDynamicsDerivativesInward
+   (const SBTreePositionCache&, const SBTreeVelocityCache&,
+    const SpatialVec& H_col, int selfMode, InverseDynamicsDerivativesWorkspace&,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const
+{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+              "calcInverseDynamicsDerivativesInward");}
+
+// Inward half for bodies above the perturbed one, where every body term
+// vanishes and only the transmitted force keeps propagating.
+virtual void calcInverseDynamicsDerivativesInwardAbove
+   (const SBTreePositionCache&, InverseDynamicsDerivativesWorkspace&,
+    int col, Matrix& dTauDQ, Matrix& dTauDU) const
+{SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+              "calcInverseDynamicsDerivativesInwardAbove");}
+
 
     // BASE CLASS METHODS //
 
