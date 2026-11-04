@@ -126,6 +126,31 @@ public:
         H_FM(1) = SpatialVec( Vec3(0),     Vec3(0,0,1) );
     }
 
+    bool calcAcrossJointVelocityJacobianPartialImpl(
+        const SBStateDigest& sbs,
+        int                  d,
+        Vec3*                dH_FM) const override
+    {
+        const SpatialVec zero(Vec3(0), Vec3(0));
+        HType& dH = HType::updAs(dH_FM);
+        dH(0) = zero;
+        dH(1) = zero;
+        return true;
+    }
+
+    bool calcAcrossJointVelocityJacobianDotPartialImpl(
+        const SBStateDigest& sbs,
+        const Real*          u,
+        int                  d,
+        Vec3*                dHDot_FM) const override
+    {
+        const SpatialVec zero(Vec3(0), Vec3(0));
+        HType& dHDot = HType::updAs(dHDot_FM);
+        dHDot(0) = zero;
+        dHDot(1) = zero;
+        return true;
+    }
+
     // Since the Jacobian above is constant in F, its time derivative in F is zero.
     void calcAcrossJointVelocityJacobianDot(
         const SBStateDigest& sbs,

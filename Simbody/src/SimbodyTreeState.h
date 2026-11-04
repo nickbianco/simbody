@@ -479,6 +479,7 @@ public:
     //   inverse of outboard mobilizer frames, X_MB = ~X_BM
 
     Real              totalMass; // sum of all rigid body and particles masses
+
     Array_<Inertia,MobilizedBodyIndex>   centralInertias;                // nb
     Array_<Vec3,MobilizedBodyIndex>      principalMoments;               // nb
     Array_<Rotation,MobilizedBodyIndex>  principalAxes;                  // nb

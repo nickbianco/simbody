@@ -1008,6 +1008,7 @@ realizeSubsystemInstanceImpl(const State& s) const {
     for (int i=0 ; i<(int)rbNodeLevels.size() ; i++) 
         for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++)
             rbNodeLevels[i][j]->realizeInstance(stateDigest); 
+
     
     return 0;
 }

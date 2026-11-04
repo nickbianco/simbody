@@ -247,6 +247,47 @@ public:
         }
     }
 
+    // Partials of H_FM and HDot_FM, delegated to the user's Implementation.
+    // Columns are extracted the same way calcAcrossJointVelocityJacobian() does
+    // it, by multiplying against unit u vectors. An Implementation that does
+    // not supply analytic partials returns false and the caller refuses to run.
+    bool calcAcrossJointVelocityJacobianPartialImpl(
+        const SBStateDigest& sbs,
+        int                  d,
+        Vec3*                dH_FM) const override
+    {
+        HType& dH = HType::updAs(dH_FM);
+        for (int i = 0; i < nu; ++i) {
+            Vec<nu> e(0);
+            e[i] = 1;
+            SpatialVec col;
+            if (!impl.multiplyByHPartialMatrix(sbs.getState(), d, nu,
+                                               &e[0], col))
+                return false;
+            dH(i) = col;
+        }
+        return true;
+    }
+
+    bool calcAcrossJointVelocityJacobianDotPartialImpl(
+        const SBStateDigest& sbs,
+        const Real*          u,
+        int                  d,
+        Vec3*                dHDot_FM) const override
+    {
+        HType& dHDot = HType::updAs(dHDot_FM);
+        for (int i = 0; i < nu; ++i) {
+            Vec<nu> e(0);
+            e[i] = 1;
+            SpatialVec col;
+            if (!impl.multiplyByHDotPartialMatrix(sbs.getState(), d, nu,
+                                                  &e[0], col))
+                return false;
+            dHDot(i) = col;
+        }
+        return true;
+    }
+
     void calcAcrossJointVelocityJacobianDot(
         const SBStateDigest& sbs,
         HType&  HDot_F0M0) const {
