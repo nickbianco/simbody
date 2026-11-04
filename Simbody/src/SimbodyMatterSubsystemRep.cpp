@@ -5617,9 +5617,202 @@ void SimbodyMatterSubsystemRep::calcTreeResidualForces(const State& s,
                 tempPtr,residualPtr);
         }
 }
-//........................ CALC TREE RESIDUAL FORCES ...........................
 
 
+//==============================================================================
+//                  CALC TREE RESIDUAL FORCE DERIVATIVES
+//==============================================================================
+// Analytic dtau/dq and dtau/du for the residual produced by
+// calcTreeResidualForces(). This differentiates that same two-pass recursion
+// term by term.
+//
+// Notation below follows Jain, "Robot and Multibody Dynamics", Ch. 18. All
+// spatial vectors are referred to each body's own origin Bo and expressed in
+// Ground, which is Simbody's convention throughout; W(w) denotes the
+// angular-only cross operator diag(w~, w~), Jain's Htilde*_w.
+void SimbodyMatterSubsystemRep::calcTreeResidualForceDerivatives(
+    const State&               s,
+    const Vector&              appliedMobilityForces,
+    const Vector_<SpatialVec>& appliedBodyForces,
+    const Vector&              knownUdot,
+    Vector&                    residualMobilityForces,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const
+{
+    const SBInstanceCache&     ic  = getInstanceCache(s);
+    const SBTreePositionCache& tpc = getTreePositionCache(s);
+    const SBTreeVelocityCache& tvc = getTreeVelocityCache(s);
+
+    const int nb = getNumBodies();
+    const int nu = getNumMobilities();
+
+    // The mobilizer partial methods take the whole digest, both because that is
+    // what every other per-mobilizer method takes and because a Custom
+    // mobilizer needs getState() to reach the user's Implementation.
+    const SBStateDigest sbs(s, *this, Stage::Velocity);
+
+    dTdq.resize(nu, nu); dTdq.setToZero();
+    dTdu.resize(nu, nu); dTdu.setToZero();
+    residualMobilityForces.resize(nu);
+    if (nu == 0) return;
+
+    const SpatialVec zeroV(Vec3(0), Vec3(0));
+
+    // Zero-length inputs mean "all zero".
+    const Vector* pKnownUdot = &knownUdot;
+    Vector zeroPerMobility;
+    if (knownUdot.size() == 0) {
+        zeroPerMobility.resize(nu); zeroPerMobility = 0;
+        pKnownUdot = &zeroPerMobility;
+    }
+    const Vector_<SpatialVec>* pBodyForces = &appliedBodyForces;
+    Vector_<SpatialVec> zeroPerBody;
+    if (appliedBodyForces.size() == 0) {
+        zeroPerBody.resize(nb); zeroPerBody = zeroV;
+        pBodyForces = &zeroPerBody;
+    }
+    const Vector* pMobForces = &appliedMobilityForces;
+    Vector zeroMobForces;
+    if (appliedMobilityForces.size() == 0) {
+        zeroMobForces.resize(nu); zeroMobForces = 0;
+        pMobForces = &zeroMobForces;
+    }
+    const Vector& mobForces = *pMobForces;
+    const Vector&              udot       = *pKnownUdot;
+    const Vector_<SpatialVec>& bodyForces = *pBodyForces;
+    const Vector&              u          = getU(s);
+
+    //--------------------------------------------------------------------------
+    // Topology. subtree[i] lists the bodies for which i is an ancestor
+    // (inclusive) in ascending index order, which is base-to-tip since a parent
+    // always precedes its children; path[i] lists i's strict ancestors below
+    // Ground. Every sweep is restricted to these, because all the primitive
+    // sensitivities carry an "i is an ancestor of k" condition.
+    //--------------------------------------------------------------------------
+    Array_<Array_<MobilizedBodyIndex>> subtree(nb), path(nb);
+    for (MobilizedBodyIndex k(1); k < nb; ++k)
+        for (const RigidBodyNode* n = &getRigidBodyNode(k);
+             n->getNodeNum() != 0; n = n->getParent())
+            subtree[n->getNodeNum()].push_back(k);
+    for (MobilizedBodyIndex i(1); i < nb; ++i)
+        for (const RigidBodyNode* n = getRigidBodyNode(i).getParent();
+             n->getNodeNum() != 0; n = n->getParent())
+            path[i].push_back(n->getNodeNum());
+
+    //--------------------------------------------------------------------------
+    // Quantities that depend only on (q, u, udot), computed once and reused by
+    // every column: the body accelerations implied by knownUdot, the composite
+    // transmitted force, and two per-body products the sweeps would otherwise
+    // redo nu times.
+    //--------------------------------------------------------------------------
+    Vector_<SpatialVec> A_GB(nb), F(nb), MA(nb), Mw(nb), bias_G(nb);
+    Array_<Vec3>        rho(nb, Vec3(0));
+    Array_<Rotation>    R_GF(nb);
+    A_GB[MobilizedBodyIndex(0)] = zeroV;
+    for (int lvl=0; lvl < (int)rbNodeLevels.size(); ++lvl)
+        for (int j=0; j < (int)rbNodeLevels[lvl].size(); ++j)
+            rbNodeLevels[lvl][j]->calcBodyAccelerationsFromUdotOutward(
+                tpc, tvc, &udot[0], &A_GB[0]);
+
+    // rho, R_GF and bias_G depend only on (q,u), so they are built once here
+    // rather than rebuilt for every column. bias_G = R_GF*(HDot_FM u) is the
+    // term the Coriolis closed form picks up when a mobilizer's H_FM depends on
+    // q; it is identically zero for the others.
+    for (MobilizedBodyIndex k(1); k < nb; ++k) {
+        const RigidBodyNode& node = getRigidBodyNode(k);
+        const Transform X_BM = ~node.getX_MB(ic);
+        const Rotation& R_GB = node.getX_GB(tpc).R();
+        rho[k]  = R_GB * X_BM.p();
+        R_GF[k] = R_GB * X_BM.R() * (~node.getX_FM(tpc).R());
+        const SpatialVec bias_F =
+            node.calcBiasForAcrossJointVelocityJacobian(tvc, &u[0]);
+        bias_G[k] = SpatialVec(R_GF[k]*bias_F[0], R_GF[k]*bias_F[1]);
+    }
+
+    for (MobilizedBodyIndex k(0); k < nb; ++k) F[k] = zeroV;
+    for (int lvl=(int)rbNodeLevels.size()-1; lvl >= 1; --lvl)
+        for (int j=0; j < (int)rbNodeLevels[lvl].size(); ++j) {
+            const RigidBodyNode& node = *rbNodeLevels[lvl][j];
+            const MobilizedBodyIndex k = node.getNodeNum();
+            const SpatialInertia& M = node.getMk_G(tpc);
+            MA[k] = M * A_GB[k];
+            Mw[k] = M * SpatialVec(node.getV_GB(tvc)[0], Vec3(0));
+            F[k] += MA[k] + node.getGyroscopicForce(tvc) - bodyForces[k];
+            // The residual falls out of F at no extra cost beyond one dot
+            // product per mobility; see the operator's documentation.
+            for (int e=0; e < node.getDOF(); ++e) {
+                const int ux = node.getUIndex() + e;
+                residualMobilityForces[ux] =
+                    dot(node.getHCol(tpc, e), F[k]) - mobForces[ux];
+            }
+            F[node.getParent()->getNodeNum()] += node.getPhi(tpc) * F[k];
+        }
+
+    //--------------------------------------------------------------------------
+    // Per-column scratch, allocated once and reset only over the touched set.
+    //--------------------------------------------------------------------------
+    Vector_<SpatialVec> dVdq(nb), dAdq(nb), dFdq(nb);
+    Vector_<SpatialVec> dVdu(nb), dAdu(nb), dFdu(nb);
+    Array_<SpatialVec>  dH(nu);
+
+    // Ground's motion sensitivities are read as the parent's by every base
+    // body but are never written by any sweep, so they are zeroed just once.
+    // Its force sensitivities accumulate and are reset per column below.
+    const MobilizedBodyIndex g(0);
+    dVdq[g] = dAdq[g] = dVdu[g] = dAdu[g] = zeroV;
+
+    RigidBodyNode::DerivativesWorkspace w;
+    w.sbs = &sbs;
+    w.ic = &ic;
+    w.A_GB = &A_GB[0]; w.F = &F[0]; w.MA = &MA[0]; w.Mw = &Mw[0];
+    w.rho = &rho[0]; w.R_GF = &R_GF[0]; w.bias_G = &bias_G[0];
+    w.u = &u[0]; w.udot = &udot[0];
+    w.dH = &dH[0];
+    w.dVdq = &dVdq[0]; w.dAdq = &dAdq[0]; w.dFdq = &dFdq[0];
+    w.dVdu = &dVdu[0]; w.dAdu = &dAdu[0]; w.dFdu = &dFdu[0];
+
+    for (MobilizedBodyIndex i(1); i < nb; ++i) {
+        const RigidBodyNode& inode = getRigidBodyNode(i);
+        const Array_<MobilizedBodyIndex>& sub = subtree[i];
+        const Array_<MobilizedBodyIndex>& anc = path[i];
+
+        for (int dcol=0; dcol < inode.getDOF(); ++dcol) {
+            const int col = inode.getUIndex() + dcol;
+            const SpatialVec& H_col = inode.getHCol(tpc, dcol);
+
+            for (unsigned a=0; a < sub.size(); ++a) {
+                const MobilizedBodyIndex k = sub[a];
+                const RigidBodyNode& nk = getRigidBodyNode(k);
+                dVdq[k] = dAdq[k] = dFdq[k] = zeroV;
+                dVdu[k] = dAdu[k] = dFdu[k] = zeroV;
+                for (int e=0; e < nk.getDOF(); ++e)
+                    dH[nk.getUIndex()+e] = zeroV;
+            }
+            for (unsigned a=0; a < anc.size(); ++a) {
+                const MobilizedBodyIndex k = anc[a];
+                dVdq[k] = dAdq[k] = dFdq[k] = zeroV;
+                dVdu[k] = dAdu[k] = dFdu[k] = zeroV;
+            }
+            dFdq[MobilizedBodyIndex(0)] = dFdu[MobilizedBodyIndex(0)] = zeroV;
+
+            for (unsigned a=0; a < sub.size(); ++a) {
+                const MobilizedBodyIndex k = sub[a];
+                getRigidBodyNode(k).calcInverseDynamicsDerivativesOutward(
+                    tpc, tvc, H_col, (k==i ? dcol : -1), w);
+            }
+            for (int a=(int)sub.size()-1; a >= 0; --a) {
+                const MobilizedBodyIndex k = sub[a];
+                getRigidBodyNode(k).calcInverseDynamicsDerivativesInward(
+                    tpc, tvc, H_col, (k==i ? dcol : -1), w,
+                    col, dTdq, dTdu);
+            }
+            for (unsigned a=0; a < anc.size(); ++a)
+                getRigidBodyNode(anc[a])
+                    .calcInverseDynamicsDerivativesInwardAbove(
+                        tpc, w, col, dTdq, dTdu);
+        }
+    }
+}
 
 //==============================================================================
 //                               MULTIPLY BY N

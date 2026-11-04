@@ -659,6 +659,107 @@ virtual const SpatialVec& getHCol(const SBTreePositionCache&, int j) const
 virtual const SpatialVec& getH_FMCol(const SBTreePositionCache&, int j) const 
 {SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodeNode", "getH_FMCol");}
 
+// Partial derivative of this mobilizer's H_FM with respect to its own
+// generalized coordinates, taken as a directional derivative along its free
+// mode d, that is, along qdot = N(q)*e_d:
+//
+//     dH_FM = sum_p ∂H_FM/∂q_p * N(q)(p, d)
+//
+// Here d, in 0..dof-1, indexes this mobilizer's mobilities: it selects column d
+// of H_FM and the generalized speed u_d, and e_d is the corresponding unit
+// vector in u. Implementations also write d as a subscript, as in q_d and
+// w_d = H_FM(d)_w. This is ∂H_FM/∂q_d only when N = I. Returns false if not
+// implemented for this mobilizer.
+virtual bool calcAcrossJointVelocityJacobianPartial(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const { return false; }
+
+// Partial derivative of this mobilizer's HDot_FM along its own free mode d,
+// taken at fixed u:
+//
+//     dHDot_FM = sum_p ∂HDot_FM/∂q_p * N(q)(p, d)
+//
+// Returns false if not implemented for this mobilizer.
+virtual bool calcAcrossJointVelocityJacobianDotPartial(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const { return false; }
+
+// Returns HDot_FM*u for this mobilizer, expressed in F: the bias term of the
+// across-joint velocity Jacobian H_FM.
+virtual SpatialVec calcBiasForAcrossJointVelocityJacobian(
+    const SBTreeVelocityCache& vc,
+    const Real*                u) const
+{
+    return SpatialVec(Vec3(0), Vec3(0));
+}
+
+// Workspace shared by the inverse dynamics derivative sweeps.
+struct DerivativesWorkspace {
+    const SBStateDigest*   sbs;
+    const SBInstanceCache* ic;
+
+    // Per-body data.
+    const SpatialVec*  A_GB;   // body accelerations
+    const SpatialVec*  F;      // composite transmitted forces
+    const SpatialVec*  MA;     // Mk_G*A_GB, per body
+    const SpatialVec*  Mw;     // Mk_G*(w_GB,0), per body
+    const Vec3*        rho;    // p_BoMo in Ground, per body
+    const Rotation*    R_GF;   // inboard frame orientations
+    const SpatialVec*  bias_G; // R_GF*(HDot_FM u), per body
+
+    // Per-mobilizer data.
+    const Real* u;
+    const Real* udot;
+    SpatialVec* dH;   // dH(k,e)/dq for the current column
+
+    // Per-column scratch arrays.
+    SpatialVec* dVdq;  SpatialVec* dAdq;  SpatialVec* dFdq;
+    SpatialVec* dVdu;  SpatialVec* dAdu;  SpatialVec* dFdu;
+};
+
+// Outward (base to tip) half of one column of the inverse dynamics
+// derivatives.
+virtual void calcInverseDynamicsDerivativesOutward(
+    const SBTreePositionCache& pc,
+    const SBTreeVelocityCache& vc,
+    const SpatialVec&          H_col,
+    int                        selfMode,
+    DerivativesWorkspace&      w) const
+{
+    SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+                 "calcInverseDynamicsDerivativesOutward");
+}
+
+// Inward (tip to base) half of one column of the inverse dynamics derivatives.
+virtual void calcInverseDynamicsDerivativesInward(
+    const SBTreePositionCache& pc,
+    const SBTreeVelocityCache& vc,
+    const SpatialVec&          H_col,
+    int                        selfMode,
+    DerivativesWorkspace&      w,
+    int                        col,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const
+{
+    SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+                 "calcInverseDynamicsDerivativesInward");
+}
+
+// Inward half for bodies above the perturbed one, where every body term
+// vanishes and only the transmitted force keeps propagating.
+virtual void calcInverseDynamicsDerivativesInwardAbove(
+    const SBTreePositionCache& pc,
+    DerivativesWorkspace&      w,
+    int                        col,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const
+{
+    SimTK_THROW2(Exception::UnimplementedVirtualMethod, "RigidBodyNode",
+                 "calcInverseDynamicsDerivativesInwardAbove");
+}
 
     // BASE CLASS METHODS //
 

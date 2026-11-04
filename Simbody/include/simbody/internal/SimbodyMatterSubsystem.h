@@ -2386,6 +2386,60 @@ void calcResidualForceIgnoringConstraints
     const Vector&              knownUdot,
     Vector&                    residualMobilityForces) const;
 
+/** Calculate the analytic first-order partial derivatives of the residual
+returned by calcResidualForceIgnoringConstraints(), with respect to the
+generalized coordinates q and the generalized speeds u.
+
+@param[in] state
+     A State valid for the containing System, already realized to
+     Stage::Velocity.
+@param[in] appliedMobilityForces
+     One scalar generalized force applied per mobility. Can be zero
+     length if there are no mobility forces; otherwise must have exactly
+     one entry per mobility in the matter subsystem.
+@param[in] appliedBodyForces
+     One spatial force for each body. A spatial force is a force applied
+     to the body origin and a torque on the body, each expressed in the
+     Ground frame. Gravity, if present, is specified here as a body force.
+     The supplied Vector must be either zero length (interpreted as all-zero)
+     or have exactly one entry per body in the matter subsystem, starting with
+     Ground as body zero.
+@param[in] knownUdot
+     These are the desired generalized accelerations, one per mobility.
+     If this is zero length it will be treated as all-zero; otherwise
+     it must have exactly one entry per mobility in the matter subsystem.
+@param[out] residualMobilityForces
+     These are the residual generalized forces which, if added to the applied
+     forces, would produce the given \a knownUdot in forward dynamics (assuming
+     the system is unconstrained). This will be resized if necessary to have
+     length nu; that is, one scalar entry per mobility. You can view this as a
+     measure of how much the given \a knownUdot fails to satisfy the equations
+     of motion.
+@param[out] dTdq
+     The nu X nu matrix of partials with respect to q, taken along the
+     mobility directions: column j is the derivative along qdot = N e_j, that
+     is, (dtau/dq)*N rather than dtau/dq itself. The two coincide only when
+     N = I, as for MobilizedBody::Pin; in general nq != nu.
+@param[out] dTdu
+     The nu X nu matrix of partials with respect to u.
+
+Column (i,d) of each output holds the derivative along the d-th mobility of
+mobilized body i, and row ux the affected mobility. Both are resized if
+necessary.
+
+@par Required stage
+  \c Stage::Velocity
+
+@see calcResidualForceIgnoringConstraints() **/
+void calcResidualForceDerivativesIgnoringConstraints
+   (const State&               state,
+    const Vector&              appliedMobilityForces,
+    const Vector_<SpatialVec>& appliedBodyForces,
+    const Vector&              knownUdot,
+    Vector&                    residualMobilityForces,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const;
+
 
 /** This is the inverse dynamics operator for when you know both the 
 accelerations and Lagrange multipliers for a constrained system. Prescribed
