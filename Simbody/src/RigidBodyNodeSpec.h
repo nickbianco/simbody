@@ -550,6 +550,72 @@ virtual void calcReverseMobilizerHDot_FM(
     const SBStateDigest& sbs,
     HType&               HDot_FM) const;
 
+bool calcAcrossJointVelocityJacobianPartial(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const final
+{
+    if (this->isReversed()) return false;
+    return calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dH_FM);
+}
+
+virtual bool calcAcrossJointVelocityJacobianPartialImpl(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const { return false; }
+
+SpatialVec calcBiasForAcrossJointVelocityJacobian(
+    const SBTreeVelocityCache& vc,
+    const Real*                u) const override
+{
+    const HType& HDot_FM = this->getHDot_FM(vc);
+    const int ux0 = this->getUIndex();
+    SpatialVec bias_F(Vec3(0), Vec3(0));
+    for (int e=0; e < dof; ++e) bias_F += HDot_FM(e) * u[ux0+e];
+    return bias_F;
+}
+
+bool calcAcrossJointVelocityJacobianDotPartial(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const final
+{
+    if (this->isReversed()) return false;
+    return calcAcrossJointVelocityJacobianDotPartialImpl(sbs, u, d, dHDot_FM);
+}
+
+virtual bool calcAcrossJointVelocityJacobianDotPartialImpl(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const { return false; }
+
+
+void calcInverseDynamicsDerivativesOutward(
+    const SBTreePositionCache& pc,
+    const SBTreeVelocityCache& vc,
+    const SpatialVec&          H_col,
+    int                        selfMode,
+    DerivativesWorkspace&      w) const override;
+
+void calcInverseDynamicsDerivativesInward(
+    const SBTreePositionCache& pc,
+    const SBTreeVelocityCache& vc,
+    const SpatialVec&          H_col,
+    int                        selfMode,
+    DerivativesWorkspace&      w,
+    int                        col,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const override;
+
+void calcInverseDynamicsDerivativesInwardAbove(
+    const SBTreePositionCache& pc,
+    DerivativesWorkspace&      w,
+    int                        col,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const override;
+
 // This routine is NOT joint specific, but cannot be called until the across-joint
 // transform X_FM has been calculated and is available in the State cache.
 void calcBodyTransforms(
