@@ -1583,6 +1583,164 @@ public:
         SimTK_THROW5(SimTK::Exception::ValueOutOfRange, "nu", 1, nu, 6, "MobilizedBody::FunctionBasedImpl::multiplyByHDotTranspose");
     }
 
+    // Analytic partials of H_FM and HDot_FM with respect to this mobilizer's
+    // own coordinates. See MobilizedBody::Custom::Implementation for the
+    // contract; here nq == nu and there are no angles, so qdot == u and a
+    // mode-d step is just a step in q_d.
+    //
+    // These differentiate exactly the construction buildH() and buildHdot()
+    // use. With theta = f(q) the spatial coordinates, Fq = df/dq, and W the
+    // Euler-sequence axis matrix whose columns are
+    //     w0 = a0,  w1 = R_F1*a1,  w2 = R_F2*a2,
+    //     h(0,i)    = W Fq[0:3,i]          h(1,i)    = Atrans Fq[3:6,i]
+    //     hdot(0,i) = Wdot Fq[0:3,i] + W Fqdot[0:3,i]
+    //     hdot(1,i) = Atrans Fqdot[3:6,i]
+    // where Fqdot = (d2f/dq2) u. Differentiating once in q therefore needs
+    // second derivatives of the user's Functions, and differentiating hdot
+    // needs third derivatives; a Function that cannot supply third order makes
+    // this return false and the caller refuse to run.
+    //
+    // Only w1 and w2 depend on q, through theta0 and theta1 respectively:
+    //     dw1/dq_d = Fq(0,d) (w0 x w1)
+    //     dw2/dq_d = Fq(0,d) (w0 x w2) + Fq(1,d) (w1 x w2)
+    // Wdot's columns are formed the same way buildHdot() forms them, from the
+    // partial angular velocities, so that this is the derivative of the hdot
+    // Simbody actually produces rather than of an idealized one.
+    bool calcFunctionBasedPartials(
+        const State&   s,
+        int            d,
+        Mat<2,6,Vec3>& dh,
+        Mat<2,6,Vec3>& dhdot) const
+    {
+        for (int i=0; i < 6; ++i)
+            if (coordIndices[i].size() > 0
+                && functions[i]->getMaxDerivativeOrder() < 3)
+                return false;
+
+        const Vector q = getQ(s);
+        const Vector u = getU(s);
+
+        Vec6      theta(0);
+        Mat<6,6>  Fq(0), Fqd(0), Fqdot(0), dFqdot(0);
+        Array_<int> d1(1), d2(2), d3(3);
+        Vector    fc;
+
+        for (int i=0; i < 6; ++i) {
+            const int nc = coordIndices[i].size();
+            if (nc == 0) continue;
+            fc.resize(nc);
+            for (int k=0; k < nc; ++k) fc[k] = q[coordIndices[i][k]];
+            theta[i] = functions[i]->calcValue(fc);
+
+            // Local slot of `d` within this function's arguments, or
+            // -1 if this function does not depend on q_d at all.
+            int dloc = -1;
+            for (int k=0; k < nc; ++k)
+                if (coordIndices[i][k] == d) dloc = k;
+
+            for (int j=0; j < nc; ++j) {
+                const int qj = coordIndices[i][j];
+                d1[0] = j;
+                Fq(i, qj) = functions[i]->calcDerivative(d1, fc);
+
+                if (dloc >= 0) {
+                    d2[0] = j; d2[1] = dloc;
+                    Fqd(i, qj) = functions[i]->calcDerivative(d2, fc);
+                }
+                for (int k=0; k < nc; ++k) {
+                    const int qk = coordIndices[i][k];
+                    d2[0] = j; d2[1] = k;
+                    Fqdot(i, qj) +=
+                        functions[i]->calcDerivative(d2, fc) * u[qk];
+                    if (dloc >= 0) {
+                        d3[0] = j; d3[1] = k; d3[2] = dloc;
+                        dFqdot(i, qj) +=
+                            functions[i]->calcDerivative(d3, fc) * u[qk];
+                    }
+                }
+            }
+        }
+
+        // W's columns and their q_d derivatives.
+        const UnitVec3 a0 = UnitVec3::getAs(&Arot(0,0));
+        const UnitVec3 a1 = UnitVec3::getAs(&Arot(0,1));
+        const UnitVec3 a2 = UnitVec3::getAs(&Arot(0,2));
+        const Rotation R_F1(theta[0], a0);
+        const Rotation R_F2 = R_F1 * Rotation(theta[1], a1);
+        const Vec3 w0(a0);
+        const Vec3 w1 = R_F1 * Vec3(a1);
+        const Vec3 w2 = R_F2 * Vec3(a2);
+        const Vec3 Dw0(0);
+        const Vec3 Dw1 = Fq(0,d) * (w0 % w1);
+        const Vec3 Dw2 = Fq(0,d) * (w0 % w2) + Fq(1,d) * (w1 % w2);
+
+        // First partial.
+        for (int i=0; i < nu; ++i) {
+            dh(0,i) = Fq(0,i)*Dw0 + Fq(1,i)*Dw1 + Fq(2,i)*Dw2
+                    + Fqd(0,i)*w0 + Fqd(1,i)*w1 + Fqd(2,i)*w2;
+            dh(1,i) = Atrans * Vec3(Fqd(3,i), Fqd(4,i), Fqd(5,i));
+        }
+
+        // Wdot's columns, built from the same partial angular velocities
+        // buildHdot() uses, and their q_d derivatives. dV1/dq_d and dV2/dq_d
+        // come from the first partial just computed.
+        Vec<6> uv1(0), uv2(0);
+        for (int i=0; i < nu; ++i) { uv1[i] = u[i]; uv2[i] = u[i]; }
+        for (int i=1; i < nu; ++i) uv1[i] = 0;
+        if (nu > 2) uv2[2] = 0;
+
+        const Vec3 V1 = multiplyByHMatrix(s, nu, &uv1[0])[0];
+        const Vec3 V2 = multiplyByHMatrix(s, nu, &uv2[0])[0];
+        Vec3 dV1(0), dV2(0);
+        for (int i=0; i < nu; ++i) {
+            dV1 += dh(0,i) * uv1[i];
+            dV2 += dh(0,i) * uv2[i];
+        }
+        const Vec3 Wd1  = V1 % w1,  Wd2  = V2 % w2;
+        const Vec3 DWd1 = dV1 % w1 + V1 % Dw1;
+        const Vec3 DWd2 = dV2 % w2 + V2 % Dw2;
+
+        // Second partial.
+        for (int i=0; i < nu; ++i) {
+            dhdot(0,i) = Fq(1,i)*DWd1 + Fq(2,i)*DWd2
+                       + Fqd(1,i)*Wd1 + Fqd(2,i)*Wd2
+                       + Fqdot(0,i)*Dw0 + Fqdot(1,i)*Dw1 + Fqdot(2,i)*Dw2
+                       + dFqdot(0,i)*w0 + dFqdot(1,i)*w1 + dFqdot(2,i)*w2;
+            dhdot(1,i) = Atrans * Vec3(dFqdot(3,i), dFqdot(4,i), dFqdot(5,i));
+        }
+        return true;
+    }
+
+    bool multiplyByHPartialMatrix(
+        const State& s,
+        int          d,
+        int          nIn,
+        const Real*  u,
+        SpatialVec&  out) const override
+    {
+        Mat<2,6,Vec3> dh, dhdot;
+        if (!calcFunctionBasedPartials(s, d, dh, dhdot)) return false;
+        out = SpatialVec(Vec3(0), Vec3(0));
+        for (int i=0; i < nIn; ++i)
+            out += SpatialVec(dh(0,i), dh(1,i)) * u[i];
+        return true;
+    }
+
+    bool multiplyByHDotPartialMatrix(
+        const State& s,
+        int          d,
+        int          nIn,
+        const Real*  u,
+        SpatialVec&  out) const override
+    {
+        Mat<2,6,Vec3> dh, dhdot;
+        if (!calcFunctionBasedPartials(s, d, dh, dhdot)) return false;
+        out = SpatialVec(Vec3(0), Vec3(0));
+        for (int i=0; i < nIn; ++i)
+            out += SpatialVec(dhdot(0,i), dhdot(1,i)) * u[i];
+        return true;
+    }
+
     void realizeTopology(State& s) const override {
         switch (nu) {
         case 1:
