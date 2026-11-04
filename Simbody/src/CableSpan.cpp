@@ -1264,6 +1264,16 @@ public:
                ContactGeometry::NearestPointOnLineResult::PointFallsBelowSurface;
     }
 
+    // For spheres and cylinders, construct a locally smooth initial wrap from
+    // the neighboring path points. Returns false when the general initializer
+    // should be used instead.
+    bool calcAnalyticInitialCurve(
+        const State& state,
+        const Vec3& prevPoint_S,
+        const Vec3& nextPoint_S,
+        const Vec3& hint_S,
+        bool useHint) const;
+
     // Helper function for initializing the path.
     void calcInitCurve(const State& state) const
     {
@@ -1281,6 +1291,11 @@ public:
         // Retrieve the contact hint that has already been projected onto the
         // surface via computeInitialInstanceData().
         Vec3 contactPoint_S = getDataInst(state).X_SP.p();
+
+        if (calcAnalyticInitialCurve(
+                state, prevPoint_S, nextPoint_S, contactPoint_S, true)) {
+            return;
+        }
 
         // Candidate #1: Calculate the tangent direction from the contact point
         // hint.
@@ -1342,6 +1357,11 @@ public:
         const Vec3 prevPoint_S = findPrevPathPoint_S(state);
         const Vec3 nextPoint_S = findNextPathPoint_S(state);
         Vec3 touchdownPoint_S  = dataInst.trackingPointOnLine_S;
+
+        if (calcAnalyticInitialCurve(
+                state, prevPoint_S, nextPoint_S, touchdownPoint_S, false)) {
+            return;
+        }
 
         // No touchdown detected: stay lifted and update the tracking point to
         // the nearest point on the line between the neighboring path points.
@@ -2729,6 +2749,150 @@ const IntegratorTolerances& CurveSegment::getIntegratorTolerances() const
 bool CurveSegment::getUseWarmStart() const
 {
     return getCable().getParameters().useWarmStart;
+}
+
+bool CurveSegment::calcAnalyticInitialCurve(
+    const State& state,
+    const Vec3& prevPoint_S,
+    const Vec3& nextPoint_S,
+    const Vec3& hint_S,
+    bool useHint) const
+{
+    const ContactGeometry& geometry = getContactGeometry();
+    const bool sphere = ContactGeometry::Sphere::isInstance(geometry);
+    const bool cylinder = ContactGeometry::Cylinder::isInstance(geometry);
+    if (!sphere && !cylinder) {
+        return false;
+    }
+    const Real radius = sphere
+        ? ContactGeometry::Sphere::getAs(geometry).getRadius()
+        : ContactGeometry::Cylinder::getAs(geometry).getRadius();
+
+    // Both problems reduce to tangents to a circle. A spherical wrap lies in
+    // the plane through the center and the neighboring points. For a cylinder
+    // solve in its cross section, then distribute the axial displacement over
+    // the straight segments and the unrolled circular arc.
+    UnitVec3 axisX(1., 0., 0.);
+    UnitVec3 axisY(0., 1., 0.);
+    if (sphere) {
+        axisX = UnitVec3(prevPoint_S);
+        Vec3 planeNormal = cross(axisX, UnitVec3(nextPoint_S));
+        if (planeNormal.norm() <= SignificantReal) {
+            // Collinear neighbors do not determine a plane. Preserve the
+            // hint's side when possible; otherwise choose a finite plane.
+            planeNormal = cross(axisX, hint_S / radius);
+            if (planeNormal.norm() <= SignificantReal) {
+                planeNormal = Vec3(axisX.perp());
+            }
+        }
+        axisY = UnitVec3(cross(UnitVec3(planeNormal), axisX));
+    }
+    auto project = [&](const Vec3& point) -> Vec2 {
+        return Vec2(dot(point, axisX), dot(point, axisY));
+    };
+    const Vec2 prev = project(prevPoint_S);
+    const Vec2 next = project(nextPoint_S);
+    const Vec2 hint = project(hint_S);
+    const Vec2 chord = next - prev;
+    const Real fraction = chord.normSqr() > 0.
+        ? clamp(0., -dot(prev, chord) / chord.normSqr(), 1.) : 0.;
+    const Vec2 nearest = prev + fraction * chord;
+    const bool clearsSurface =
+        nearest.norm() >= radius * (1. - SignificantReal);
+
+    // Retain the hint's route when it lies on one of the two possible arcs.
+    const bool preferHint = useHint && hint.norm() > SignificantReal * radius;
+
+    const Real prevRadius = prev.norm();
+    const Real nextRadius = next.norm();
+    const Real prevAngle = std::atan2(prev[1], prev[0]);
+    const Real nextAngle = std::atan2(next[1], next[0]);
+    const Real prevOffset = std::acos(clamp(0., radius / prevRadius, 1.));
+    const Real nextOffset = std::acos(clamp(0., radius / nextRadius, 1.));
+    const Real firstLine = std::sqrt(std::max(
+        0., (prevRadius - radius) * (prevRadius + radius)));
+    const Real lastLine = std::sqrt(std::max(
+        0., (nextRadius - radius) * (nextRadius + radius)));
+
+    struct Wrap {
+        Real direction;
+        Real startAngle;
+        Real angle;
+        Real hintDistance;
+        bool containsHint;
+    };
+    auto makeWrap = [&](Real direction) -> Wrap {
+        const Real start = prevAngle + direction * prevOffset;
+        Real angle = std::fmod(direction * (nextAngle - prevAngle)
+                              - prevOffset - nextOffset, 2. * Pi);
+        if (angle < 0.) {
+            angle += 2. * Pi;
+        }
+        // Roundoff at grazing contact must not turn a zero arc into a turn
+        // around the entire surface.
+        if (angle < SignificantReal || 2. * Pi - angle < SignificantReal) {
+            angle = 0.;
+        }
+        const Real midpoint = start + direction * angle / 2.;
+        const Real distance = std::abs(std::remainder(
+            std::atan2(hint[1], hint[0]) - midpoint, 2. * Pi));
+        return {direction, start, angle, distance,
+                preferHint && distance <= angle / 2.};
+    };
+    const Wrap positive = makeWrap(1.);
+    const Wrap negative = makeWrap(-1.);
+    const Wrap* shortest = positive.angle <= negative.angle
+        ? &positive : &negative;
+    const Wrap* wrap = shortest;
+    if (positive.containsHint || negative.containsHint) {
+        if (!negative.containsHint) {
+            wrap = &positive;
+        } else if (!positive.containsHint) {
+            wrap = &negative;
+        } else {
+            wrap = positive.hintDistance <= negative.hintDistance
+                ? &positive : &negative;
+        }
+    } else if (clearsSurface) {
+        liftCurveFromSurface(
+            prevPoint_S + fraction * (nextPoint_S - prevPoint_S),
+            updDataInst(state));
+        return true;
+    }
+
+    // A smooth long spherical route can be a stationary point that is not a
+    // length minimum. Seeding that solution exactly would stop MinimumLength
+    // before it can escape. Retain the general initializer (including the
+    // hint's out-of-plane component) in this case. Do not simply discard the
+    // hinted route: neighboring obstacles may depend on that choice.
+    if (sphere && preferHint &&
+        getCable().getParameters().algorithm ==
+            CableSpanAlgorithm::MinimumLength &&
+        (clearsSurface || wrap->angle > shortest->angle + SignificantReal)) {
+        return false;
+    }
+
+    const Real cosStart = std::cos(wrap->startAngle);
+    const Real sinStart = std::sin(wrap->startAngle);
+    Vec3 point = radius * (cosStart * axisX + sinStart * axisY);
+    Vec3 tangent = wrap->direction * (-sinStart * axisX + cosStart * axisY);
+    Real arcLength = radius * wrap->angle;
+    if (cylinder) {
+        const Real planarLength = firstLine + arcLength + lastLine;
+        if (planarLength <= SignificantReal * radius) {
+            liftCurveFromSurface(prevPoint_S, updDataInst(state));
+            return true;
+        }
+        const Real height = nextPoint_S[2] - prevPoint_S[2];
+        const Real length = std::hypot(planarLength, height);
+        point[2] = prevPoint_S[2] + height * firstLine / planarLength;
+        tangent *= planarLength / length;
+        tangent[2] = height / length;
+        arcLength *= length / planarLength;
+    }
+    shootNewGeodesic(point, tangent, arcLength,
+        getDataInst(state).integratorInitialStepSize, updDataInst(state));
+    return true;
 }
 
 ObstacleIndex CurveSegment::findPrevObstacleInContactWithCable(

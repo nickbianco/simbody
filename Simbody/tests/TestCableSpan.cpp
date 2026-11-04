@@ -1481,7 +1481,6 @@ void testTangentialAlignment() {
     // Counters used to confirm the sweep below is not vacuous.
     int numInContact        = 0;
     int numConvergedAligned  = 0;
-    int numLargeAlignmentError = 0;
 
     // For each algorithm, sweep across a range of gaps, attachment point
     // separations, and contact point hints.
@@ -1565,9 +1564,6 @@ void testTangentialAlignment() {
             measuredAngle,
             gap,
             hintDeg);
-        if (measuredAngle > 1.) {
-            ++numLargeAlignmentError;
-        }
 
         // A path reported as converged must be aligned.
         if (reportedSmoothness < smoothnessTolerance) {
@@ -1589,27 +1585,19 @@ void testTangentialAlignment() {
     SimTK_ASSERT_ALWAYS(numConvergedAligned > 0,
         "No configuration in the tangential alignment test produced a "
         "converged, aligned path; the test is vacuous.");
-    SimTK_ASSERT_ALWAYS(numLargeAlignmentError > 0,
-        "No configuration in the tangential alignment test ended up badly "
-        "misaligned, so the smoothness check was never exercised on a folded "
-        "path.");
+    // Do not require a folded path: improved initialization may make the
+    // entire sweep converge.
 }
 
-/** CableSpan test for selecting initial geodesic tangent candidates.
-
-CableSpan must select a tangent vector from which to shoot a zero-length
-geodesic as an initial guess for the path solver. Two candidates are available:
-a tangent vector calculating from a point on the surface derived from the
-contact hint, or a tangent vector calculated from a point derived from the
-touchdown detection algorithm.
+/** CableSpan initialization with a nearly radial sphere contact hint.
 
 This test checks a particularly pathological case: a cable running from (-2,0,0)
 to (2,0,0) over a unit sphere at the origin, so that the straight line between
 the attachment points passes through the center of the sphere, and a contact
-hint placed just off the point where that line exits the sphere. In this case,
-the contact hint is the better candidate, even though both candidates are poorly
-aligned with the straight line segments. Test that CableSpan selects the correct
-initial tangent vector and converges to a valid path. **/
+hint placed just off the point where that line exits the sphere. A zero-length
+geodesic at that hint is poorly aligned with the straight line segments, while
+the closest point on the chord has an undefined surface normal. Check that the
+initialized path still converges to a valid taut solution. **/
 void testInitialGeodesicTangent() {
     const Real radius = 1.;
     const Vec3 origin(-2., 0., 0.);
@@ -1711,6 +1699,106 @@ void testInitialLiftoff() {
 }
 
 
+/** Check surface-specific initialization independently of Newton corrections.
+The expected lengths come from tangent-circle geometry and, for cylinders,
+unrolling the surface. Include transformed surfaces, reversed paths, off-plane
+and axially displaced hints, and touchdown without a hint through the center. */
+void testAnalyticInitialization()
+{
+    const Real halfCircleLength = 2. * std::sqrt(3.) + Pi / 3.;
+    const Real nearRadius = 1.000001;
+    const Real nearHalfCircleLength = 2. * std::sqrt(nearRadius * nearRadius - 1.)
+        + Pi - 2. * std::acos(1. / nearRadius);
+    const Vec3 sphereOrigin(-2., 0.4, 0.3);
+    const Vec3 sphereTermination(2., 0.5, -0.2);
+    const Vec3 sphereHint = Vec3(UnitVec3(sphereOrigin))
+                         + Vec3(UnitVec3(sphereTermination))
+                         + 2. * UnitVec3(cross(sphereOrigin, sphereTermination));
+    const Real sphereAngle = std::acos(dot(
+        UnitVec3(sphereOrigin), UnitVec3(sphereTermination)));
+    const Real sphereLength = std::sqrt(sphereOrigin.normSqr() - 1.)
+        + std::sqrt(sphereTermination.normSqr() - 1.) + sphereAngle
+        - std::acos(1. / sphereOrigin.norm())
+        - std::acos(1. / sphereTermination.norm());
+    struct Case {
+        bool cylinder;
+        Vec3 origin, termination, hint;
+        Real length;
+        bool contact;
+        bool useHint;
+    };
+    const std::vector<Case> cases = {
+        {false, {-2., 0., 0.}, {2., 0., 0.}, {1., 1e-3, 0.},
+            halfCircleLength, true, true},
+        {false, {-2., 0., 0.}, {2., 0., 0.}, {0., 0., 0.},
+            halfCircleLength, true, false},
+        {false, {-2., 0., 0.}, {2., 1e-10, 0.}, {0., 1., 0.},
+            halfCircleLength, true, true},
+        {false, sphereOrigin, sphereTermination, sphereHint,
+            sphereLength, true, true},
+        {false, {2., 0., 0.}, {3., 0., 0.}, {1., 0., 0.},
+            1., false, true},
+        {false, {-2., 1., 0.}, {2., 1., 0.}, {0., 0., 0.},
+            4., false, false},
+        {true, {-2., 0., -2.}, {2., 0., 3.}, {0., 1., 100.},
+            std::hypot(halfCircleLength, 5.), true, true},
+        {true, {-2., 0., -2.}, {2., 0., 3.}, {0., 0., 0.},
+            std::hypot(halfCircleLength, 5.), true, false},
+        // Previously diverged to a folded path of length > 22000. Retain the
+        // hinted wrapping side, whose valid taut path has this length.
+        {true, {-1.2, -0.4, -2.}, {0.4, 1.4, -1.5}, {-0.4, -0.9, -0.1},
+            4.5003247613482, true, true},
+        {true, {2., 0., -2.}, {2., 0., 3.}, {1., 0., 100.},
+            5., false, true},
+        {true, {-nearRadius, 0., -0.2}, {nearRadius, 0., 0.2}, {0., 1., 100.},
+            std::hypot(nearHalfCircleLength, 0.4), true, true},
+        {true, {-2., 1., 0.}, {2., 1., 1.}, {0., 0., 0.},
+            std::sqrt(17.), false, false},
+    };
+
+    for (const Case& test : cases) {
+    for (Real scale : {0.1, 10.}) {
+    for (bool reverse : {false, true}) {
+    for (CableSpanAlgorithm algorithm :
+            {CableSpanAlgorithm::Scholz2015, CableSpanAlgorithm::MinimumLength}) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        CableSubsystem cables(system);
+        const Transform X_GS(Rotation(0.7, UnitVec3(1., 2., 3.)),
+                             Vec3(3., -4., 2.));
+        const Vec3 origin = X_GS * (scale *
+            (reverse ? test.termination : test.origin));
+        const Vec3 termination = X_GS * (scale *
+            (reverse ? test.origin : test.termination));
+        CableSpan cable(cables, matter.Ground(), origin,
+                        matter.Ground(), termination);
+        std::shared_ptr<ContactGeometry> geometry;
+        if (test.cylinder) {
+            geometry = std::make_shared<ContactGeometry::Cylinder>(scale);
+        } else {
+            geometry = std::make_shared<ContactGeometry::Sphere>(scale);
+        }
+        const CableSpanObstacleIndex ix = test.useHint
+            ? cable.addObstacle(matter.Ground(), X_GS, geometry, scale * test.hint)
+            : cable.addObstacle(matter.Ground(), X_GS, geometry);
+        cable.setAlgorithm(algorithm);
+        cable.setSmoothnessTolerance(1e-8);
+        cable.setSolverMaxIterations(0);
+        system.realizeTopology();
+        State s = system.getDefaultState();
+        system.realize(s, Stage::Position);
+        SimTK_ASSERT_ALWAYS(cable.isInContactWithObstacle(s, ix) == test.contact,
+            "Analytic initialization chose the wrong contact status");
+        SimTK_ASSERT1_ALWAYS(cable.getSmoothness(s) < 1e-8,
+            "Analytic initialization requires path corrections (smoothness=%g)",
+            cable.getSmoothness(s));
+        SimTK_ASSERT2_ALWAYS(
+            std::abs(cable.calcLength(s) - scale * test.length) < scale * 1e-8,
+            "Analytic initialization produced length %g, expected %g",
+            cable.calcLength(s), scale * test.length);
+    }}}}
+}
+
 int main()
 {
     testSimpleCable();
@@ -1724,4 +1812,5 @@ int main()
     testTangentialAlignment();
     testInitialGeodesicTangent();
     testInitialLiftoff();
+    testAnalyticInitialization();
 }

@@ -236,9 +236,12 @@ public:
     the obstacle, in local surface frame coordinates. The point will be used as
     a starting point when computing the initial cable path. As such, it does
     not have to lie on the contact geometry's surface, nor does it have to
-    belong to a valid cable path. If a smooth path cannot be made through the
-    hint, the contact point is placed instead where the straight line between
-    the neighboring path points comes closest to the surface.
+    belong to a valid cable path. For spheres and cylinders, initialization
+    first attempts to construct a smooth circular or helical wrap between the
+    neighboring path points, using the hint to select a wrapping route. Other
+    cases use a zero-length initial curve at the hint; if its tangent cannot
+    be aligned with the neighboring straight segments, touchdown detection is
+    used to find an alternative contact point.
     @return The index of the added obstacle in this cable. **/
     CableSpanObstacleIndex addObstacle(
         MobilizedBodyIndex obstacleBody,
@@ -402,9 +405,10 @@ public:
     the obstacle, in local surface frame coordinates. The point will be used as
     a starting point when computing the initial cable path. As such, it does
     not have to lie on the contact geometry's surface, nor does it have to
-    belong to the optimal cable path. If a smooth path cannot be made through
-    the hint, the contact point is placed instead where the straight line
-    between the neighboring path points comes closest to the surface. **/
+    belong to the optimal cable path. Spheres and cylinders can use the hint
+    to select a smooth circular or helical initial wrap. Other cases use the
+    general initialization and touchdown procedure described in addObstacle().
+    **/
     void setObstacleContactPointHint(
         CableSpanObstacleIndex ix,
         Vec3 contactPointHint_S);
