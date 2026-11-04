@@ -304,6 +304,82 @@ void SimbodyMatterSubsystem::calcResidualForceIgnoringConstraints
 }
 
 
+//==============================================================================
+//            CALC RESIDUAL FORCE DERIVATIVES IGNORING CONSTRAINTS
+//==============================================================================
+void SimbodyMatterSubsystem::calcResidualForceDerivativesIgnoringConstraints
+   (const State&               state,
+    const Vector&              appliedMobilityForces,
+    const Vector_<SpatialVec>& appliedBodyForcesInG,
+    const Vector&              knownUdot,
+    Vector&                    residualMobilityForces,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu) const
+{
+    const SimbodyMatterSubsystemRep& rep = getRep();
+    const int nb = rep.getNumBodies();
+    const int nu = rep.getNU(state);
+
+    SimTK_APIARGCHECK2_ALWAYS(
+        appliedMobilityForces.size()==0 || appliedMobilityForces.size()==nu,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesIgnoringConstraints",
+        "Got %d appliedMobilityForces but there are %d mobilities.",
+        appliedMobilityForces.size(), nu);
+    SimTK_APIARGCHECK2_ALWAYS(
+        appliedBodyForcesInG.size()==0 || appliedBodyForcesInG.size()==nb,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesIgnoringConstraints",
+        "Got %d appliedBodyForces but there are %d bodies (including Ground).",
+        appliedBodyForcesInG.size(), nb);
+    SimTK_APIARGCHECK2_ALWAYS(
+        knownUdot.size()==0 || knownUdot.size()==nu,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesIgnoringConstraints",
+        "Got %d knownUdots but there are %d mobilities.",
+        knownUdot.size(), nu);
+
+    residualMobilityForces.resize(nu);
+
+    // Assume at first that the Vectors are contiguous.
+    const Vector*              cmobForces  = &appliedMobilityForces;
+    const Vector_<SpatialVec>* cbodyForces = &appliedBodyForcesInG;
+    const Vector*              cudot       = &knownUdot;
+    Vector*                    cresid      = &residualMobilityForces;
+    bool needToCopyBack = false;
+
+    Vector              contig_mobForces, contig_udot, contig_resid;
+    Vector_<SpatialVec> contig_bodyForces;
+
+    if (!appliedMobilityForces.hasContiguousData()) {
+        contig_mobForces.resize(nu);                     // contiguous memory
+        contig_mobForces(0, nu) = appliedMobilityForces; // copy, no realloc
+        cmobForces = (const Vector*)&contig_mobForces;
+    }
+    if (!residualMobilityForces.hasContiguousData()) {
+        contig_resid.resize(nu);                         // contiguous memory
+        cresid = (Vector*)&contig_resid;
+        needToCopyBack = true;
+    }
+    if (!appliedBodyForcesInG.hasContiguousData()) {
+        contig_bodyForces.resize(nb);                    // contiguous memory
+        contig_bodyForces(0, nb) = appliedBodyForcesInG; // copy, no realloc
+        cbodyForces = (const Vector_<SpatialVec>*)&contig_bodyForces;
+    }
+    if (!knownUdot.hasContiguousData()) {
+        contig_udot.resize(nu);                          // contiguous memory
+        contig_udot(0, nu) = knownUdot;                  // copy, no realloc
+        cudot = (const Vector*)&contig_udot;
+    }
+
+    rep.calcTreeResidualForceDerivatives(state, *cmobForces, *cbodyForces,
+                                         *cudot, *cresid, dTdq, dTdu);
+
+    if (needToCopyBack)
+        residualMobilityForces = *cresid;
+}
+
+
 
 //==============================================================================
 //                          CALC RESIDUAL FORCE 
