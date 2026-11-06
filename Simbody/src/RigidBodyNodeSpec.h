@@ -542,6 +542,10 @@ virtual void calcAcrossJointVelocityJacobianDot(
 // following methods are called instead of the above; the default 
 // implementation postprocesses the output from the above methods, but a 
 // mobilizer can override it if it knows how to get the job done faster.
+// An override must return exactly what the default would:
+// calcReverseMobilizerH_FMPartial() and calcReverseMobilizerHDot_FMPartial()
+// differentiate the default formulas, and the latter also inverts the
+// default formula on the cached HDot_FM.
 virtual void calcReverseMobilizerH_FM(
     const SBStateDigest& sbs,
     HType&               H_FM) const;
@@ -550,12 +554,26 @@ virtual void calcReverseMobilizerHDot_FM(
     const SBStateDigest& sbs,
     HType&               HDot_FM) const;
 
+// Partials of the reversed H_FM and HDot_FM along free mode d, built from the
+// forward partials of H_F0M0 and HDot_F0M0.
+bool calcReverseMobilizerH_FMPartial(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const;
+
+bool calcReverseMobilizerHDot_FMPartial(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const;
+
 bool calcAcrossJointVelocityJacobianPartial(
     const SBStateDigest& sbs,
     int                  d,
     Vec3*                dH_FM) const final
 {
-    if (this->isReversed()) return false;
+    if (this->isReversed())
+        return calcReverseMobilizerH_FMPartial(sbs, d, dH_FM);
     return calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dH_FM);
 }
 
@@ -581,7 +599,8 @@ bool calcAcrossJointVelocityJacobianDotPartial(
     int                  d,
     Vec3*                dHDot_FM) const final
 {
-    if (this->isReversed()) return false;
+    if (this->isReversed())
+        return calcReverseMobilizerHDot_FMPartial(sbs, u, d, dHDot_FM);
     return calcAcrossJointVelocityJacobianDotPartialImpl(sbs, u, d, dHDot_FM);
 }
 
@@ -743,6 +762,20 @@ const HType& getH_FM(const SBTreePositionCache& pc) const
 {   return HType::getAs(&pc.storageForH_FM[2*uIndex]); }
 HType&       updH_FM(SBTreePositionCache& pc) const
 {   return HType::updAs(&pc.storageForH_FM[2*uIndex]); }
+
+// Return H_F0M0, the cross-joint velocity Jacobian *as it was defined* in the
+// mobilizer specification. If the mobilizer has been reversed, this undoes
+// calcReverseMobilizerH_FM(); otherwise it is just H_FM. Each column is a
+// spatial velocity of M in F, so reversing them one at a time gives H_MF.
+HType findH_F0M0(const SBTreePositionCache& pc) const
+{
+    const HType& H_FM = getH_FM(pc);
+    if (!isReversed()) return H_FM;
+    HType H_MF;
+    for (int e=0; e < dof; ++e)
+        H_MF(e) = reverseSpatialVelocity(getX_FM(pc), H_FM(e));
+    return H_MF;
+}
 
 // "H" here should really be H_PB_G, that is, cross joint transition
 // matrix relating parent and body frames, but expressed in Ground.

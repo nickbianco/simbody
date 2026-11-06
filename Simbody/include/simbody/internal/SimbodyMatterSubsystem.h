@@ -2434,9 +2434,9 @@ dependence of \a appliedMobilityForces or \a appliedBodyForces on q or u.
   \c Stage::Velocity
 
 @throws An exception if any mobilizer cannot supply the partials of its H_FM
-and HDot_FM that these derivatives need. That is the case for a reversed
-mobilizer, and for a MobilizedBody::Custom whose Implementation does not
-override calcHPartialMatrix() and calcHDotPartialMatrix().
+and HDot_FM that these derivatives need. That is the case for a
+MobilizedBody::Custom whose Implementation does not override
+calcHPartialMatrix() and calcHDotPartialMatrix().
 
 @see calcResidualForceIgnoringConstraints() **/
 void calcResidualForceDerivativesIgnoringConstraints
