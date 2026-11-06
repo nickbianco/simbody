@@ -195,7 +195,7 @@ bool calcAcrossJointVelocityJacobianPartialImpl(
 {
     const SBTreePositionCache& pc = sbs.getTreePositionCache();
     const Rotation& R_FM = this->findX_F0M0(pc).R();
-    const Vec3      w_d  = this->getH_FM(pc)(d)[0];
+    const Vec3      w_d  = this->findH_F0M0(pc)(d)[0];
 
     HType& dH = HType::updAs(dH_FM);
     dH(0) = SpatialVec( w_d % R_FM.x(), Vec3(0) );
@@ -213,7 +213,7 @@ bool calcAcrossJointVelocityJacobianDotPartialImpl(
     const SBTreeVelocityCache& vc = sbs.getTreeVelocityCache();
     const Rotation& R_FM = this->findX_F0M0(pc).R();
     const Vec3      w_FM = this->find_w_F0M0(pc, vc);
-    const Vec3      w_d  = this->getH_FM(pc)(d)[0];
+    const Vec3      w_d  = this->findH_F0M0(pc)(d)[0];
     const Vec3      dMx  = w_d % R_FM.x();
     const Vec3      dMy  = w_d % R_FM.y();
 

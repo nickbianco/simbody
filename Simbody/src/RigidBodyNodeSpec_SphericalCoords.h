@@ -263,7 +263,7 @@ bool calcAcrossJointVelocityJacobianPartialImpl(
     const Vec3  sMy = signZe*R_FM.y();
     const Vec3  sMt = signT*R_FM(axisT);
 
-    const SpatialVec H_d = this->getH_FM(pc)(d);
+    const SpatialVec H_d = this->findH_F0M0(pc)(d);
     const Vec3&      w_d = H_d[0];
     const Vec3&      v_d = H_d[1];
 
@@ -300,7 +300,7 @@ bool calcAcrossJointVelocityJacobianDotPartialImpl(
     const Vec3  dsMy = w_FM % sMy;          // as in HDot_FM below
     const Vec3  dsMt = w_FM % sMt;
 
-    const SpatialVec H_d = this->getH_FM(pc)(d);
+    const SpatialVec H_d = this->findH_F0M0(pc)(d);
     const Vec3&      w_d = H_d[0];
     const Vec3&      v_d = H_d[1];          // = d(p_FM)/dq_d
     const Vec3  DsMy = w_d % sMy;
