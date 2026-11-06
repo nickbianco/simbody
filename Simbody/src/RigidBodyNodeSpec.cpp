@@ -229,6 +229,109 @@ RigidBodyNodeSpec<dof, noR_FM>::calcReverseMobilizerHDot_FM(
     HDot_FM[1] -= p_FM_x * HDot_FM[0] + vwp * H_FM[0];  // 36*dof flops
 }
 
+//==============================================================================
+//                   CALC REVERSE MOBILIZER H_FM PARTIAL
+//==============================================================================
+// Partial of the reversed H_FM along free mode d, built from the forward
+// partial dH_MF of H_F0M0. Along that mode M moves in F with
+// V_FM = H_FM(d) = (w_d, v_d), so dR_FM = w_d_x R_FM and dp_FM = v_d.
+// Differentiating calcReverseMobilizerH_FM() then gives
+//      dH_FM_w = w_d_x H_FM_w - R_FM dH_MF_w
+//
+//      dH_FM_v = w_d_x H_FM_v - R_FM dH_MF_v
+//                - (p_FM_x dH_FM_w + (v_d_x - w_d_x p_FM_x) H_FM_w)
+//
+// which is calcReverseMobilizerHDot_FM() with V_FM and HDot_MF replaced by
+// H_FM(d) and dH_MF.
+template<int dof, bool noR_FM> bool
+RigidBodyNodeSpec<dof, noR_FM>::calcReverseMobilizerH_FMPartial(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const
+{
+    Vec3 dHMFstore[2*dof];
+    if (!calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dHMFstore))
+        return false;
+    const HType& dH_MF = HType::getAs(dHMFstore);
+
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const Rotation& R_FM = getX_FM(pc).R();
+    const Vec3&     p_FM = getX_FM(pc).p();
+    const HType&    H_FM = getH_FM(pc);
+
+    const Mat33 p_FM_x = crossMat(p_FM);
+    const Mat33 w_d_x  = crossMat(H_FM(d)[0]);
+    const Mat33 v_d_x  = crossMat(H_FM(d)[1]);
+    const Mat33 vwp    = v_d_x - w_d_x*p_FM_x;
+
+    HType& dH = HType::updAs(dH_FM);
+    dH = w_d_x*H_FM - (noR_FM ? dH_MF : R_FM*dH_MF);
+    dH[1] -= p_FM_x*dH[0] + vwp*H_FM[0];
+    return true;
+}
+
+//==============================================================================
+//                 CALC REVERSE MOBILIZER HDOT_FM PARTIAL
+//==============================================================================
+// Partial of the reversed HDot_FM along free mode d at fixed u, built from the
+// forward partial dHDot_MF of HDot_F0M0. calcReverseMobilizerHDot_FM() forms
+//      A         = w_FM_x H_FM - R_FM HDot_MF
+//      HDot_FM_w = A_w
+//      HDot_FM_v = A_v - (p_FM_x A_w + (v_FM_x - w_FM_x p_FM_x) H_FM_w)
+//
+// with V_FM = H_FM u. Along mode d, dR_FM = w_d_x R_FM, dp_FM = v_d, and
+// dV_FM = dH_FM u with dH_FM the reversed partial above. A, and with it
+// R_FM HDot_MF, is recovered from the cached HDot_FM.
+template<int dof, bool noR_FM> bool
+RigidBodyNodeSpec<dof, noR_FM>::calcReverseMobilizerHDot_FMPartial(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const
+{
+    Vec3 dHFMstore[2*dof], dHDotMFstore[2*dof];
+    if (!calcReverseMobilizerH_FMPartial(sbs, d, dHFMstore))
+        return false;
+    if (!calcAcrossJointVelocityJacobianDotPartialImpl(sbs, u, d, dHDotMFstore))
+        return false;
+    const HType& dH_FM    = HType::getAs(dHFMstore);
+    const HType& dHDot_MF = HType::getAs(dHDotMFstore);
+
+    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreeVelocityCache& vc = sbs.getTreeVelocityCache();
+    const Rotation& R_FM    = getX_FM(pc).R();
+    const Vec3&     p_FM    = getX_FM(pc).p();
+    const HType&    H_FM    = getH_FM(pc);
+    const HType&    HDot_FM = getHDot_FM(vc);
+    const Vec3&     w_FM    = getV_FM(vc)[0];
+    const Vec3&     v_FM    = getV_FM(vc)[1];
+
+    const int ux0 = getUIndex();
+    SpatialVec dV_FM(Vec3(0), Vec3(0));
+    for (int e=0; e < dof; ++e) dV_FM += dH_FM(e) * u[ux0+e];
+
+    const Mat33 p_FM_x  = crossMat(p_FM);
+    const Mat33 w_FM_x  = crossMat(w_FM);
+    const Mat33 v_FM_x  = crossMat(v_FM);
+    const Mat33 vwp     = v_FM_x - w_FM_x*p_FM_x;
+    const Mat33 w_d_x   = crossMat(H_FM(d)[0]);
+    const Mat33 v_d_x   = crossMat(H_FM(d)[1]); // d(p_FM_x)
+    const Mat33 dw_FM_x = crossMat(dV_FM[0]);
+    const Mat33 dvwp    = crossMat(dV_FM[1]) - dw_FM_x*p_FM_x - w_FM_x*v_d_x;
+
+    HType A = HDot_FM;
+    A[1] += p_FM_x*HDot_FM[0] + vwp*H_FM[0];
+    const HType R_HDot_MF = w_FM_x*H_FM - A;
+
+    const HType dA = dw_FM_x*H_FM + w_FM_x*dH_FM - w_d_x*R_HDot_MF
+                   - (noR_FM ? dHDot_MF : R_FM*dHDot_MF);
+
+    HType& dHDot = HType::updAs(dHDot_FM);
+    dHDot = dA;
+    dHDot[1] -= v_d_x*A[0] + p_FM_x*dA[0] + dvwp*H_FM[0] + vwp*dH_FM[0];
+    return true;
+}
+
 
 //==============================================================================
 //                     REALIZE ARTICULATED BODY INERTIAS

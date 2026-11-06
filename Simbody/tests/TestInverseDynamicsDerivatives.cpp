@@ -415,28 +415,42 @@ void testInputHandling() {
 }
 
 // A reversed mobilizer builds its H_FM by post-processing the as-defined H_MF
-// with a q-dependent transform, so its partials are not the reversal of the
-// as-defined ones. That is a separate rejection path from the q-dependent-H_FM
-// one above, and it must also refuse rather than return a wrong answer.
-void testReversedMobilizerIsRejected() {
+// with the q-dependent X_FM, so even a Ball, whose as-defined H is constant,
+// has nonzero partials once reversed. Put reversed mobilizers mid-chain, each
+// with a mobile child, so their partials and the forces transmitted through
+// them are both exercised.
+void testReversedMobilizersInChain() {
     MultibodySystem system;
     SimbodyMatterSubsystem matter(system);
-    Body::Rigid body(cylinderProps(1.0, Vec3(0.01,0,0), 0.2, 0.04));
-    MobilizedBody::Pin pin(matter.Ground(), Transform(), body,
-                           Transform(Vec3(0,0.2,0)));
-    // Same Pin, but with q and u defined outboard-to-inboard.
-    MobilizedBody::Pin rev(pin, Transform(), body, Transform(Vec3(0,0.2,0)),
-                           MobilizedBody::Reverse);
+    Body::Rigid body(cylinderProps(1.2, Vec3(0.03,-0.01,0.02), 0.2, 0.04));
+
+    MobilizedBody::Pin       link1(matter.Ground(),
+        Transform(Rotation(0.2, XAxis), Vec3(0.03,-0.1,0.02)), body,
+        Transform(Rotation(0.1, ZAxis), Vec3(0,0.2,0)));
+    MobilizedBody::Universal link2(link1,
+        Transform(Rotation(0.3, YAxis), Vec3(0.02,-0.2,0.01)), body,
+        Transform(Rotation(-0.2, XAxis), Vec3(0,0.15,0)),
+        MobilizedBody::Reverse);
+    MobilizedBody::Ball      link3(link2,
+        Transform(Rotation(0.25, ZAxis), Vec3(0,-0.2,0.03)), body,
+        Transform(Rotation(0.15, XAxis), Vec3(0.01,0.2,0)),
+        MobilizedBody::Reverse);
+    MobilizedBody::Pin       link4(link3,
+        Transform(Rotation(-0.35, XAxis), Vec3(0.01,-0.18,0)), body,
+        Transform(Rotation(0.2, YAxis), Vec3(0,0.16,0.02)));
 
     State state = system.realizeTopology();
     system.realize(state, Stage::Velocity);
+    const int nq = state.getNQ(), nu = state.getNU();
+    for (int i=0; i < nq; ++i) state.updQ()[i] = 0.27 - 0.08*i;
+    matter.normalizeQuaternions(state);
+    for (int i=0; i < nu; ++i) state.updU()[i] = -0.6 + 0.19*i;
+    system.realize(state, Stage::Velocity);
+    checkAgainstFiniteDifferences(system, state);
+}
 
-    Vector residual;
-    Matrix dq, du;
-    SimTK_TEST_MUST_THROW(
-        matter.calcResidualForceDerivativesIgnoringConstraints(
-            state, Vector(), Vector_<SpatialVec>(), Vector(),
-            residual, dq, du));
+static const char* reversedTag(MobilizedBody::Direction dir) {
+    return dir == MobilizedBody::Reverse ? " reversed" : "";
 }
 
 // Exercise every mobilizer type that claims to support the operator. Each gets
@@ -444,9 +458,10 @@ void testReversedMobilizerIsRejected() {
 // parent, then the mobilizer itself -- and is checked against central finite
 // differences. This is what actually validates each mobilizer's dH_FM/dq and
 // dHDot_FM/dq implementations; the formulas are short but easy to get subtly
-// wrong, and several of the terms vanish on simpler models.
+// wrong, and several of the terms vanish on simpler models. Run reversed, it
+// validates the generic reversal of those partials instead.
 template <class MobodType>
-static void checkMobilizer(const char* name, bool expectSupported = true) {
+static void checkMobilizer(const char* name, MobilizedBody::Direction dir) {
     MultibodySystem system;
     SimbodyMatterSubsystem matter(system);
     Body::Rigid body(cylinderProps(1.3, Vec3(0.03,-0.02,0.04), 0.22, 0.045));
@@ -456,7 +471,7 @@ static void checkMobilizer(const char* name, bool expectSupported = true) {
         Transform(Rotation(0.17, YAxis), Vec3(0,0.26,0)));
     MobodType tested(inboard,
         Transform(Rotation(0.31, ZAxis), Vec3(0.01,-0.24,0.05)), body,
-        Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)));
+        Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)), dir);
 
     State state = system.realizeTopology();
     // Realize once so Instance is valid, then set q. Changing q invalidates
@@ -469,22 +484,16 @@ static void checkMobilizer(const char* name, bool expectSupported = true) {
     for (int i=0; i < nu; ++i) state.updU()[i] = -0.37 + 0.14*i;
     system.realize(state, Stage::Velocity);
 
-    Vector residual;
-    Matrix dq, du;
-    if (!expectSupported) {
-        SimTK_TEST_MUST_THROW(
-            matter.calcResidualForceDerivativesIgnoringConstraints(
-                state, Vector(), Vector_<SpatialVec>(), Vector(),
-            residual, dq, du));
-        return;
-    }
-    std::cout << "    " << name << " (nq=" << nq << ", nu=" << nu << ")\n";
+    std::cout << "    " << name << reversedTag(dir)
+              << " (nq=" << nq << ", nu=" << nu << ")\n";
     checkAgainstFiniteDifferences(system, state);
 }
 
-// Screw, Ellipsoid and CantileverFreeBeam take extra construction arguments, so
-// they get their own setup rather than the uniform template above.
-static void checkWithExtraArg(const char* name, int which) {
+// Screw, Ellipsoid and CantileverFreeBeam take extra construction arguments, and
+// Weld takes no Direction, so they get their own setup rather than the uniform
+// template above.
+static void checkWithExtraArg(const char* name, int which,
+                              MobilizedBody::Direction dir) {
     MultibodySystem system;
     SimbodyMatterSubsystem matter(system);
     Body::Rigid body(cylinderProps(1.3, Vec3(0.03,-0.02,0.04), 0.22, 0.045));
@@ -496,13 +505,16 @@ static void checkWithExtraArg(const char* name, int which) {
 
     MobilizedBody tested;
     if (which == 0)
-        tested = MobilizedBody::Screw(inboard, X_PF, body, X_BM, Real(0.37));
+        tested = MobilizedBody::Screw(inboard, X_PF, body, X_BM, Real(0.37),
+                                      dir);
     else if (which == 1)   // deliberately unequal radii
         tested = MobilizedBody::Ellipsoid(inboard, X_PF, body, X_BM,
-                                          Vec3(0.17, 0.23, 0.31));
-    else
+                                          Vec3(0.17, 0.23, 0.31), dir);
+    else if (which == 2)
         tested = MobilizedBody::CantileverFreeBeam(inboard, X_PF, body, X_BM,
-                                                   Real(0.42));
+                                                   Real(0.42), dir);
+    else
+        tested = MobilizedBody::Weld(inboard, X_PF, body, X_BM);
 
     State state = system.realizeTopology();
     system.realize(state, Stage::Velocity);
@@ -510,8 +522,8 @@ static void checkWithExtraArg(const char* name, int which) {
     matter.normalizeQuaternions(state);
     for (int i=0; i < state.getNU(); ++i) state.updU()[i] = -0.37 + 0.14*i;
     system.realize(state, Stage::Velocity);
-    std::cout << "    " << name << " (nq=" << state.getNQ()
-              << ", nu=" << state.getNU() << ")\n";
+    std::cout << "    " << name << reversedTag(dir)
+              << " (nq=" << state.getNQ() << ", nu=" << state.getNU() << ")\n";
     checkAgainstFiniteDifferences(system, state);
 }
 
@@ -538,7 +550,8 @@ struct FunctionBasedModel {
     SimbodyMatterSubsystem matter;
     State                  state;
 
-    FunctionBasedModel(int nmob, const Vector& q, const Vector& u)
+    FunctionBasedModel(int nmob, MobilizedBody::Direction dir,
+                       const Vector& q, const Vector& u)
     :   matter(system) {
         Body::Rigid body(cylinderProps(1.3, Vec3(0.03,-0.02,0.04),
                                        0.22, 0.045));
@@ -565,7 +578,7 @@ struct FunctionBasedModel {
         MobilizedBody::FunctionBased tested(inboard,
             Transform(Rotation(0.31, ZAxis), Vec3(0.01,-0.24,0.05)), body,
             Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)),
-            nmob, functions, coordIndices);
+            nmob, functions, coordIndices, dir);
 
         state = system.realizeTopology();
         system.realize(state, Stage::Velocity);
@@ -576,17 +589,18 @@ struct FunctionBasedModel {
 };
 }
 
-static void checkFunctionBased(const char* name, int nmob) {
+static void checkFunctionBased(const char* name, int nmob,
+                               MobilizedBody::Direction dir) {
     // Nominal configuration, sized from a throwaway model.
     Vector q0, u0;
-    {   FunctionBasedModel probe(nmob, Vector(), Vector());
+    {   FunctionBasedModel probe(nmob, dir, Vector(), Vector());
         const int nq = probe.state.getNQ(), nu = probe.state.getNU();
         q0.resize(nq); u0.resize(nu);
         for (int i=0; i < nq; ++i) q0[i] = 0.21 - 0.09*i;
         for (int i=0; i < nu; ++i) u0[i] = -0.37 + 0.14*i;
     }
 
-    FunctionBasedModel m(nmob, q0, u0);
+    FunctionBasedModel m(nmob, dir, q0, u0);
     const int nu = m.state.getNU(), nb = m.matter.getNumBodies();
     const Vector              udot       = makeUdot(nu);
     const Vector              mobForces  = makeMobilityForces(nu);
@@ -605,8 +619,8 @@ static void checkFunctionBased(const char* name, int nmob) {
     for (int i=0; i < nu; ++i) tauScale = std::max(tauScale, std::abs(tau[i]));
     const Real tol = 1e-6 * tauScale;
 
-    std::cout << "    " << name << " (nq=" << m.state.getNQ()
-              << ", nu=" << nu << ")\n";
+    std::cout << "    " << name << reversedTag(dir)
+              << " (nq=" << m.state.getNQ() << ", nu=" << nu << ")\n";
 
     const Real h = 1e-5;
     for (int j=0; j < nu; ++j) {
@@ -614,8 +628,8 @@ static void checkFunctionBased(const char* name, int nmob) {
         Vector Ne; m.matter.multiplyByN(m.state, false, e, Ne);
 
         // Rebuilt systems, so the H cache cannot be stale.
-        FunctionBasedModel mp(nmob, q0 + h*Ne, u0);
-        FunctionBasedModel mm(nmob, q0 - h*Ne, u0);
+        FunctionBasedModel mp(nmob, dir, q0 + h*Ne, u0);
+        FunctionBasedModel mm(nmob, dir, q0 - h*Ne, u0);
         Vector tp, tm;
         mp.matter.calcResidualForceIgnoringConstraints(mp.state, mobForces,
                                                    bodyForces, udot, tp);
@@ -636,37 +650,45 @@ static void checkFunctionBased(const char* name, int nmob) {
     }
 }
 
-void testAllSupportedMobilizers() {
-    // H_FM constant in F, so every partial vanishes.
-    checkMobilizer<MobilizedBody::Pin>              ("Pin");
-    checkMobilizer<MobilizedBody::Slider>           ("Slider");
-    checkMobilizer<MobilizedBody::Cylinder>         ("Cylinder");
-    checkMobilizer<MobilizedBody::Planar>           ("Planar");
-    checkMobilizer<MobilizedBody::Translation>      ("Translation");
-    checkMobilizer<MobilizedBody::Ball>             ("Ball");
-    checkMobilizer<MobilizedBody::Free>             ("Free");
-    checkMobilizer<MobilizedBody::Weld>             ("Weld");
-    checkWithExtraArg("Screw", 0);
+static void checkAllMobilizers(MobilizedBody::Direction dir) {
+    // H_FM as defined is constant in F, so every forward partial vanishes;
+    // reversed, R_FM and p_FM make them nonzero for the rotational ones.
+    checkMobilizer<MobilizedBody::Pin>              ("Pin", dir);
+    checkMobilizer<MobilizedBody::Slider>           ("Slider", dir);
+    checkMobilizer<MobilizedBody::Cylinder>         ("Cylinder", dir);
+    checkMobilizer<MobilizedBody::Planar>           ("Planar", dir);
+    checkMobilizer<MobilizedBody::Translation>      ("Translation", dir);
+    checkMobilizer<MobilizedBody::Ball>             ("Ball", dir);
+    checkMobilizer<MobilizedBody::Free>             ("Free", dir);
+    if (dir == MobilizedBody::Forward)   // no mobilities, nothing to reverse
+        checkWithExtraArg("Weld", 3, dir);
+    checkWithExtraArg("Screw", 0, dir);
 
     // H_FM depends on q, so these rely on both dH_FM/dq and dHDot_FM/dq; the
     // second is what makes the Coriolis term come out right.
-    checkMobilizer<MobilizedBody::Universal>        ("Universal");
-    checkMobilizer<MobilizedBody::LineOrientation>("LineOrientation");
-    checkMobilizer<MobilizedBody::FreeLine>       ("FreeLine");
-    checkMobilizer<MobilizedBody::Gimbal>           ("Gimbal");
-    checkMobilizer<MobilizedBody::Bushing>          ("Bushing");
-    checkWithExtraArg("Ellipsoid", 1);
-    checkWithExtraArg("CantileverFreeBeam", 2);
+    checkMobilizer<MobilizedBody::Universal>        ("Universal", dir);
+    checkMobilizer<MobilizedBody::LineOrientation>("LineOrientation", dir);
+    checkMobilizer<MobilizedBody::FreeLine>       ("FreeLine", dir);
+    checkMobilizer<MobilizedBody::Gimbal>           ("Gimbal", dir);
+    checkMobilizer<MobilizedBody::Bushing>          ("Bushing", dir);
+    checkWithExtraArg("Ellipsoid", 1, dir);
+    checkWithExtraArg("CantileverFreeBeam", 2, dir);
 
     // HDot_FM depends on the linear part of the cross-mobilizer velocity too,
     // so these exercise the v_d path through both partials.
-    checkMobilizer<MobilizedBody::SphericalCoords>  ("SphericalCoords");
-    checkMobilizer<MobilizedBody::BendStretch>      ("BendStretch");
+    checkMobilizer<MobilizedBody::SphericalCoords>  ("SphericalCoords", dir);
+    checkMobilizer<MobilizedBody::BendStretch>      ("BendStretch", dir);
 
     // A Custom subclass supplied by Simbody itself.
-    checkFunctionBased("FunctionBased(1)", 1);
-    checkFunctionBased("FunctionBased(3)", 3);
+    checkFunctionBased("FunctionBased(1)", 1, dir);
+    checkFunctionBased("FunctionBased(3)", 3, dir);
 }
+
+void testAllSupportedMobilizers()
+{   checkAllMobilizers(MobilizedBody::Forward); }
+
+void testAllReversedMobilizers()
+{   checkAllMobilizers(MobilizedBody::Reverse); }
 
 //==============================================================================
 //                           CUSTOM MOBILIZERS
@@ -752,7 +774,9 @@ private:
 static void buildCustomSystem(MultibodySystem& system,
                               SimbodyMatterSubsystem& matter,
                               bool withHPartial, bool withHDotPartial,
-                              int unavailableMode, State& state) {
+                              int unavailableMode, State& state,
+                              MobilizedBody::Direction dir =
+                                  MobilizedBody::Forward) {
     Body::Rigid body(cylinderProps(1.3, Vec3(0.03,-0.02,0.04), 0.22, 0.045));
     MobilizedBody::Pin inboard(matter.Ground(),
         Transform(Rotation(0.23, XAxis), Vec3(0.04,0.09,-0.03)), body,
@@ -761,7 +785,7 @@ static void buildCustomSystem(MultibodySystem& system,
         new UniversalAsCustom(matter, withHPartial, withHDotPartial,
                               unavailableMode),
         Transform(Rotation(0.31, ZAxis), Vec3(0.01,-0.24,0.05)), body,
-        Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)));
+        Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)), dir);
 
     state = system.realizeTopology();
     system.realize(state, Stage::Velocity);
@@ -771,14 +795,18 @@ static void buildCustomSystem(MultibodySystem& system,
 }
 
 // A Custom mobilizer that supplies both partials is supported, and its answer
-// must match finite differences just like any built-in mobilizer.
+// must match finite differences just like any built-in mobilizer, in either
+// direction.
 void testCustomMobilizerWithPartials() {
-    MultibodySystem system;
-    SimbodyMatterSubsystem matter(system);
-    State state;
-    buildCustomSystem(system, matter, true, true, -1, state);
-    std::cout << "    Custom (with partials)\n";
-    checkAgainstFiniteDifferences(system, state);
+    for (auto dir : {MobilizedBody::Forward, MobilizedBody::Reverse}) {
+        MultibodySystem system;
+        SimbodyMatterSubsystem matter(system);
+        State state;
+        buildCustomSystem(system, matter, true, true, -1, state, dir);
+        std::cout << "    Custom (with partials)"
+                  << reversedTag(dir) << "\n";
+        checkAgainstFiniteDifferences(system, state);
+    }
 }
 
 // Reject either missing partial, including a failure after the first mode has
@@ -822,8 +850,9 @@ int main() {
         SimTK_SUBTEST(testInvarianceToModelPlacement);
         SimTK_SUBTEST(testInputHandling);
         SimTK_SUBTEST(testAllSupportedMobilizers);
+        SimTK_SUBTEST(testAllReversedMobilizers);
+        SimTK_SUBTEST(testReversedMobilizersInChain);
         SimTK_SUBTEST(testCustomMobilizerWithPartials);
         SimTK_SUBTEST(testCustomMobilizerWithoutPartials);
-        SimTK_SUBTEST(testReversedMobilizerIsRejected);
     SimTK_END_TEST();
 }

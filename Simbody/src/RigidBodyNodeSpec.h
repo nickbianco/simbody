@@ -550,12 +550,26 @@ virtual void calcReverseMobilizerHDot_FM(
     const SBStateDigest& sbs,
     HType&               HDot_FM) const;
 
+// Partials of the reversed H_FM and HDot_FM along free mode d, built from the
+// forward partials of H_F0M0 and HDot_F0M0.
+bool calcReverseMobilizerH_FMPartial(
+    const SBStateDigest& sbs,
+    int                  d,
+    Vec3*                dH_FM) const;
+
+bool calcReverseMobilizerHDot_FMPartial(
+    const SBStateDigest& sbs,
+    const Real*          u,
+    int                  d,
+    Vec3*                dHDot_FM) const;
+
 bool calcAcrossJointVelocityJacobianPartial(
     const SBStateDigest& sbs,
     int                  d,
     Vec3*                dH_FM) const final
 {
-    if (this->isReversed()) return false;
+    if (this->isReversed())
+        return calcReverseMobilizerH_FMPartial(sbs, d, dH_FM);
     return calcAcrossJointVelocityJacobianPartialImpl(sbs, d, dH_FM);
 }
 
@@ -581,7 +595,8 @@ bool calcAcrossJointVelocityJacobianDotPartial(
     int                  d,
     Vec3*                dHDot_FM) const final
 {
-    if (this->isReversed()) return false;
+    if (this->isReversed())
+        return calcReverseMobilizerHDot_FMPartial(sbs, u, d, dHDot_FM);
     return calcAcrossJointVelocityJacobianDotPartialImpl(sbs, u, d, dHDot_FM);
 }
 
@@ -743,6 +758,23 @@ const HType& getH_FM(const SBTreePositionCache& pc) const
 {   return HType::getAs(&pc.storageForH_FM[2*uIndex]); }
 HType&       updH_FM(SBTreePositionCache& pc) const
 {   return HType::updAs(&pc.storageForH_FM[2*uIndex]); }
+
+// Return H_F0M0, the cross-joint velocity Jacobian *as it was defined* in the
+// mobilizer specification. If the mobilizer has been reversed, this undoes
+// calcReverseMobilizerH_FM(); otherwise it is just H_FM. With R_MF = ~R_FM,
+//      H_MF_w = -R_MF H_FM_w
+//      H_MF_v = -R_MF (H_FM_v + p_FM x H_FM_w)
+HType findH_F0M0(const SBTreePositionCache& pc) const
+{
+    const HType& H_FM = getH_FM(pc);
+    if (!isReversed()) return H_FM;
+    const Rotation R_MF   = ~getX_FM(pc).R();
+    const Mat33    p_FM_x = crossMat(getX_FM(pc).p());
+    HType H_MF;
+    H_MF[0] = -(R_MF * H_FM[0]);
+    H_MF[1] = -(R_MF * (H_FM[1] + p_FM_x * H_FM[0]));
+    return H_MF;
+}
 
 // "H" here should really be H_PB_G, that is, cross joint transition
 // matrix relating parent and body frames, but expressed in Ground.

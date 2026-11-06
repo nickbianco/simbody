@@ -175,7 +175,7 @@ void calcAcrossJointVelocityJacobian(
 // mode's linear part v_d enters too. The useful facts are
 //     d(p_FM)/dq_d = v_d   and   d(Mx_F)/dq_d = w_d x Mx_F,
 // which make the first partial the HDot_FM formula below evaluated at
-// V_F0M0 = H_FM(d), i.e. at u = e_d.
+// V_F0M0 = H_F0M0(d), i.e. at u = e_d.
 bool calcAcrossJointVelocityJacobianPartialImpl(
     const SBStateDigest& sbs,
     int                  d,
@@ -183,7 +183,7 @@ bool calcAcrossJointVelocityJacobianPartialImpl(
 {
     const SBTreePositionCache& pc = sbs.getTreePositionCache();
     const Vec3&      Mx_F = this->findX_F0M0(pc).R().x();
-    const SpatialVec H_d  = this->getH_FM(pc)(d);
+    const SpatialVec H_d  = this->findH_F0M0(pc)(d);
     const Vec3&      w_d  = H_d[0];
     const Vec3&      v_d  = H_d[1];
 
@@ -205,7 +205,7 @@ bool calcAcrossJointVelocityJacobianDotPartialImpl(
     const Vec3&      Mx_F   = this->findX_F0M0(pc).R().x();
     const SpatialVec V_F0M0 = this->findV_F0M0(pc, vc);
     const Vec3&      w_FM   = V_F0M0[0];
-    const Vec3       w_d    = this->getH_FM(pc)(d)[0];
+    const Vec3       w_d    = this->findH_F0M0(pc)(d)[0];
 
     // dV_FM/dq_d at fixed u is sum_p (dH_FM(p)/dq_d) u_p, so it follows from
     // the first partial above.
