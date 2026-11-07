@@ -98,7 +98,8 @@ namespace SimTK {
  * f_3, f_4, f_5 on the other hand are aligned with frame F's axes so 
  * constitute a vector in F.
  */
-class SimTK_SIMBODY_EXPORT Force::LinearBushing : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::LinearBushing : public Force {
 public:
     /// Create a LinearBushing between a pair of arbitrary frames, one fixed 
     /// to each of two bodies.

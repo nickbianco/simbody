@@ -128,7 +128,8 @@ namespace SimTK {
  * Constrained Molecular Dynamics: The Newton-Euler Inverse Mass
  * Operator Method. J. Phys. Chem. 100:10508-10517 (1996).
  */
-class SimTK_SIMBODY_EXPORT Force::Thermostat : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::Thermostat : public Force {
 public:
     /// Define a global thermostat (one that affects all degrees of freedom) at
     /// a given default temperature and relaxation time. The number of 

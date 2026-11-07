@@ -190,7 +190,8 @@ namespace SimTK {
  * Thanks to Nur Adila Faruk Senan (a.k.a. Adila Papaya) for help in clarifying
  * this documentation.
  */
-class SimTK_SIMBODY_EXPORT Force::Custom : public Force {
+template <class T>
+class Force_<T>::Custom : public Force_<T> {
 public:
     class Implementation;
     /**
@@ -201,13 +202,13 @@ public:
      *                       ownership of the implementation object, and deletes it when the Force itself
      *                       is deleted.
      */
-    Custom(GeneralForceSubsystem& forces, Implementation* implementation);
+    Custom(GeneralForceSubsystem_<T>& forces, Implementation* implementation);
     
     /** Default constructor creates an empty handle. **/
     Custom() {}
 
     /** @cond **/ // don't let Doxygen see this
-    SimTK_INSERT_DERIVED_HANDLE_DECLARATIONS(Custom, CustomImpl, Force);
+    SimTK_INSERT_DERIVED_HANDLE_DECLARATIONS(Custom, CustomImpl, Force_<T>);
     /** @endcond **/
 protected:
     const Implementation& getImplementation() const;
@@ -217,9 +218,22 @@ protected:
 /**
  * Every custom force requires implementation of a class that is derived from
  * this abstract class.\ See Force::Custom for details.
+ *
+ * For a scalar type T other than Real, calcForce() and calcPotentialEnergy()
+ * take a ScalarState<T> and std::vectors (see ForceScalarTypes); the
+ * realize...() methods always take the Real State, which holds the system's
+ * structure and discrete variables. A force element written as a template on
+ * T can be used both in Simbody's usual computations (T = Real) and with
+ * another scalar type.
  */
-class SimTK_SIMBODY_EXPORT Force::Custom::Implementation {
+template <class T>
+class Force_<T>::Custom::Implementation {
 public:
+    using StateType           = typename Force_<T>::StateType;
+    using BodyForceVector     = typename Force_<T>::BodyForceVector;
+    using ParticleForceVector = typename Force_<T>::ParticleForceVector;
+    using MobilityForceVector = typename Force_<T>::MobilityForceVector;
+
     virtual ~Implementation() { }
     /**
      * Calculate the force for a given state.
@@ -232,13 +246,13 @@ public:
      * @param mobilityForces forces on individual mobilities (elements of the state's u vector) are accumulated in this.
      *                       To apply a force to a mobility, add it to the appropriate element of this vector.
      */
-    virtual void calcForce(const State& state, Vector_<SpatialVec>& bodyForces, Vector_<Vec3>& particleForces, Vector& mobilityForces) const = 0;
+    virtual void calcForce(const StateType& state, BodyForceVector& bodyForces, ParticleForceVector& particleForces, MobilityForceVector& mobilityForces) const = 0;
     /**
      * Calculate this force's contribution to the potential energy of the System.
      * 
      * @param state          the State for which to calculate the potential energy
      */
-    virtual Real calcPotentialEnergy(const State& state) const = 0;
+    virtual T calcPotentialEnergy(const StateType& state) const = 0;
     /**
      * Get whether this force depends only on the position variables (q), not on the velocies (u) or auxiliary variables (z).
      * The default implementation returns false.  If the force depends only on positions, you should override this to return
@@ -282,6 +296,8 @@ public:
         Array_<DecorativeGeometry>& geometry) const {}
 
 };
+
+extern template class SimTK_SIMBODY_EXPORT Force_<Real>::Custom;
 
 } // namespace SimTK
 

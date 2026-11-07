@@ -38,6 +38,7 @@
 #include <exception>
 
 #include "ForceImpl.h"
+#include "simbody/internal/tree/ForceScalarImpl.h"
 
 #include <memory>
 
@@ -525,9 +526,10 @@ namespace SimTK{
 // try not to incur any overhead if there are no such forces in the System.
 // Note in particular that Force::Gravity does its own caching so doesn't make
 // use of this service.
-class GeneralForceSubsystemRep : public ForceSubsystem::Guts {
+template <>
+class GeneralForceSubsystemRep_<Real> : public ForceSubsystem::Guts {
 public:
-    GeneralForceSubsystemRep()
+    GeneralForceSubsystemRep_()
      : ForceSubsystemRep("GeneralForceSubsystem", "0.0.1")
     {
         //The default number of threads is the physical number of processors
@@ -535,7 +537,7 @@ public:
         calcForcesExecutor = new ParallelExecutor();
     }
 
-    ~GeneralForceSubsystemRep() {
+    ~GeneralForceSubsystemRep_() {
         // Delete in reverse order to be nice to heap system.
         for (int i = (int) forces.size()-1; i >= 0; --i)
             delete forces[i];
@@ -970,81 +972,8 @@ private:
     mutable CacheEntryIndex         particleForceCacheIndex;
 };
 
-    ///////////////////////////
-    // GeneralForceSubsystem //
-    ///////////////////////////
-
-
-/*static*/ bool
-GeneralForceSubsystem::isInstanceOf(const ForceSubsystem& s) {
-    return GeneralForceSubsystemRep::isA(s.getRep());
-}
-/*static*/ const GeneralForceSubsystem&
-GeneralForceSubsystem::downcast(const ForceSubsystem& s) {
-    assert(isInstanceOf(s));
-    return static_cast<const GeneralForceSubsystem&>(s);
-}
-/*static*/ GeneralForceSubsystem&
-GeneralForceSubsystem::updDowncast(ForceSubsystem& s) {
-    assert(isInstanceOf(s));
-    return static_cast<GeneralForceSubsystem&>(s);
-}
-
-const GeneralForceSubsystemRep&
-GeneralForceSubsystem::getRep() const {
-    return SimTK_DYNAMIC_CAST_DEBUG<const GeneralForceSubsystemRep&>(ForceSubsystem::getRep());
-}
-GeneralForceSubsystemRep&
-GeneralForceSubsystem::updRep() {
-    return SimTK_DYNAMIC_CAST_DEBUG<GeneralForceSubsystemRep&>(ForceSubsystem::updRep());
-}
-
-// Create Subsystem but don't associate it with any System. This isn't much use except
-// for making std::vector's, which require a default constructor to be available.
-GeneralForceSubsystem::GeneralForceSubsystem()
-:   ForceSubsystem()
-{   adoptSubsystemGuts(new GeneralForceSubsystemRep()); }
-
-GeneralForceSubsystem::GeneralForceSubsystem(MultibodySystem& mbs)
-:   ForceSubsystem()
-{   adoptSubsystemGuts(new GeneralForceSubsystemRep());
-    mbs.addForceSubsystem(*this); } // steal ownership
-
-ForceIndex GeneralForceSubsystem::adoptForce(Force& force)
-{   return updRep().adoptForce(force); }
-
-int GeneralForceSubsystem::getNumForces() const
-{   return getRep().getNumForces(); }
-
-const Force& GeneralForceSubsystem::getForce(ForceIndex index) const
-{   return getRep().getForce(index); }
-
-Force& GeneralForceSubsystem::updForce(ForceIndex index)
-{   return updRep().updForce(index); }
-
-bool GeneralForceSubsystem::isForceDisabled
-   (const State& state, ForceIndex index) const
-{   return getRep().isForceDisabled(state, index); }
-
-void GeneralForceSubsystem::setForceIsDisabled
-   (State& state, ForceIndex index, bool disabled) const
-{   getRep().setForceIsDisabled(state, index, disabled); }
-
-void GeneralForceSubsystem::setNumberOfThreads(unsigned numThreads)
-{   updRep().setNumberOfThreads(numThreads); }
-
-int GeneralForceSubsystem::getNumberOfThreads() const
-{   return getRep().getNumberOfThreads(); }
-
-void GeneralForceSubsystem::calcForceContributionsSum(
-    const State& s, const Array_<ForceIndex>& forceIndexes, 
-    Vector_<SpatialVec>& bodyForces, Vector& mobilityForces) const 
-{
-    getRep().calcForceContributionsSum(
-        s, forceIndexes, bodyForces, mobilityForces);
-}
-
-const MultibodySystem& GeneralForceSubsystem::getMultibodySystem() const
-{   return MultibodySystem::downcast(getSystem()); }
+// The GeneralForceSubsystem handle methods are in
+// simbody/internal/tree/ForceScalarImpl.h.
+template class GeneralForceSubsystem_<Real>;
 
 } // namespace SimTK

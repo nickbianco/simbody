@@ -36,7 +36,8 @@ namespace SimTK {
 //                          FORCE :: GRAVITY IMPL
 //==============================================================================
 // This is the hidden implementation class for Force::Gravity.
-class Force::GravityImpl : public ForceImpl {
+template <>
+class Force_<Real>::GravityImpl : public ForceImpl {
 friend class Force::Gravity;
 
     // These are settable parameters including gravity vector, zero height,

@@ -49,7 +49,8 @@ not to be conserved.
 If you want to be able to apply discrete forces to any body or mobilizer 
 without specifying which one in advance, see Force::DiscreteForces.
 @see Force::DiscreteForces **/
-class SimTK_SIMBODY_EXPORT Force::MobilityDiscreteForce : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::MobilityDiscreteForce : public Force {
 public:
     /** Create a %MobilityDiscreteForce.
     

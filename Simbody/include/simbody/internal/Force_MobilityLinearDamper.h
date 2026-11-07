@@ -43,7 +43,8 @@ all our generalized speeds have physical meaning. This is not a potential force
 and hence does not contribute to potential energy.
 **/
 
-class SimTK_SIMBODY_EXPORT Force::MobilityLinearDamper : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::MobilityLinearDamper : public Force {
 public:
     /** Create a %MobilityLinearDamper force element on a particular mobility
     (generalized speed).

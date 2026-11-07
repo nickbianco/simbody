@@ -26,14 +26,15 @@
 
 #include "simbody/internal/common.h"
 #include "simbody/internal/ForceSubsystem.h"
+#include "simbody/internal/ForceTypes.h"
 
 #include <cassert>
+#include <type_traits>
 
 namespace SimTK {
 
 class MultibodySystem;
 class SimbodyMatterSubsystem;
-class Force;
 
 /** This is a concrete subsystem which can apply arbitrary forces to a 
 MultibodySystem. Each force element is represented by a Force object. For 
@@ -43,11 +44,23 @@ example, to add a spring between two bodies, you would write
     // ...
     Force::TwoPointLinearSpring(forces, body1, station1, body2, station2, k, x0);
 @endcode
-**/
-class SimTK_SIMBODY_EXPORT GeneralForceSubsystem : public ForceSubsystem {
+
+GeneralForceSubsystem is GeneralForceSubsystem_<Real>. A
+GeneralForceSubsystem_<T> for another scalar type T holds Force_<T> elements.
+It belongs to the same MultibodySystem and uses its State for the structure
+and discrete variables (such as which elements are disabled), but its forces
+aren't part of the System's Real dynamics: they are evaluated with a
+ScalarState<T> by calcForceContributionsSum(). **/
+template <class T>
+class GeneralForceSubsystem_ : public ForceSubsystem {
 public:
-    GeneralForceSubsystem();
-    explicit GeneralForceSubsystem(MultibodySystem&);
+    using StateType           = typename ForceScalarTypes<T>::StateType;
+    using BodyForceVector     = typename ForceScalarTypes<T>::BodyForceVector;
+    using MobilityForceVector =
+        typename ForceScalarTypes<T>::MobilityForceVector;
+
+    GeneralForceSubsystem_();
+    explicit GeneralForceSubsystem_(MultibodySystem&);
 
     /** Attach a new force to this subsystem. The subsystem takes over 
     ownership of the force, leaving the passed in handle as a reference to 
@@ -61,17 +74,17 @@ public:
         element.
     @return A unique integer index for the adopted force element that can be
     used to retrieve this force element from the subsystem later if needed. **/
-    ForceIndex adoptForce(Force& force);
+    ForceIndex adoptForce(Force_<T>& force);
     
     /** Get the number of force elements which have been added to this 
     Subsystem. Legal ForceIndex values range from 0 to getNumForces()-1. **/
     int getNumForces() const;
 
     /** Get a const reference to a force element by index. **/
-    const Force& getForce(ForceIndex index) const;
+    const Force_<T>& getForce(ForceIndex index) const;
 
     /** Get a writable reference to a force element by index. **/
-    Force& updForce(ForceIndex index);
+    Force_<T>& updForce(ForceIndex index);
 
     /** Find out whether a particular force element contained in this
     subsystem is currently disabled in the given state. **/
@@ -93,7 +106,8 @@ public:
     on the machine.
     
     @note This method should NOT be called while realizing Stage::Dynamics.**/
-    void setNumberOfThreads(unsigned numThreads);
+    void setNumberOfThreads(unsigned numThreads)
+        requires std::is_same_v<T, Real>;
     
     /** Returns the number of threads that the GeneralForceSubsystem can
     use to calculate computationally expensive forces (that have the
@@ -101,7 +115,7 @@ public:
     
     @return Maximum number of threads GeneralForceSubsystem can use for force
     computations**/
-    int getNumberOfThreads() const;
+    int getNumberOfThreads() const requires std::is_same_v<T, Real>;
     
     /** Calculate the sum of forces that would be applied by the force elements 
     if the given \a state were realized to Dynamics stage. This sizes the given
@@ -138,8 +152,8 @@ public:
         correspondence, you must call methods of MobilizedBody; there is no
         hint here.  **/
     void calcForceContributionsSum(
-        const State& state, const Array_<ForceIndex>& forceIndexes, 
-        Vector_<SpatialVec>& bodyForces, Vector& mobilityForces) const;
+        const StateType& state, const Array_<ForceIndex>& forceIndexes,
+        BodyForceVector& bodyForces, MobilityForceVector& mobilityForces) const;
 
     /** Every Subsystem is owned by a System; a GeneralForceSubsystem expects
     to be owned by a MultibodySystem. This method returns a const reference
@@ -148,15 +162,17 @@ public:
     const MultibodySystem& getMultibodySystem() const;
 
     /** @cond **/   // don't show in Doxygen docs
-    SimTK_PIMPL_DOWNCAST(GeneralForceSubsystem, ForceSubsystem);
+    SimTK_PIMPL_DOWNCAST(GeneralForceSubsystem_, ForceSubsystem);
     /** @endcond **/
 private:
     // OBSOLETE; use getNumForces() instead.
     int getNForces() const {return getNumForces();}
 
-    class GeneralForceSubsystemRep& updRep();
-    const GeneralForceSubsystemRep& getRep() const;
+    GeneralForceSubsystemRep_<T>& updRep();
+    const GeneralForceSubsystemRep_<T>& getRep() const;
 };
+
+extern template class SimTK_SIMBODY_EXPORT GeneralForceSubsystem_<Real>;
 
 } // namespace SimTK
 

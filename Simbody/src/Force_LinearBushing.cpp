@@ -32,7 +32,8 @@
 
 namespace SimTK {
 
-class Force::LinearBushingImpl : public ForceImpl {
+template <>
+class Force_<Real>::LinearBushingImpl : public ForceImpl {
     struct InstanceVars {
         InstanceVars(const Transform& defX_B1F, const Transform& defX_B2M,
                      const Vec6& defStiffness, const Vec6& defDamping)

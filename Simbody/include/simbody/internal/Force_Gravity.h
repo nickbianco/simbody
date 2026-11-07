@@ -67,7 +67,8 @@ also signed.
 
 @author Michael Sherman
 **/
-class SimTK_SIMBODY_EXPORT Force::Gravity : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::Gravity : public Force {
 public:
 
 

@@ -62,7 +62,8 @@ will never generate a "sticking" force. This is a Hunt and Crossley-like
 dissipation model. It has the nice property that the damping force is zero
 when you first touch the stop.
 **/
-class SimTK_SIMBODY_EXPORT Force::MobilityLinearStop : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::MobilityLinearStop : public Force {
 public:
     /** Create a %MobilityLinearStop force element on a particular generalized 
     coordinate.

@@ -42,7 +42,8 @@ torque; if anything more general then this is in compatible force units. This
 force does not contribute to the potential energy, so adding it to a system will
 cause energy not to be conserved unless you account for the power injected or
 dissipated here. **/
-class SimTK_SIMBODY_EXPORT Force::MobilityConstantForce : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::MobilityConstantForce : public Force {
 public:
     /** Add a %MobilityConstantForce element to the indicated Subsystem.   
     @param forces       Subsystem to which this force should be added.

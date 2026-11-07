@@ -38,7 +38,8 @@ namespace SimTK {
 for applying external forces or forces that are updated at discrete times due 
 to the occurrence of events.
 @see Force::MobilityDiscreteForce **/
-class SimTK_SIMBODY_EXPORT Force::DiscreteForces : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::DiscreteForces : public Force {
 public:
     /** Create a %DiscreteForces force element.
     

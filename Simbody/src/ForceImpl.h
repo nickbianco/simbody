@@ -28,86 +28,18 @@
 #include "simbody/internal/common.h"
 #include "simbody/internal/Force.h"
 #include "simbody/internal/Force_BuiltIns.h"
+#include "simbody/internal/tree/ForceScalarImpl.h"
 
 namespace SimTK {
 
-// This is what a Force handle points to.
-class ForceImpl : public PIMPLImplementation<Force, ForceImpl> {
-public:
-    ForceImpl() : forces(0), defaultDisabled(false) {}
-    ForceImpl(const ForceImpl& clone) {*this = clone;}
-
-    void setDisabledByDefault(bool shouldBeDisabled) 
-    {   invalidateTopologyCache();
-        defaultDisabled = shouldBeDisabled; }
-
-    bool isDisabledByDefault() const 
-    {   return defaultDisabled; }
-
-    virtual ~ForceImpl() {}
-    virtual ForceImpl* clone() const = 0;
-    virtual bool dependsOnlyOnPositions() const {
-        return false;
-    }
-    virtual bool shouldBeParallelIfPossible() const{
-        return false;
-    }
-    ForceIndex getForceIndex() const {return index;}
-    const GeneralForceSubsystem& getForceSubsystem() const 
-    {   assert(forces); return *forces; }
-    void setForceSubsystem(GeneralForceSubsystem& frcsub, ForceIndex ix) {
-        forces = &frcsub;
-        index  = ix;
-    }
-    void invalidateTopologyCache() const {
-        if (forces) forces->invalidateSubsystemTopologyCache();
-    }
-
-    // Every force element must provide the next two methods. Note that 
-    // calcForce() must *add in* (+=) its forces to the given arrays.
-    virtual void calcForce(const State&         state, 
-                           Vector_<SpatialVec>& bodyForces, 
-                           Vector_<Vec3>&       particleForces, 
-                           Vector&              mobilityForces) const = 0;
-    virtual Real calcPotentialEnergy(const State& state) const = 0;
-
-    virtual void realizeTopology    (State& state) const {}
-    virtual void realizeModel       (State& state) const {}
-    virtual void realizeInstance    (const State& state) const {}
-    virtual void realizeTime        (const State& state) const {}
-    virtual void realizePosition    (const State& state) const {}
-    virtual void realizeVelocity    (const State& state) const {}
-    virtual void realizeDynamics    (const State& state) const {}
-    virtual void realizeAcceleration(const State& state) const {}
-    virtual void realizeReport      (const State& state) const {}
-
-    virtual void calcDecorativeGeometryAndAppend
-       (const State& s, Stage stage, Array_<DecorativeGeometry>& geom) const {}
-
-private:
-        // CONSTRUCTION
-    GeneralForceSubsystem* forces;  // just a reference; no delete on destruction
-    ForceIndex             index;
-
-        // TOPOLOGY "STATE"
-    // Changing anything here invalidates the topology of the containing
-    // force Subsystem and thus of the whole System. 
-
-    // This says whether the Instance-stage "disabled" flag for this force 
-    // element should be initially on or off. Most force elements are enabled 
-    // by default.
-    bool                   defaultDisabled;
-
-        // TOPOLOGY "CACHE"
-    // Nothing in the base Impl class.
-};
-
-
+// The ForceImpl base class (ForceImpl_<Real>) and Force::CustomImpl are in
+// simbody/internal/tree/ForceScalarImpl.h.
 
 //------------------------------------------------------------------------------
 //                    TWO POINT LINEAR SPRING IMPL
 //------------------------------------------------------------------------------
-class Force::TwoPointLinearSpringImpl : public ForceImpl {
+template <>
+class Force_<Real>::TwoPointLinearSpringImpl : public ForceImpl {
 public:
     TwoPointLinearSpringImpl(const MobilizedBody& body1, const Vec3& station1, 
                              const MobilizedBody& body2, const Vec3& station2, 
@@ -141,7 +73,8 @@ private:
 //------------------------------------------------------------------------------
 //                    TWO POINT LINEAR DAMPER IMPL
 //------------------------------------------------------------------------------
-class Force::TwoPointLinearDamperImpl : public ForceImpl {
+template <>
+class Force_<Real>::TwoPointLinearDamperImpl : public ForceImpl {
 public:
     TwoPointLinearDamperImpl(const MobilizedBody& body1, const Vec3& station1, const MobilizedBody& body2, const Vec3& station2, Real damping);
     TwoPointLinearDamperImpl* clone() const override {
@@ -161,7 +94,8 @@ private:
 //------------------------------------------------------------------------------
 //                    TWO POINT CONSTANT FORCE IMPL
 //------------------------------------------------------------------------------
-class Force::TwoPointConstantForceImpl : public ForceImpl {
+template <>
+class Force_<Real>::TwoPointConstantForceImpl : public ForceImpl {
 public:
     TwoPointConstantForceImpl(const MobilizedBody& body1, const Vec3& station1, const MobilizedBody& body2, const Vec3& station2, Real force);
     TwoPointConstantForceImpl* clone() const override {
@@ -184,7 +118,8 @@ private:
 //------------------------------------------------------------------------------
 //                    MOBILITY LINEAR SPRING IMPL
 //------------------------------------------------------------------------------
-class Force::MobilityLinearSpringImpl : public ForceImpl {
+template <>
+class Force_<Real>::MobilityLinearSpringImpl : public ForceImpl {
 friend class MobilityLinearSpring;
 
     MobilityLinearSpringImpl(const MobilizedBody& mobod, 
@@ -235,7 +170,8 @@ friend class MobilityLinearSpring;
 //------------------------------------------------------------------------------
 //                       MOBILITY LINEAR DAMPER IMPL
 //------------------------------------------------------------------------------
-class Force::MobilityLinearDamperImpl : public ForceImpl {
+template <>
+class Force_<Real>::MobilityLinearDamperImpl : public ForceImpl {
 friend class MobilityLinearDamper;
 
     MobilityLinearDamperImpl(const MobilizedBody&   mobod, 
@@ -285,7 +221,8 @@ friend class MobilityLinearDamper;
 //                       MOBILITY CONSTANT FORCE IMPL
 //------------------------------------------------------------------------------
 // Hidden implementation class for a MobilityConstantForce force element.
-class Force::MobilityConstantForceImpl : public ForceImpl {
+template <>
+class Force_<Real>::MobilityConstantForceImpl : public ForceImpl {
 friend class MobilityConstantForce;
 
     MobilityConstantForceImpl(const MobilizedBody&  mobod, 
@@ -338,7 +275,8 @@ friend class MobilityConstantForce;
 //                       MOBILITY LINEAR STOP IMPL
 //------------------------------------------------------------------------------
 // Hidden implementation class for a MobilityLinearStop force element.
-class Force::MobilityLinearStopImpl : public ForceImpl {
+template <>
+class Force_<Real>::MobilityLinearStopImpl : public ForceImpl {
 friend class MobilityLinearStop;
 
     // Type of the discrete state variable that holds values for this
@@ -411,7 +349,8 @@ friend class MobilityLinearStop;
 // This Force element allocates a scalar discrete variable and applies its
 // value as a generalized force at a particular mobility. The value can be
 // set externally in an event handler or between steps.
-class Force::MobilityDiscreteForceImpl : public ForceImpl {
+template <>
+class Force_<Real>::MobilityDiscreteForceImpl : public ForceImpl {
 public:
     MobilityDiscreteForceImpl(const MobilizedBody&  mobod, 
                               MobilizerUIndex       whichU, 
@@ -464,7 +403,8 @@ friend class Force::MobilityDiscreteForce;
 // This Force element allocates a Vector discrete variables and applies their
 // values as generalized and body spatial forces. The values can be
 // set externally in an event handler or between steps.
-class Force::DiscreteForcesImpl : public ForceImpl {
+template <>
+class Force_<Real>::DiscreteForcesImpl : public ForceImpl {
 public:
     DiscreteForcesImpl(const SimbodyMatterSubsystem& matter);
 
@@ -509,7 +449,8 @@ friend class Force::DiscreteForces;
 //------------------------------------------------------------------------------
 //                           CONSTANT FORCE IMPL
 //------------------------------------------------------------------------------
-class Force::ConstantForceImpl : public ForceImpl {
+template <>
+class Force_<Real>::ConstantForceImpl : public ForceImpl {
 public:
     ConstantForceImpl(const MobilizedBody& body, const Vec3& station, const Vec3& force);
     ConstantForceImpl* clone() const override {
@@ -531,7 +472,8 @@ private:
 //------------------------------------------------------------------------------
 //                          CONSTANT TORQUE IMPL
 //------------------------------------------------------------------------------
-class Force::ConstantTorqueImpl : public ForceImpl {
+template <>
+class Force_<Real>::ConstantTorqueImpl : public ForceImpl {
 public:
     ConstantTorqueImpl(const MobilizedBody& body, const Vec3& torque);
     ConstantTorqueImpl* clone() const override {
@@ -553,7 +495,8 @@ private:
 //------------------------------------------------------------------------------
 //                          GLOBAL DAMPER IMPL
 //------------------------------------------------------------------------------
-class Force::GlobalDamperImpl : public ForceImpl {
+template <>
+class Force_<Real>::GlobalDamperImpl : public ForceImpl {
 public:
     GlobalDamperImpl(const SimbodyMatterSubsystem& matter, Real damping);
     GlobalDamperImpl* clone() const override {
@@ -571,7 +514,8 @@ private:
 //------------------------------------------------------------------------------
 //                          UNIFORM GRAVITY IMPL
 //------------------------------------------------------------------------------
-class Force::UniformGravityImpl : public ForceImpl {
+template <>
+class Force_<Real>::UniformGravityImpl : public ForceImpl {
 public:
     UniformGravityImpl(const SimbodyMatterSubsystem& matter, const Vec3& g, Real zeroHeight);
     UniformGravityImpl* clone() const override {
@@ -600,71 +544,6 @@ private:
 };
 
 
-
-//------------------------------------------------------------------------------
-//                              CUSTOM IMPL
-//------------------------------------------------------------------------------
-class Force::CustomImpl : public ForceImpl {
-public:
-    CustomImpl(Force::Custom::Implementation* implementation);
-    CustomImpl* clone() const override {
-        return new CustomImpl(*this);
-    }
-    bool dependsOnlyOnPositions() const override {
-        return implementation->dependsOnlyOnPositions();
-    }
-    void calcForce(const State& state, Vector_<SpatialVec>& bodyForces, 
-                   Vector_<Vec3>& particleForces, Vector& mobilityForces) 
-                   const override;
-    Real calcPotentialEnergy(const State& state) const override;
-    bool shouldBeParallelIfPossible() const override {
-        return implementation->shouldBeParallelIfPossible();
-    }
-    ~CustomImpl() {
-        delete implementation;
-    }
-    const Force::Custom::Implementation& getImplementation() const {
-        return *implementation;
-    }
-    Force::Custom::Implementation& updImplementation() {
-        return *implementation;
-    }
-protected:
-    void realizeTopology(State& state) const override {
-        implementation->realizeTopology(state);
-    }
-    void realizeModel(State& state) const override {
-        implementation->realizeModel(state);
-    }
-    void realizeInstance(const State& state) const override {
-        implementation->realizeInstance(state);
-    }
-    void realizeTime(const State& state) const override {
-        implementation->realizeTime(state);
-    }
-    void realizePosition(const State& state) const override {
-        implementation->realizePosition(state);
-    }
-    void realizeVelocity(const State& state) const override {
-        implementation->realizeVelocity(state);
-    }
-    void realizeDynamics(const State& state) const override {
-        implementation->realizeDynamics(state);
-    }
-    void realizeAcceleration(const State& state) const override {
-        implementation->realizeAcceleration(state);
-    }
-    void realizeReport(const State& state) const override {
-        implementation->realizeReport(state);
-    }
-    void calcDecorativeGeometryAndAppend(const State& state, Stage stage, 
-        Array_<DecorativeGeometry>& geom) const override 
-    {
-        implementation->calcDecorativeGeometryAndAppend(state,stage,geom);
-    }
-private:
-    Force::Custom::Implementation* implementation;
-};
 
 } // namespace SimTK
 

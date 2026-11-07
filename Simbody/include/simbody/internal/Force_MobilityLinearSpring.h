@@ -46,7 +46,8 @@ that qdot=u. In particular, do not use this on coordinates for Ball or Free
 mobilizers. You can often replace those with Gimbal or Bushing mobilizers for
 which qdot=u holds, or split up the mobilizer into simpler components separated
 by massless bodies. **/
-class SimTK_SIMBODY_EXPORT Force::MobilityLinearSpring : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::MobilityLinearSpring : public Force {
 public:
     /** Create a %MobilityLinearSpring force element on a particular generalized
     coordinate.

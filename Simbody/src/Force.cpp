@@ -38,50 +38,7 @@ namespace SimTK {
 //                                  FORCE
 //------------------------------------------------------------------------------
 
-void Force::setDisabledByDefault(bool shouldBeDisabled)
-{   updImpl().setDisabledByDefault(shouldBeDisabled); }
-bool Force::isDisabledByDefault() const
-{   return getImpl().isDisabledByDefault(); }
-
-void Force::disable(State& state) const 
-{   getForceSubsystem().setForceIsDisabled(state, getForceIndex(), true); }
-void Force::enable(State& state) const 
-{   getForceSubsystem().setForceIsDisabled(state, getForceIndex(), false); }
-bool Force::isDisabled(const State& state) const
-{   return getForceSubsystem().isForceDisabled(state, getForceIndex()); }
-
-void Force::calcForceContribution(const State&   state,
-                           Vector_<SpatialVec>&  bodyForces,
-                           Vector_<Vec3>&        particleForces,
-                           Vector&               mobilityForces) const 
-{
-    const MultibodySystem& mbs = getForceSubsystem().getMultibodySystem();
-    const SimbodyMatterSubsystem& matter = mbs.getMatterSubsystem();
-
-    // Resize if necessary.
-    bodyForces.resize(matter.getNumBodies());
-    particleForces.resize(matter.getNumParticles());
-    mobilityForces.resize(matter.getNumMobilities());
-
-    // Set all forces to zero.
-    bodyForces.setToZero();
-    particleForces.setToZero();
-    mobilityForces.setToZero();
-    if (isDisabled(state)) return;
-
-    // Add in force element contributions.
-    getImpl().calcForce(state,bodyForces,particleForces,mobilityForces);
-}
-
-Real Force::calcPotentialEnergyContribution(const State& state) const {
-    if (isDisabled(state)) return 0;
-    return getImpl().calcPotentialEnergy(state);
-}
-
-const GeneralForceSubsystem& Force::getForceSubsystem() const 
-{   return getImpl().getForceSubsystem(); }
-ForceIndex Force::getForceIndex() const
-{   return getImpl().getForceIndex(); }
+// The Force handle methods are in simbody/internal/tree/ForceScalarImpl.h.
 
 //-------------------------- TwoPointLinearSpring ------------------------------
 //------------------------------------------------------------------------------
@@ -1087,32 +1044,7 @@ Real Force::UniformGravityImpl::calcPotentialEnergy(const State& state) const {
 //---------------------------------- Custom ------------------------------------
 //------------------------------------------------------------------------------
 
-SimTK_INSERT_DERIVED_HANDLE_DEFINITIONS(Force::Custom, Force::CustomImpl, Force);
-
-Force::Custom::Custom(GeneralForceSubsystem& forces, Implementation* implementation) : 
-        Force(new CustomImpl(implementation)) {
-    updImpl().setForceSubsystem(forces, forces.adoptForce(*this));
-}
-
-const Force::Custom::Implementation& Force::Custom::getImplementation() const {
-    return getImpl().getImplementation();
-}
-
-Force::Custom::Implementation& Force::Custom::updImplementation() {
-    return updImpl().updImplementation();    
-}
-
-
-Force::CustomImpl::CustomImpl(Force::Custom::Implementation* implementation) : implementation(implementation) {
-}
-
-void Force::CustomImpl::calcForce(const State& state, Vector_<SpatialVec>& bodyForces, Vector_<Vec3>& particleForces, Vector& mobilityForces) const {
-    implementation->calcForce(state, bodyForces, particleForces, mobilityForces);
-}
-
-Real Force::CustomImpl::calcPotentialEnergy(const State& state) const {
-    return implementation->calcPotentialEnergy(state);
-}
+// Force::Custom is in simbody/internal/tree/ForceScalarImpl.h.
 
 } // namespace SimTK
 

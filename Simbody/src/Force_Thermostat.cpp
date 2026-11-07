@@ -33,7 +33,8 @@
 namespace SimTK {
 
 // Implementation class for Force::Thermostat.
-class Force::ThermostatImpl : public ForceImpl {
+template <>
+class Force_<Real>::ThermostatImpl : public ForceImpl {
 public:
     ThermostatImpl(const SimbodyMatterSubsystem& matter, 
                    Real boltzmannsConstant, 

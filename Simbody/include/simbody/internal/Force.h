@@ -26,15 +26,13 @@
 
 #include "SimTKcommon.h"
 #include "simbody/internal/common.h"
+#include "simbody/internal/ForceTypes.h"
 #include "simbody/internal/GeneralForceSubsystem.h"
 
 namespace SimTK {
 
 class SimbodyMatterSubsystem;
-class GeneralForceSubsystem;
 class MobilizedBody;
-class Force;
-class ForceImpl;
 
 // We only want the template instantiation to occur once. This symbol is defined
 // in the SimTK core compilation unit that defines the Force class but should 
@@ -46,9 +44,24 @@ class ForceImpl;
 /** This is the base class from which all Force element handle classes derive.
 A Force object applies forces to some or all of the bodies, particles, and 
 mobilities in a System. There are subclasses for various standard types of 
-forces, or you can create your own forces by deriving from Force::Custom. **/
-class SimTK_SIMBODY_EXPORT Force : public PIMPLHandle<Force, ForceImpl, true> {
+forces, or you can create your own forces by deriving from Force::Custom.
+
+Force_<T> is a template on the scalar type T that the force element computes
+with; Force is Force_<Real>, Simbody's usual force element. For any other T
+(such as casadi::SX), a force element is evaluated with a ScalarState<T>; see
+ForceScalarTypes. Only Force_<T>::Custom is available for every T. The other
+built-in force elements are defined for Real only. **/
+template <class T>
+class Force_ : public PIMPLHandle<Force_<T>, ForceImpl_<T>, true> {
+    using Super = PIMPLHandle<Force_<T>, ForceImpl_<T>, true>;
 public:
+    using StateType           = typename ForceScalarTypes<T>::StateType;
+    using BodyForceVector     = typename ForceScalarTypes<T>::BodyForceVector;
+    using ParticleForceVector =
+        typename ForceScalarTypes<T>::ParticleForceVector;
+    using MobilityForceVector =
+        typename ForceScalarTypes<T>::MobilityForceVector;
+
     /**@name                   Enabling and disabling
     These methods determine whether this force element is active in a given
     State. When disabled, the Force element is completely ignored and will
@@ -127,10 +140,10 @@ public:
     efficent way to calculate forces; use it sparingly. For a more efficent way
     to calculate force contributions from multiple force elements, see
     GeneralForceSubsystem::calcForceContributionsSum(). **/
-    void calcForceContribution(const State&          state,
-                               Vector_<SpatialVec>&  bodyForces,
-                               Vector_<Vec3>&        particleForces,
-                               Vector&               mobilityForces) const;
+    void calcForceContribution(const StateType&      state,
+                               BodyForceVector&      bodyForces,
+                               ParticleForceVector&  particleForces,
+                               MobilityForceVector&  mobilityForces) const;
     /** Calculate the potential energy contribution that is made by this
     force element at the given \a state. This calls the force element's
     calcPotentialEnergy() method. A disabled force element will return zero 
@@ -142,7 +155,7 @@ public:
         needs; if you don't know then realize it to Stage::Position.
     @return The potential energy contribution of this force element at this
     \a state value. **/
-    Real calcPotentialEnergyContribution(const State& state) const;
+    T calcPotentialEnergyContribution(const StateType& state) const;
     /*@}*/
 
     /**@name                   Bookkeeping
@@ -151,7 +164,7 @@ public:
     index assigned to this force element. **/
     /*@{*/
     /** Default constructor for Force handle base class does nothing. **/
-    Force() {}
+    Force_() {}
     /** Implicit conversion to ForceIndex when needed. This will throw an 
     exception if the force element has not yet been adopted by a force 
     subsystem. **/
@@ -159,7 +172,7 @@ public:
     /** Get the GeneralForceSubsystem of which this Force is an element. 
     This will throw an exception if the force element has not yet been
     adopted by a force subsystem. **/
-    const GeneralForceSubsystem& getForceSubsystem() const;
+    const GeneralForceSubsystem_<T>& getForceSubsystem() const;
     /** Get the index of this force element within its parent force subsystem.
     The returned index will be invalid if the force element has not yet been
     adopted by any subsystem (test with the index.isValid() method). **/
@@ -205,8 +218,10 @@ public:
 protected:
     /** Use this in a derived Force handle class constructor to supply the 
     concrete implementation object to be stored in the handle base. **/
-    explicit Force(ForceImpl* r) : HandleBase(r) { }
+    explicit Force_(ForceImpl_<T>* r) : Super(r) { }
 };
+
+extern template class SimTK_SIMBODY_EXPORT Force_<Real>;
 
 
 /**
@@ -220,7 +235,8 @@ protected:
  * are unable to determine a direction for the force in that case.
  */
 
-class SimTK_SIMBODY_EXPORT Force::TwoPointLinearSpring : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::TwoPointLinearSpring : public Force {
 public:
     /**
      * Create a TwoPointLinearSpring.
@@ -253,7 +269,8 @@ public:
  * are unable to determine a direction for the force in that case.
  */
 
-class SimTK_SIMBODY_EXPORT Force::TwoPointLinearDamper: public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::TwoPointLinearDamper : public Force {
 public:
     /**
      * Create a TwoPointLinearDamper.
@@ -284,7 +301,8 @@ public:
  * are unable to determine a direction for the force in that case.
  */
 
-class SimTK_SIMBODY_EXPORT Force::TwoPointConstantForce: public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::TwoPointConstantForce : public Force {
 public:
     /**
      * Create a TwoPointConstantForce.
@@ -312,7 +330,8 @@ public:
  * a system will cause energy not to be conserved.
  */
 
-class SimTK_SIMBODY_EXPORT Force::ConstantForce: public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::ConstantForce : public Force {
 public:
     ConstantForce(GeneralForceSubsystem& forces, const MobilizedBody& body, const Vec3& station, const Vec3& force);
     
@@ -329,7 +348,8 @@ public:
  * a system will cause energy not to be conserved.
  */
 
-class SimTK_SIMBODY_EXPORT Force::ConstantTorque: public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::ConstantTorque : public Force {
 public:
     ConstantTorque(GeneralForceSubsystem& forces, const MobilizedBody& body, const Vec3& torque);
     
@@ -353,7 +373,8 @@ public:
  * hence does not contribute to potential energy.
  */
 
-class SimTK_SIMBODY_EXPORT Force::GlobalDamper : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::GlobalDamper : public Force {
 public:
     GlobalDamper(GeneralForceSubsystem& forces, const SimbodyMatterSubsystem& matter, Real damping);
     
@@ -373,7 +394,8 @@ public:
  * @see SimTK::Force::Gravity
  */
 
-class SimTK_SIMBODY_EXPORT Force::UniformGravity : public Force {
+template <>
+class SimTK_SIMBODY_EXPORT Force_<Real>::UniformGravity : public Force {
 public:
     UniformGravity(GeneralForceSubsystem& forces, 
                    const SimbodyMatterSubsystem& matter, 

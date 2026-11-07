@@ -28,7 +28,9 @@
 // library. The values must equal Simbody's, and the derivatives along a
 // random direction must match central differences of Simbody's results, for
 // body kinematics, forward and inverse dynamics, mass matrix products, system
-// Jacobian products, and kinetic energy.
+// Jacobian products, and kinetic energy. Also, force elements written once as
+// a template on the scalar type, in a GeneralForceSubsystem_<Dual>, must agree
+// with the same elements in Simbody's GeneralForceSubsystem.
 
 // The scalar traits for Dual must be defined before any other SimTKcommon
 // header is included.
@@ -155,6 +157,7 @@ SimTK_DEFINE_REAL_SCALAR_MATRIX_OPERATORS(SimTKDualTest::Dual);
 
 #include "Simbody.h"
 #include "simbody/internal/tree/MultibodyScalarImpl.h"
+#include "simbody/internal/tree/ForceScalarImpl.h"
 #include "SimTKcommon/Testing.h"
 
 using namespace SimTK;
@@ -162,6 +165,7 @@ using SimTKDualTest::Dual;
 
 // Instantiate everything so we catch compilation problems.
 SimTK_INSTANTIATE_MULTIBODY_SCALAR(Dual);
+SimTK_INSTANTIATE_FORCE_SCALAR(Dual);
 
 namespace {
 
@@ -210,8 +214,8 @@ struct TestSystem {
 };
 
 // Gravity body forces for a ScalarState, computed as Force::Gravity does.
-// Force subsystems don't support other scalar types, so applied forces are
-// computed by the caller.
+// The built-in force elements are Real only, so these are computed by the
+// caller.
 template <class T>
 std::vector<SpatialVec_<T>> calcGravityForces(const TestSystem& sys,
                                               const ScalarState<T>& s) {
@@ -390,6 +394,142 @@ void compareDualToSimbody(const std::vector<int>& parents) {
 const std::vector<int> Chain{0, 1, 2, 3, 4, 5, 6, 7};
 const std::vector<int> Tree{0, 1, 1, 0, 4, 2, 2, 5, 3};
 
+//==============================================================================
+//                        FORCE ELEMENTS FOR ANY SCALAR
+//==============================================================================
+template <class T>
+Vec<3,T> toT(const Vec3& v) {return Vec<3,T>(T(v[0]), T(v[1]), T(v[2]));}
+
+// A mobilized body's first q and its u index, from either kind of state.
+Real getFirstQ(const SimbodyMatterSubsystem&, const MobilizedBody& mobod,
+               const State& s)
+{   return mobod.getOneQ(s, MobilizerQIndex(0)); }
+template <class T>
+T getFirstQ(const SimbodyMatterSubsystem& matter, const MobilizedBody& mobod,
+            const ScalarState<T>& s) {
+    return s.getQ()[s.getQStart(matter.getMySubsystemIndex())
+                    + mobod.getFirstQIndex(s.getRealState())];
+}
+const State& getRealState(const State& s) {return s;}
+template <class T>
+const State& getRealState(const ScalarState<T>& s) {return s.getRealState();}
+
+// A linear spring and damper between stations on two bodies, and a torsional
+// spring on another body's first mobility, written once for any scalar type.
+template <class T>
+class SpringDamper : public Force_<T>::Custom::Implementation {
+    using Super = typename Force_<T>::Custom::Implementation;
+public:
+    using typename Super::StateType;
+    using typename Super::BodyForceVector;
+    using typename Super::ParticleForceVector;
+    using typename Super::MobilityForceVector;
+
+    SpringDamper(const SimbodyMatterSubsystem& matter,
+                 MobilizedBodyIndex body1, const Vec3& station1,
+                 MobilizedBodyIndex body2, const Vec3& station2,
+                 Real k, Real c, Real x0, MobilizedBodyIndex jointBody,
+                 Real kq)
+    :   matter(matter), body1(body1), body2(body2), station1(station1),
+        station2(station2), k(k), c(c), x0(x0), jointBody(jointBody),
+        kq(kq) {}
+
+    void calcForce(const StateType& s, BodyForceVector& bodyForces,
+                   ParticleForceVector&,
+                   MobilityForceVector& mobilityForces) const override {
+        const MobilizedBody& mobod1 = matter.getMobilizedBody(body1);
+        const MobilizedBody& mobod2 = matter.getMobilizedBody(body2);
+        const Transform_<T>&  X_GB1 = mobod1.getBodyTransform(s);
+        const Transform_<T>&  X_GB2 = mobod2.getBodyTransform(s);
+        const SpatialVec_<T>& V_GB1 = mobod1.getBodyVelocity(s);
+        const SpatialVec_<T>& V_GB2 = mobod2.getBodyVelocity(s);
+        const Vec<3,T> r1 = X_GB1.R()*toT<T>(station1);
+        const Vec<3,T> r2 = X_GB2.R()*toT<T>(station2);
+        const Vec<3,T> d = (X_GB2.p() + r2) - (X_GB1.p() + r1);
+        const Vec<3,T> v = (V_GB2[1] + V_GB2[0] % r2)
+                         - (V_GB1[1] + V_GB1[0] % r1);
+        const T length = sqrt(~d*d);
+        const Vec<3,T> e = d/length;
+        const T tension = T(k)*(length - T(x0)) + T(c)*(~v*e);
+        const Vec<3,T> f1 = tension*e; // on body 1, toward body 2
+        bodyForces[body1] += SpatialVec_<T>(r1 % f1, f1);
+        bodyForces[body2] -= SpatialVec_<T>(r2 % f1, f1);
+
+        const MobilizedBody& joint = matter.getMobilizedBody(jointBody);
+        mobilityForces[joint.getFirstUIndex(getRealState(s))] -=
+            T(kq)*getFirstQ(matter, joint, s);
+    }
+
+    T calcPotentialEnergy(const StateType& s) const override {
+        const Transform_<T>& X_GB1 =
+            matter.getMobilizedBody(body1).getBodyTransform(s);
+        const Transform_<T>& X_GB2 =
+            matter.getMobilizedBody(body2).getBodyTransform(s);
+        const Vec<3,T> d = (X_GB2.p() + X_GB2.R()*toT<T>(station2))
+                         - (X_GB1.p() + X_GB1.R()*toT<T>(station1));
+        const T stretch = sqrt(~d*d) - T(x0);
+        const T q = getFirstQ(matter, matter.getMobilizedBody(jointBody), s);
+        return T(0.5*k)*stretch*stretch + T(0.5*kq)*q*q;
+    }
+
+private:
+    const SimbodyMatterSubsystem& matter;
+    MobilizedBodyIndex body1, body2;
+    Vec3 station1, station2;
+    Real k, c, x0;
+    MobilizedBodyIndex jointBody;
+    Real kq;
+};
+
+// A chain of pin, slider, and planar bodies with the same force elements in
+// Simbody's GeneralForceSubsystem and in a GeneralForceSubsystem_<Dual>. The
+// second spring is disabled by default.
+struct ForceTestSystem {
+    MultibodySystem                 system;
+    SimbodyMatterSubsystem          matter;
+    GeneralForceSubsystem           forces;
+    GeneralForceSubsystem_<Dual>    dualForces;
+    Force::Custom                   spring, disabledSpring;
+    Force_<Dual>::Custom            dualSpring, dualDisabledSpring;
+    State                           state;
+
+    ForceTestSystem() : matter(system), forces(system), dualForces(system) {
+        MobilizedBody::Pin b1(matter.Ground(), Test::randTransform(),
+                              Body::Rigid(randMassProperties()),
+                              Test::randTransform());
+        MobilizedBody::Slider b2(b1, Test::randTransform(),
+                                 Body::Rigid(randMassProperties()),
+                                 Test::randTransform());
+        MobilizedBody::Planar b3(b2, Test::randTransform(),
+                                 Body::Rigid(randMassProperties()),
+                                 Test::randTransform(), MobilizedBody::Reverse);
+        MobilizedBody::Pin b4(b3, Test::randTransform(),
+                              Body::Rigid(randMassProperties()),
+                              Test::randTransform());
+        spring = Force::Custom(forces, new SpringDamper<Real>(matter,
+            b1, Vec3(0.1, 0.2, 0.3), b4, Vec3(-0.2, 0.1, 0), 50, 2, 0.5,
+            b2, 7));
+        dualSpring = Force_<Dual>::Custom(dualForces, new SpringDamper<Dual>(
+            matter, b1, Vec3(0.1, 0.2, 0.3), b4, Vec3(-0.2, 0.1, 0), 50, 2,
+            0.5, b2, 7));
+        disabledSpring = Force::Custom(forces, new SpringDamper<Real>(matter,
+            b2, Vec3(0), b3, Vec3(0.3, 0, 0), 1000, 10, 0, b4, 100));
+        dualDisabledSpring = Force_<Dual>::Custom(dualForces,
+            new SpringDamper<Dual>(matter, b2, Vec3(0), b3, Vec3(0.3, 0, 0),
+                                   1000, 10, 0, b4, 100));
+        disabledSpring.setDisabledByDefault(true);
+        dualDisabledSpring.setDisabledByDefault(true);
+        state = system.realizeTopology();
+        system.realize(state, Stage::Instance);
+    }
+};
+
+Array_<ForceIndex> allForces(int n) {
+    Array_<ForceIndex> all;
+    for (int i=0; i < n; ++i) all.push_back(ForceIndex(i));
+    return all;
+}
+
 } // anonymous namespace
 
 void testChain() {compareDualToSimbody(Chain);}
@@ -489,6 +629,118 @@ void testConstraints() {
     SimTK_TEST_MUST_THROW(system.realize(enabled, Stage::Instance));
 }
 
+// A force element written once as a template on the scalar type, evaluated
+// with Duals in a GeneralForceSubsystem_<Dual>: its forces, its potential
+// energy, and the accelerations they cause must equal Simbody's for the same
+// element in a GeneralForceSubsystem, and their derivatives must match
+// central differences.
+void testForces() {
+    ForceTestSystem sys;
+    const int nq = sys.state.getNQ(), nu = sys.state.getNU();
+    const Array_<ForceIndex> all = allForces(2);
+
+    auto simbody = [&](const Vector& q, const Vector& u) {
+        State s = sys.state;
+        s.updQ() = q; s.updU() = u;
+        sys.system.realize(s, Stage::Acceleration);
+        Vector_<SpatialVec> F; Vector f;
+        sys.forces.calcForceContributionsSum(s, all, F, f);
+        std::vector<Real> out;
+        append(out, F); append(out, f);
+        append(out, sys.spring.calcPotentialEnergyContribution(s));
+        // The GeneralForceSubsystem_<Dual> adds nothing to the System's
+        // potential energy or forces, so this is the Real spring's alone.
+        append(out, sys.system.calcPotentialEnergy(s));
+        append(out, s.getUDot());
+        return out;
+    };
+
+    ScalarState<Dual> sx(sys.state);
+    auto dual = [&](const std::vector<Dual>& q, const std::vector<Dual>& u) {
+        sx.setQ(q); sx.setU(u);
+        sys.system.realize(sx, Stage::Velocity);
+        std::vector<SpatialVec_<Dual>> F; std::vector<Dual> f;
+        sys.dualForces.calcForceContributionsSum(sx, all, F, f);
+        std::vector<Dual> out;
+        append(out, F); append(out, f);
+        const Dual pe = sys.dualSpring.calcPotentialEnergyContribution(sx);
+        append(out, pe); append(out, pe);
+        std::vector<Dual> udot;
+        std::vector<SpatialVec_<Dual>> A_GB;
+        sys.matter.calcAccelerationIgnoringConstraints(sx, f, F, udot, A_GB);
+        append(out, udot);
+        return out;
+    };
+
+    for (int trial=0; trial < 5; ++trial) {
+        const Vector q = randVector(nq), u = randVector(nu);
+        const Vector dq = randVector(nq), du = randVector(nu);
+        const std::vector<Dual> y = dual(toDual(q, dq), toDual(u, du));
+        const Real h = 1e-6;
+        const std::vector<Real> y0 = simbody(q, u);
+        const std::vector<Real> yp = simbody(q + h*dq, u + h*du);
+        const std::vector<Real> ym = simbody(q - h*dq, u - h*du);
+        SimTK_TEST(y.size() == y0.size());
+        for (size_t i=0; i < y0.size(); ++i) {
+            SimTK_TEST_EQ(y[i].value(), y0[i]);
+            SimTK_TEST_EQ_TOL(y[i].deriv(), (yp[i] - ym[i])/(2*h), 1e-5);
+        }
+    }
+}
+
+// Handles, downcasts, and enabling and disabling (which use the Real State).
+void testForceBookkeeping() {
+    ForceTestSystem sys;
+    SimTK_TEST(sys.dualForces.getNumForces() == 2);
+    SimTK_TEST(sys.dualSpring.getForceIndex() == ForceIndex(0));
+    SimTK_TEST(sys.dualDisabledSpring.getForceIndex() == ForceIndex(1));
+    SimTK_TEST(sys.dualSpring.getForceSubsystem().getNumForces() == 2);
+    SimTK_TEST(Force_<Dual>::Custom::isInstanceOf(
+        sys.dualForces.getForce(ForceIndex(1))));
+    SimTK_TEST(GeneralForceSubsystem::isInstanceOf(sys.forces));
+    SimTK_TEST(!GeneralForceSubsystem::isInstanceOf(sys.dualForces));
+    SimTK_TEST(GeneralForceSubsystem_<Dual>::isInstanceOf(sys.dualForces));
+    SimTK_TEST(!GeneralForceSubsystem_<Dual>::isInstanceOf(sys.forces));
+
+    SimTK_TEST(!sys.dualSpring.isDisabled(sys.state));
+    SimTK_TEST(sys.dualDisabledSpring.isDisabled(sys.state));
+    State s = sys.state;
+    s.updQ() = randVector(s.getNQ()); s.updU() = randVector(s.getNU());
+    sys.dualSpring.disable(s);
+    sys.dualDisabledSpring.enable(s);
+    sys.disabledSpring.enable(s);
+    SimTK_TEST(sys.dualSpring.isDisabled(s));
+    SimTK_TEST(!sys.dualDisabledSpring.isDisabled(s));
+    sys.system.realize(s, Stage::Velocity);
+    ScalarState<Dual> sx(s);
+    sys.system.realize(sx, Stage::Velocity);
+
+    // A disabled element contributes nothing.
+    std::vector<SpatialVec_<Dual>> F;
+    std::vector<Vec<3,Dual>> particleForces;
+    std::vector<Dual> f;
+    sys.dualSpring.calcForceContribution(sx, F, particleForces, f);
+    SimTK_TEST(F.size() == (size_t)sys.matter.getNumBodies());
+    SimTK_TEST(f.size() == (size_t)sys.matter.getNumMobilities());
+    for (const auto& Fb : F) for (int k=0; k < 2; ++k) for (int i=0; i < 3; ++i)
+        SimTK_TEST(Fb[k][i].value() == 0);
+    for (const auto& fi : f) SimTK_TEST(fi.value() == 0);
+    SimTK_TEST(sys.dualSpring.calcPotentialEnergyContribution(sx).value()
+               == 0);
+
+    // The enabled one equals its Real twin.
+    Vector_<SpatialVec> FReal; Vector_<Vec3> particleReal; Vector fReal;
+    sys.disabledSpring.calcForceContribution(s, FReal, particleReal, fReal);
+    sys.dualDisabledSpring.calcForceContribution(sx, F, particleForces, f);
+    for (int b=0; b < FReal.size(); ++b)
+        for (int k=0; k < 2; ++k) for (int i=0; i < 3; ++i)
+            SimTK_TEST_EQ(F[b][k][i].value(), FReal[b][k][i]);
+    for (int i=0; i < fReal.size(); ++i) SimTK_TEST_EQ(f[i].value(), fReal[i]);
+    SimTK_TEST_EQ(
+        sys.dualDisabledSpring.calcPotentialEnergyContribution(sx).value(),
+        sys.disabledSpring.calcPotentialEnergyContribution(s));
+}
+
 int main() {
     SimTK_START_TEST("TestMultibodyScalarDual");
         SimTK_SUBTEST(testChain);
@@ -496,5 +748,7 @@ int main() {
         SimTK_SUBTEST(testStages);
         SimTK_SUBTEST(testUnsupported);
         SimTK_SUBTEST(testConstraints);
+        SimTK_SUBTEST(testForces);
+        SimTK_SUBTEST(testForceBookkeeping);
     SimTK_END_TEST();
 }
