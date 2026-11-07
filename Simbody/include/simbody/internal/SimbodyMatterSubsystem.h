@@ -2445,6 +2445,45 @@ void calcResidualForceDerivativesIgnoringConstraints
     Matrix&                    dTdq,
     Matrix&                    dTdu) const;
 
+/** Calculate the analytic first-order partial derivatives of the residual
+returned by calcResidualForceIgnoringConstraints(), with respect to the mass
+properties of every body as they are stored in the State (see
+MobilizedBody::setBodyMassProperties()). For each body these are its mass m,
+its mass center station c (measured from the body origin and expressed in the
+body frame), and its unit inertia G about the body origin, expressed in the
+body frame.
+
+The applied mobility and body forces do not depend on the mass properties, so
+they do not appear here. In particular, gravity supplied as an applied body
+force is treated as fixed; if it is computed from the same mass properties,
+its contribution to the derivatives must be added separately.
+
+@param[in] state
+     A State valid for the containing System, already realized to
+     Stage::Velocity.
+@param[in] knownUdot
+     These are the desired generalized accelerations, one per mobility.
+     If this is zero length it will be treated as all-zero; otherwise
+     it must have exactly one entry per mobility in the matter subsystem.
+@param[out] dTdp
+     The nu X 10*(nb-1) matrix of partials, where nb is the number of bodies
+     including Ground, which has no parameters. Column 10*(b-1)+k holds the
+     derivative with respect to the k-th parameter of the body with
+     MobilizedBodyIndex b: k=0 is m, k=1..3 are c[0..2], and k=4..9 are the
+     G elements xx, yy, zz, xy, xz, yz, in the order taken by the UnitInertia
+     constructor. Each off-diagonal element is a single parameter that sets
+     both symmetric entries of G. Row ux is the affected mobility. This will
+     be resized if necessary.
+
+@par Required stage
+  \c Stage::Velocity
+
+@see calcResidualForceIgnoringConstraints() **/
+void calcResidualForceDerivativesWrtInertialParameters
+   (const State&               state,
+    const Vector&              knownUdot,
+    Matrix&                    dTdp) const;
+
 
 /** This is the inverse dynamics operator for when you know both the 
 accelerations and Lagrange multipliers for a constrained system. Prescribed

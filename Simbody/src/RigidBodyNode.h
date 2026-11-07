@@ -871,7 +871,8 @@ const Real* getQPool(const SBModelCache& mc,
 
     // INSTANCE INFO
 
-// TODO: These ignore State currently since they aren't parametrizable.
+// These return the default mass properties supplied at construction; the
+// values in use are stored in the `State` (see below).
 const MassProperties& getMassProperties_OB_B() const {return massProps_B;}
 const Real&           getMass          () const {return massProps_B.getMass();}
 const Vec3&           getCOM_B         () const {return massProps_B.getMassCenter();}
@@ -890,6 +891,14 @@ const Transform& getX_BM(const SBInstanceVars& iv) const {
 }
 Transform& updX_BM(SBInstanceVars& iv) const {
     return toB(iv.outboardMobilizerFrames);
+}
+
+// The body mass properties are stored in the `State` as instance variables.
+const MassProperties& getMassProperties_OB_B(const SBInstanceVars& iv) const {
+    return fromB(iv.bodyMassProperties);
+}
+MassProperties& updMassProperties_OB_B(SBInstanceVars& iv) const {
+    return toB(iv.bodyMassProperties);
 }
 
 // The inverse of the mobilizer outboard frame transform is pre-computed and
@@ -1161,7 +1170,8 @@ Real calcKineticEnergy(
 // Calculate all spatial configuration quantities, assuming availability of
 // joint-specific relative quantities.
 void calcJointIndependentKinematicsPos(
-    SBTreePositionCache& pc) const;
+    const SBInstanceVars& iv,
+    SBTreePositionCache&  pc) const;
 
 // Calcluate all spatial velocity quantities, assuming availability of
 // joint-specific relative quantities and all position kinematics.
