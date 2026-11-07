@@ -403,9 +403,20 @@ const SpatialVec& getMobilizerAcceleration(const State& state) const { // A_FM
     return *(new SpatialVec());
 }
 
-/** Return a reference to this body's mass properties in the State cache. The 
-State must have been realized to Stage::Instance or higher. **/
+/** Return a reference to this body's mass properties, taken about the body
+origin and expressed in the body frame. The value is held in the State as an
+Instance-stage variable, initialized from setDefaultMassProperties() at State
+creation and updatable with setBodyMassProperties(). The State must have been
+realized to Stage::Instance or higher. **/
 const MassProperties& getBodyMassProperties(const State& state) const;
+
+/** Set this body's mass properties, taken about the body origin and expressed
+in the body frame, in the given State. Calling this method invalidates
+Stage::Instance and higher. The value from setDefaultMassProperties() is used
+as the default value during State creation. Ground's mass properties cannot be
+changed.
+@see setDefaultMassProperties(), getBodyMassProperties() **/
+void setBodyMassProperties(State& state, const MassProperties& M_Bo_B) const;
 
 /** Return a reference to the already-calculated SpatialInertia of this  body, 
 taken about the body's origin (\e not its mass center), and expressed in the 

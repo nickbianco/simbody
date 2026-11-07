@@ -379,6 +379,75 @@ void SimbodyMatterSubsystem::calcResidualForceDerivativesIgnoringConstraints
         residualMobilityForces = *cresid;
 }
 
+// The residual is tau = J^T F - f, with F_b = M_b A_b + b_b the inertial body
+// force of body b, and the applied forces f independent of the mass
+// properties. In b's frame, with w and alpha its angular velocity and
+// acceleration and a the acceleration of its origin,
+//      F_b = m [ G alpha + w x (G w) + c x a ; a + alpha x c + w x (w x c) ]
+// so dF_b/dm = F_b/m, dF_b/dc = m [ -a_x ; alpha_x + w_x w_x ], and, writing
+// G x = L(x) g for the six elements g of G,
+//      dF_b/dg = m [ L(alpha) + w_x L(w) ; 0 ].
+// Each column of dF_b is reexpressed in Ground and mapped by J^T.
+void SimbodyMatterSubsystem::calcResidualForceDerivativesWrtInertialParameters
+   (const State&               state,
+    const Vector&              knownUdot,
+    Matrix&                    dTdp) const
+{
+    const int nb = getNumBodies();
+    const int nu = state.getNU();
+
+    SimTK_APIARGCHECK2_ALWAYS(
+        knownUdot.size()==0 || knownUdot.size()==nu,
+        "SimbodyMatterSubsystem",
+        "calcResidualForceDerivativesWrtInertialParameters",
+        "Got %d knownUdots but there are %d mobilities.",
+        knownUdot.size(), nu);
+
+    Vector_<SpatialVec> A_GB;
+    calcBodyAccelerationFromUDot(state, knownUdot, A_GB);
+
+    dTdp.resize(nu, 10*(nb-1));
+    Vector_<SpatialVec> F_G(nb, SpatialVec(Vec3(0), Vec3(0)));
+    Vector col;
+    for (MobilizedBodyIndex b(1); b < nb; ++b) {
+        const MobilizedBody&  mobod  = getMobilizedBody(b);
+        const MassProperties& M_Bo_B = mobod.getBodyMassProperties(state);
+        const Real            m      = M_Bo_B.getMass();
+        const Vec3&           c      = M_Bo_B.getMassCenter();
+        const Mat33           G      = M_Bo_B.getUnitInertia().toMat33();
+        const Rotation&       R_GB   = mobod.getBodyRotation(state);
+        const Vec3 w     = ~R_GB*mobod.getBodyAngularVelocity(state);
+        const Vec3 alpha = ~R_GB*A_GB[b][0];
+        const Vec3 a     = ~R_GB*A_GB[b][1];
+        const Mat33 w_x = crossMat(w), alpha_x = crossMat(alpha);
+
+        // Columns of dF_b, expressed in B.
+        SpatialVec dF[10];
+        dF[0] = SpatialVec(G*alpha + w % (G*w) + c % a,
+                           a + alpha % c + w % (w % c));
+        const Mat33 dFc_w = -m*crossMat(a);
+        const Mat33 dFc_v =  m*(alpha_x + w_x*w_x);
+        for (int j=0; j < 3; ++j)
+            dF[1+j] = SpatialVec(dFc_w(j), dFc_v(j));
+        // L(x) maps g = (xx, yy, zz, xy, xz, yz) to G x.
+        const auto L = [](const Vec3& x) {
+            return Mat<3,6>(x[0],    0,    0, x[1], x[2],    0,
+                               0, x[1],    0, x[0],    0, x[2],
+                               0,    0, x[2],    0, x[0], x[1]);
+        };
+        const Mat<3,6> dFg_w = m*(L(alpha) + w_x*L(w));
+        for (int k=0; k < 6; ++k)
+            dF[4+k] = SpatialVec(dFg_w(k), Vec3(0));
+
+        for (int k=0; k < 10; ++k) {
+            F_G[b] = SpatialVec(R_GB*dF[k][0], R_GB*dF[k][1]);
+            multiplyBySystemJacobianTranspose(state, F_G, col);
+            dTdp(10*(b-1)+k) = col;
+        }
+        F_G[b] = SpatialVec(Vec3(0), Vec3(0));
+    }
+}
+
 
 
 //==============================================================================

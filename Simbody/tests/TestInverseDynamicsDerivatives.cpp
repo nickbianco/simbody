@@ -839,6 +839,138 @@ void testCustomMobilizerWithoutPartials() {
     }
 }
 
+// The ten inertial parameters of a body, in the order of the dTdp columns:
+// m, c, and the elements xx, yy, zz, xy, xz, yz of G.
+static Vec<10> getInertialParameters(const MassProperties& M) {
+    const UnitInertia& G = M.getUnitInertia();
+    const Vec3& Gm = G.getMoments();
+    const Vec3& Gp = G.getProducts();
+    const Vec3& c  = M.getMassCenter();
+    Vec<10> p;
+    p[0] = M.getMass();
+    p.updSubVec<3>(1) = c;
+    p.updSubVec<3>(4) = Gm;
+    p.updSubVec<3>(7) = Gp;
+    return p;
+}
+static MassProperties makeMassProperties(const Vec<10>& p) {
+    return MassProperties(p[0], Vec3(p[1], p[2], p[3]),
+            UnitInertia(p[4], p[5], p[6], p[7], p[8], p[9]));
+}
+
+// A floating base, a reversed multi-DoF joint, a branch and a welded body, with
+// mass centers off the body origins and full unit inertias, checked against
+// central differences of the residual through setBodyMassProperties().
+void testInertialParameterDerivatives() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body1(cylinderProps(2.0, Vec3( 0.03,-0.02, 0.05), 0.30, 0.05));
+    Body::Rigid body2(cylinderProps(1.4, Vec3(-0.02, 0.04,-0.01), 0.25, 0.04));
+    Body::Rigid body3(cylinderProps(0.8, Vec3( 0.01, 0.03, 0.02), 0.18, 0.03));
+    Body::Rigid body4(cylinderProps(0.6, Vec3( 0.02,-0.01,-0.03), 0.15, 0.03));
+    Body::Rigid body5(cylinderProps(0.4, Vec3(-0.01, 0.02, 0.01), 0.10, 0.02));
+
+    MobilizedBody::Free link1(matter.Ground(),
+        Transform(Rotation(0.20, XAxis), Vec3(0.05, 0.10,-0.02)), body1,
+        Transform(Rotation(0.15, YAxis), Vec3(0.00, 0.30, 0.00)));
+    MobilizedBody::Ball link2(link1,
+        Transform(Rotation(0.35, ZAxis), Vec3(0.00,-0.30, 0.04)), body2,
+        Transform(Rotation(0.10, XAxis), Vec3(0.02, 0.25, 0.00)),
+        MobilizedBody::Reverse);
+    MobilizedBody::Pin  link3(link2,
+        Transform(Rotation(0.40, XAxis), Vec3(0.00,-0.25, 0.03)), body3,
+        Transform(Rotation(0.25, ZAxis), Vec3(0.00, 0.18, 0.00)));
+    MobilizedBody::Universal link4(link1,
+        Transform(Rotation(-0.30, YAxis), Vec3(0.12,-0.10,-0.05)), body4,
+        Transform(Rotation(0.05, XAxis), Vec3(0.00, 0.15, 0.00)));
+    MobilizedBody::Weld link5(link3,
+        Transform(Rotation(0.30, YAxis), Vec3(0.04,-0.12, 0.02)), body5,
+        Transform(Rotation(-0.20, ZAxis), Vec3(0.01, 0.05, 0.00)));
+    const MobilizedBody links[] = {link1, link2, link3, link4, link5};
+
+    State state = system.realizeTopology();
+    link1.setQToFitTransform(state,
+        Transform(Rotation(BodyRotationSequence, 0.30, XAxis, -0.45, YAxis,
+                           0.25, ZAxis), Vec3(0.15, 0.40,-0.20)));
+    link1.setUToFitVelocity(state,
+        SpatialVec(Vec3(0.70,-1.10,0.50), Vec3(-0.40,0.90,1.30)));
+    link2.setQToFitRotation(state,
+        Rotation(BodyRotationSequence, -0.55, XAxis, 0.35, YAxis, 0.60, ZAxis));
+    link2.setUToFitAngularVelocity(state, Vec3(1.20, 0.60,-0.85));
+    link3.setAngle(state, 0.65);  link3.setRate(state,-1.45);
+    link4.setOneQ(state, 0, -0.85);  link4.setOneQ(state, 1, 0.40);
+    link4.setOneU(state, 0,  0.95);  link4.setOneU(state, 1,-0.70);
+
+    // Give each body a unit inertia with nonzero products, so every column of
+    // dF/dG is exercised.
+    for (const MobilizedBody& link : links) {
+        Vec<10> p = getInertialParameters(link.getBodyMassProperties(state));
+        p[7] += 0.004; p[8] -= 0.003; p[9] += 0.002;
+        link.setBodyMassProperties(state, makeMassProperties(p));
+    }
+    system.realize(state, Stage::Velocity);
+
+    const int nu = state.getNU(), nb = matter.getNumBodies();
+    const Vector              udot       = makeUdot(nu);
+    const Vector              mobForces  = makeMobilityForces(nu);
+    const Vector_<SpatialVec> bodyForces = makeBodyForces(nb);
+
+    Matrix dTdp;
+    matter.calcResidualForceDerivativesWrtInertialParameters(state, udot, dTdp);
+    SimTK_TEST(dTdp.nrow()==nu && dTdp.ncol()==10*(nb-1));
+
+    // The inertial part of the residual is linear in each body's mass with c
+    // and G held fixed, so the mass columns, weighted by the masses, must sum
+    // to it exactly.
+    Vector tauInertial;
+    matter.calcResidualForceIgnoringConstraints(state, Vector(),
+            Vector_<SpatialVec>(), udot, tauInertial);
+    Vector massSum(nu, Real(0));
+    for (MobilizedBodyIndex b(1); b < nb; ++b)
+        massSum += matter.getMobilizedBody(b).getBodyMass(state)
+                   * dTdp(10*(b-1));
+    SimTK_TEST_EQ(massSum, tauInertial);
+
+    // Central differences, with applied forces present to show they drop out.
+    Vector tau;
+    matter.calcResidualForceIgnoringConstraints(state, mobForces, bodyForces,
+                                                udot, tau);
+    Real tauScale = 1;
+    for (int i=0; i < nu; ++i) tauScale = std::max(tauScale, std::abs(tau[i]));
+    const Real tol = 1e-8 * tauScale;
+    const Real h = 1e-5;
+    for (MobilizedBodyIndex b(1); b < nb; ++b) {
+        const MobilizedBody& mobod = matter.getMobilizedBody(b);
+        const Vec<10> p = getInertialParameters(mobod.getBodyMassProperties(state));
+        for (int k=0; k < 10; ++k) {
+            Vec<10> pp = p, pm = p;
+            pp[k] += h;  pm[k] -= h;
+            State sp = state, sm = state;
+            mobod.setBodyMassProperties(sp, makeMassProperties(pp));
+            mobod.setBodyMassProperties(sm, makeMassProperties(pm));
+            system.realize(sp, Stage::Velocity);
+            system.realize(sm, Stage::Velocity);
+            Vector tp, tm;
+            matter.calcResidualForceIgnoringConstraints(sp, mobForces,
+                    bodyForces, udot, tp);
+            matter.calcResidualForceIgnoringConstraints(sm, mobForces,
+                    bodyForces, udot, tm);
+            SimTK_TEST_EQ_TOL(dTdp(10*(b-1)+k), (tp-tm)/(2*h), tol);
+        }
+    }
+
+    // Zero-length udot is all-zero; wrong-sized udot must be rejected.
+    Matrix dTdpZero, dTdpExplicit;
+    matter.calcResidualForceDerivativesWrtInertialParameters(state, Vector(),
+                                                             dTdpZero);
+    matter.calcResidualForceDerivativesWrtInertialParameters(state,
+            Vector(nu, Real(0)), dTdpExplicit);
+    SimTK_TEST_EQ(dTdpZero, dTdpExplicit);
+    SimTK_TEST_MUST_THROW(
+        matter.calcResidualForceDerivativesWrtInertialParameters(state,
+            Vector(nu+1, Real(0)), dTdp));
+}
+
 int main() {
     SimTK_START_TEST("TestInverseDynamicsDerivatives");
         SimTK_SUBTEST(testSinglePin);
@@ -854,5 +986,6 @@ int main() {
         SimTK_SUBTEST(testReversedMobilizersInChain);
         SimTK_SUBTEST(testCustomMobilizerWithPartials);
         SimTK_SUBTEST(testCustomMobilizerWithoutPartials);
+        SimTK_SUBTEST(testInertialParameterDerivatives);
     SimTK_END_TEST();
 }
