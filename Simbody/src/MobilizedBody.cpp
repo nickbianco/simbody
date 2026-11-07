@@ -215,6 +215,8 @@ const Transform& MobilizedBody::getDefaultOutboardFrame() const {
 
 const MassProperties& MobilizedBody::getBodyMassProperties(const State& s) const 
 {   return getImpl().getBodyMassProperties(s); }
+void MobilizedBody::setBodyMassProperties(State& s, const MassProperties& M_Bo_B) const
+{   getImpl().setBodyMassProperties(s, M_Bo_B); }
 
 const SpatialInertia& MobilizedBody::
 getBodySpatialInertiaInGround(const State& s) const {

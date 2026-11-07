@@ -282,7 +282,7 @@ void realizePosition(const SBStateDigest& sbs) const override
     calcParentToChildVelocityJacobianInGround(mv, iv, ic, pc, updH(pc));
 
     // Mobilizer independent.
-    calcJointIndependentKinematicsPos(pc);
+    calcJointIndependentKinematicsPos(iv, pc);
 }
 
 // Set new velocities for the current configuration, and calculate

@@ -1087,6 +1087,117 @@ void testVariableEllipsoidRadii() {
     SimTK_TEST_EQ(ellipsoidReverse.getRadii(state), defaultRadii);
 }
 
+// Build a Pin -> Ball -> Weld chain under gravity whose bodies have the given
+// default mass properties.
+static void buildMassPropertiesChain(MultibodySystem& system,
+        SimbodyMatterSubsystem& matter, GeneralForceSubsystem& forces,
+        const Array_<MassProperties>& mprops, Array_<MobilizedBody>& mobods) {
+    Force::Gravity(forces, matter, Vec3(0.3, -9.81, 0.2));
+    MobilizedBody::Pin pin(matter.Ground(),
+            Transform(Rotation(0.3, Vec3(1, 2, 3)), Vec3(0.1, 0.2, 0.3)),
+            Body::Rigid(mprops[0]), Transform(Vec3(0, 0.5, 0)));
+    MobilizedBody::Ball ball(pin, Transform(Vec3(0.2, -0.4, 0.1)),
+            Body::Rigid(mprops[1]), Transform(Vec3(-0.1, 0.3, 0.2)));
+    MobilizedBody::Weld weld(ball, Transform(Vec3(0.3, 0.1, -0.2)),
+            Body::Rigid(mprops[2]), Transform());
+    mobods = {pin, ball, weld};
+    system.realizeTopology();
+}
+
+void testVariableBodyMassProperties() {
+
+    const Array_<MassProperties> defaultMassProps = {
+        MassProperties(1.0, Vec3(0.1, 0.2, 0.3), UnitInertia(1.0, 1.1, 1.2)),
+        MassProperties(2.0, Vec3(-0.2, 0.1, 0.0), UnitInertia(0.5, 0.6, 0.7)),
+        MassProperties(0.5, Vec3(0.0, -0.1, 0.2), UnitInertia(0.3, 0.4, 0.5))};
+    const Array_<MassProperties> newMassProps = {
+        MassProperties(1.7, Vec3(-0.3, 0.1, 0.2),
+                UnitInertia(0.9, 1.3, 1.0, 0.05, -0.02, 0.03)),
+        MassProperties(0.8, Vec3(0.2, -0.3, 0.1),
+                UnitInertia(0.7, 0.5, 0.6, -0.04, 0.01, 0.02)),
+        MassProperties(1.3, Vec3(0.1, 0.2, -0.1),
+                UnitInertia(0.4, 0.3, 0.5, 0.02, 0.03, -0.01))};
+
+    // A system built with the default mass properties, and a reference system
+    // built with the new mass properties as its defaults.
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    GeneralForceSubsystem forces(system);
+    Array_<MobilizedBody> mobods;
+    buildMassPropertiesChain(system, matter, forces, defaultMassProps, mobods);
+
+    MultibodySystem systemRef;
+    SimbodyMatterSubsystem matterRef(systemRef);
+    GeneralForceSubsystem forcesRef(systemRef);
+    Array_<MobilizedBody> mobodsRef;
+    buildMassPropertiesChain(systemRef, matterRef, forcesRef, newMassProps,
+            mobodsRef);
+
+    // The mass properties should match the defaults.
+    State state = system.getDefaultState();
+    for (int i = 0; i < 3; ++i) {
+        SimTK_TEST_EQ(mobods[i].getBodyMassProperties(state).getMass(),
+                defaultMassProps[i].getMass());
+        SimTK_TEST_EQ(mobods[i].getBodyMassProperties(state).getMassCenter(),
+                defaultMassProps[i].getMassCenter());
+    }
+
+    // Set new mass properties. No need to realize here, since we're just
+    // pulling directly from the Instance-stage discrete variables.
+    system.realize(state, Stage::Acceleration);
+    for (int i = 0; i < 3; ++i)
+        mobods[i].setBodyMassProperties(state, newMassProps[i]);
+    SimTK_TEST(state.getSystemStage() < Stage::Instance);
+    for (int i = 0; i < 3; ++i) {
+        SimTK_TEST_EQ(mobods[i].getBodyMass(state), newMassProps[i].getMass());
+        SimTK_TEST_EQ(mobods[i].getBodyMassCenterStation(state),
+                newMassProps[i].getMassCenter());
+        SimTK_TEST_EQ(mobods[i].getBodyUnitInertiaAboutBodyOrigin(state)
+                .asSymMat33(), newMassProps[i].getUnitInertia().asSymMat33());
+    }
+
+    // Everything computed from the mass properties should now match the
+    // reference system in the same configuration and motion.
+    State stateRef = systemRef.getDefaultState();
+    for (int i = 0; i < state.getNQ(); ++i)
+        state.updQ()[i] = stateRef.updQ()[i] = 0.2 + 0.1*i;
+    for (int i = 0; i < state.getNU(); ++i)
+        state.updU()[i] = stateRef.updU()[i] = -0.3 + 0.2*i;
+    system.realize(state, Stage::Acceleration);
+    systemRef.realize(stateRef, Stage::Acceleration);
+
+    SimTK_TEST_EQ(matter.calcSystemMass(state), matterRef.calcSystemMass(stateRef));
+    SimTK_TEST_EQ(matter.calcSystemMassCenterLocationInGround(state),
+            matterRef.calcSystemMassCenterLocationInGround(stateRef));
+    SimTK_TEST_EQ(matter.calcKineticEnergy(state),
+            matterRef.calcKineticEnergy(stateRef));
+    for (int i = 0; i < 3; ++i) {
+        SimTK_TEST_EQ(
+                mobods[i].getBodySpatialInertiaInGround(state).toSpatialMat(),
+                mobodsRef[i].getBodySpatialInertiaInGround(stateRef)
+                        .toSpatialMat());
+    }
+    SimTK_TEST_EQ(state.getUDot(), stateRef.getUDot());
+
+    Vector udot(state.getNU());
+    for (int i = 0; i < state.getNU(); ++i) udot[i] = 0.4 - 0.15*i;
+    Vector tau, tauRef;
+    matter.calcResidualForceIgnoringConstraints(state, Vector(),
+            Vector_<SpatialVec>(), udot, tau);
+    matterRef.calcResidualForceIgnoringConstraints(stateRef, Vector(),
+            Vector_<SpatialVec>(), udot, tauRef);
+    SimTK_TEST_EQ(tau, tauRef);
+
+    // Ground's mass properties cannot be changed.
+    SimTK_TEST_MUST_THROW(matter.Ground().setBodyMassProperties(state,
+            newMassProps[0]));
+
+    // Grabbing a fresh default state should restore the defaults.
+    state = system.getDefaultState();
+    for (int i = 0; i < 3; ++i)
+        SimTK_TEST_EQ(mobods[i].getBodyMass(state), defaultMassProps[i].getMass());
+}
+
 int main() {
     SimTK_START_TEST("TestMobilizedBody");
         SimTK_SUBTEST(testCalculationMethods);
@@ -1100,5 +1211,6 @@ int main() {
         SimTK_SUBTEST(testMirroredEllipsoidJacobians);
         SimTK_SUBTEST(testVariableMobilizerFrames);
         SimTK_SUBTEST(testVariableEllipsoidRadii);
+        SimTK_SUBTEST(testVariableBodyMassProperties);
     SimTK_END_TEST();
 }

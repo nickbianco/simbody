@@ -255,9 +255,15 @@ public:
     void setUToFitLinearVelocity(State& s, const Vec3& v_FM)  const;
 
     const MassProperties& getBodyMassProperties(const State& s) const {
-        // TODO: these should come from the state if the body has variable mass props
         const SBInstanceVars& iv = getMyMatterSubsystemRep().getInstanceVars(s);
-        return getMyRigidBodyNode().getMassProperties_OB_B();
+        return getMyRigidBodyNode().getMassProperties_OB_B(iv);
+    }
+    void setBodyMassProperties(State& s, const MassProperties& M_Bo_B) const {
+        SimTK_APIARGCHECK_ALWAYS(getMyMobilizedBodyIndex() != GroundIndex,
+            "MobilizedBody", "setBodyMassProperties",
+            "Ground's mass properties cannot be changed.");
+        SBInstanceVars& iv = getMyMatterSubsystemRep().updInstanceVars(s);
+        getMyRigidBodyNode().updMassProperties_OB_B(iv) = M_Bo_B;
     }
 
     const SpatialInertia& getBodySpatialInertiaInGround(const State& s) const {

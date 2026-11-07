@@ -407,17 +407,18 @@ public:
 
         const Rotation& R_GB = getX_GB(pc).R();
         const Vec3&     p_GB = getX_GB(pc).p();
+        const MassProperties& M_Bo_B = getMassProperties_OB_B(iv);
 
         // reexpress inertia in ground (57 flops)
-        const UnitInertia G_Bo_G  = getUnitInertia_OB_B().reexpress(~R_GB);
-        const Vec3        p_BBc_G = R_GB*getCOM_B(); // 15 flops
+        const UnitInertia G_Bo_G  = M_Bo_B.getUnitInertia().reexpress(~R_GB);
+        const Vec3        p_BBc_G = R_GB*M_Bo_B.getMassCenter(); // 15 flops
 
         updCOM_G(pc) = p_GB + p_BBc_G; // 3 flops
 
         // Calc Mk: the spatial inertia matrix about the body origin.
         // Note: we need to calculate this now so that we'll be able to calculate
         // kinetic energy without going past the Velocity stage.
-        updMk_G(pc) = SpatialInertia(getMass(), p_BBc_G, G_Bo_G);
+        updMk_G(pc) = SpatialInertia(M_Bo_B.getMass(), p_BBc_G, G_Bo_G);
     }
     
     void realizeVelocity(const SBStateDigest& sbs) const override {
