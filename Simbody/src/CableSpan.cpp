@@ -1670,6 +1670,179 @@ private:
 };
 
 //==============================================================================
+//                                Cable Station
+//==============================================================================
+/* This class represents a station on a mobilized body that the cable is
+attached to (the cable origin or termination) or passes through (a via point).
+The station is either fixed in the body frame, or it is a "moving" station whose
+location in the body frame is a function of a set of generalized coordinates,
+s_B = f(q). A moving station moves relative to its body, so it contributes to
+the cable lengthening speed and does work through the generalized coordinates
+it depends on; see calcStationDot_B() and calcStationPartial_B(). */
+class CableStation final {
+public:
+    CableStation() = default;
+
+    explicit CableStation(const Vec3& station_B) : m_station_B(station_B) {}
+
+    CableStation(
+        std::shared_ptr<const Function_<Vec3>> function,
+        const Array_<MobilizedBodyIndex>& coordBodies,
+        const Array_<MobilizerQIndex>& coordIndices) :
+        m_function(std::move(function)),
+        m_coordBodies(coordBodies),
+        m_coordIndices(coordIndices)
+    {
+        SimTK_ERRCHK_ALWAYS(
+            m_function != nullptr,
+            "CableStation::CableStation()",
+            "Expected a station function, but got a null pointer.");
+        SimTK_ERRCHK2_ALWAYS(
+            m_coordBodies.size() == m_coordIndices.size(),
+            "CableStation::CableStation()",
+            "Expected the same number of coordinate bodies (=%i) and "
+            "coordinate indices (=%i).",
+            (int)m_coordBodies.size(),
+            (int)m_coordIndices.size());
+        SimTK_ERRCHK2_ALWAYS(
+            m_function->getArgumentSize() == (int)m_coordBodies.size(),
+            "CableStation::CableStation()",
+            "Expected the station function to have one argument per "
+            "coordinate (=%i), but it has %i arguments.",
+            (int)m_coordBodies.size(),
+            m_function->getArgumentSize());
+        SimTK_ERRCHK_ALWAYS(
+            m_function->getMaxDerivativeOrder() >= 1,
+            "CableStation::CableStation()",
+            "Expected the station function to support first derivatives.");
+    }
+
+    bool isMoving() const
+    {
+        return m_function != nullptr;
+    }
+
+    // The station in the body frame if the station is fixed, otherwise NaN.
+    const Vec3& getFixedStation_B() const
+    {
+        return m_station_B;
+    }
+
+    int getNumCoordinates() const
+    {
+        return (int)m_coordBodies.size();
+    }
+
+    // The station in the body frame. Requires Stage::Position for a moving
+    // station.
+    Vec3 calcStation_B(
+        const SimbodyMatterSubsystem& matter,
+        const State& state) const
+    {
+        if (!isMoving()) {
+            return m_station_B;
+        }
+        return m_function->calcValue(gatherCoordinates(matter, state));
+    }
+
+    // Partial derivative of the station in the body frame w.r.t. the k-th
+    // coordinate the station depends on (zero if the station is fixed).
+    Vec3 calcStationPartial_B(
+        const SimbodyMatterSubsystem& matter,
+        const State& state,
+        int k) const
+    {
+        if (!isMoving()) {
+            return Vec3(0.);
+        }
+        const Array_<int> derivComponents(1, k);
+        return m_function->calcDerivative(
+            derivComponents,
+            gatherCoordinates(matter, state));
+    }
+
+    // Time derivative of the station in the body frame, i.e., the velocity of
+    // the station relative to its body (zero if the station is fixed).
+    // Requires Stage::Velocity.
+    Vec3 calcStationDot_B(
+        const SimbodyMatterSubsystem& matter,
+        const State& state) const
+    {
+        Vec3 stationDot_B(0.);
+        for (int k = 0; k < getNumCoordinates(); ++k) {
+            const Real qdot = matter.getMobilizedBody(m_coordBodies[k])
+                .getOneQDot(state, m_coordIndices[k]);
+            stationDot_B += calcStationPartial_B(matter, state, k) * qdot;
+        }
+        return stationDot_B;
+    }
+
+    // Add the generalized forces produced by a force (in ground) applied at
+    // this station on the body 'body' to the q-like vector 'forces_q'.
+    void addInGeneralizedForces(
+        const SimbodyMatterSubsystem& matter,
+        const State& state,
+        const MobilizedBody& body,
+        const Vec3& force_G,
+        Vector& forces_q) const
+    {
+        const Rotation& R_GB = body.getBodyRotation(state);
+        for (int k = 0; k < getNumCoordinates(); ++k) {
+            const QIndex qx(
+                matter.getMobilizedBody(m_coordBodies[k]).getFirstQIndex(state)
+                + m_coordIndices[k]);
+            forces_q[qx] +=
+                dot(force_G, R_GB * calcStationPartial_B(matter, state, k));
+        }
+    }
+
+private:
+    Vector gatherCoordinates(
+        const SimbodyMatterSubsystem& matter,
+        const State& state) const
+    {
+        Vector q(getNumCoordinates());
+        for (int k = 0; k < getNumCoordinates(); ++k) {
+            q[k] = matter.getMobilizedBody(m_coordBodies[k])
+                .getOneQ(state, m_coordIndices[k]);
+        }
+        return q;
+    }
+
+    // The station in the body frame (fixed station only).
+    Vec3 m_station_B{NaN};
+    // The station as a function of generalized coordinates (moving station
+    // only).
+    std::shared_ptr<const Function_<Vec3>> m_function;
+    Array_<MobilizedBodyIndex> m_coordBodies;
+    Array_<MobilizerQIndex> m_coordIndices;
+};
+
+// The location of 'station' on 'body' in ground.
+Vec3 calcStationLocationInGround(
+    const MobilizedBody& body,
+    const CableStation& station,
+    const State& state)
+{
+    return body.getBodyTransform(state).shiftFrameStationToBase(
+        station.calcStation_B(body.getMatterSubsystem(), state));
+}
+
+// The velocity of 'station' on 'body' in ground, including the motion of a
+// moving station relative to the body.
+Vec3 calcStationVelocityInGround(
+    const MobilizedBody& body,
+    const CableStation& station,
+    const State& state)
+{
+    const SimbodyMatterSubsystem& matter = body.getMatterSubsystem();
+    return body.findStationVelocityInGround(
+               state,
+               station.calcStation_B(matter, state)) +
+           body.getBodyRotation(state) * station.calcStationDot_B(matter, state);
+}
+
+//==============================================================================
 //                                 Via Point
 //==============================================================================
 /* This struct represents a zero-length cable segment associated with a via
@@ -1689,12 +1862,12 @@ public:
         CableSpanIndex cableIndex,
         ViaPointIndex viaPointIndex,
         MobilizedBodyIndex body,
-        const Vec3& station_B) :
+        CableStation station) :
         m_subsystem(subsystem),
         m_cableIndex(cableIndex),
         m_viaPointIndex(viaPointIndex),
         m_body(body),
-        m_station_B(station_B)
+        m_station(std::move(station))
     {}
 
     //--------------------------------------------------------------------------
@@ -1782,14 +1955,20 @@ public:
         return getSubsystem().getImpl().getCableImpl(m_cableIndex);
     }
 
+    // The station in the body frame if the via point is fixed, otherwise NaN.
     const Vec3& getStation_B() const
     {
-        return m_station_B;
+        return m_station.getFixedStation_B();
     }
 
     void setStation_B(const Vec3& station_B)
     {
-        m_station_B = station_B;
+        m_station = CableStation(station_B);
+    }
+
+    const CableStation& getStation() const
+    {
+        return m_station;
     }
 
     //--------------------------------------------------------------------------
@@ -1799,8 +1978,10 @@ public:
     const Vec3& calcStation_G(const State& state) const
     {
         Vec3& station_G = updStation_G(state);
-        station_G = getMobilizedBody().getBodyTransform(
-            state).shiftFrameStationToBase(m_station_B);
+        station_G = calcStationLocationInGround(
+            getMobilizedBody(),
+            m_station,
+            state);
         getSubsystem().markCacheValueRealized(state, m_indexStation_G);
         return station_G;
     }
@@ -1818,8 +1999,8 @@ private:
 
     // MobilizedBody that the via point is attached to.
     MobilizedBodyIndex m_body = MobilizedBodyIndex::Invalid();
-    // The position of the via point in the body frame.
-    Vec3 m_station_B{NaN};
+    // The via point's station on the body (fixed or moving).
+    CableStation m_station;
 
     // Topology cache.
     CacheEntryIndex m_indexStation_G = CacheEntryIndex::Invalid();
@@ -2143,15 +2324,18 @@ public:
 
     Vec3 calcOriginPointInGround(const State& state) const
     {
-        return getOriginBody().getBodyTransform(state).shiftFrameStationToBase(
-            m_originStation);
+        return calcStationLocationInGround(
+            getOriginBody(),
+            m_originStation,
+            state);
     }
 
     Vec3 calcTerminationPointInGround(const State& state) const
     {
-        return getTerminationBody()
-            .getBodyTransform(state)
-            .shiftFrameStationToBase(m_terminationStation);
+        return calcStationLocationInGround(
+            getTerminationBody(),
+            m_terminationStation,
+            state);
     }
 
     //--------------------------------------------------------------------------
@@ -2233,7 +2417,7 @@ public:
 
     ViaPointIndex addViaPoint(
         MobilizedBodyIndex viaPointBody,
-        const Vec3& station_B)
+        CableStation station)
     {
         invalidateTopology();
 
@@ -2249,7 +2433,7 @@ public:
             getIndex(),
             viaPointIx,
             viaPointBody,
-            station_B));
+            std::move(station)));
 
         // Mark the end of the last CableSegment with this ViaPoint.
         m_cableSegments.back().setFinalViaPointIndex(viaPointIx);
@@ -2285,24 +2469,46 @@ public:
         m_terminationBody = terminationBody;
     }
 
+    // The origin station in the body frame if it is fixed, otherwise NaN.
     const Vec3& getOriginStation() const
     {
-        return m_originStation;
+        return m_originStation.getFixedStation_B();
     }
 
     void setOriginStation(const Vec3& originStation)
     {
-        m_originStation = originStation;
+        m_originStation = CableStation(originStation);
     }
 
+    void setOriginStation(CableStation originStation)
+    {
+        m_originStation = std::move(originStation);
+    }
+
+    const CableStation& getOriginCableStation() const
+    {
+        return m_originStation;
+    }
+
+    // The termination station in the body frame if it is fixed, otherwise NaN.
     const Vec3& getTerminationStation() const
     {
-        return m_terminationStation;
+        return m_terminationStation.getFixedStation_B();
     }
 
     void setTerminationStation(const Vec3& terminationStation)
     {
-        m_terminationStation = terminationStation;
+        m_terminationStation = CableStation(terminationStation);
+    }
+
+    void setTerminationStation(CableStation terminationStation)
+    {
+        m_terminationStation = std::move(terminationStation);
+    }
+
+    const CableStation& getTerminationCableStation() const
+    {
+        return m_terminationStation;
     }
 
     int getNumObstacles() const
@@ -2324,6 +2530,11 @@ public:
         const State& state,
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
+
+    void applyMobilityForces(
+        const State& state,
+        Real tension,
+        Vector& mobilityForces) const;
 
     Real calcCablePower(const State& state, Real tension) const;
 
@@ -2618,7 +2829,7 @@ private:
         // origin).
         Vec3 x_GQ = dataPos.originPoint_G;
         Vec3 v_GQ =
-            getOriginBody().findStationVelocityInGround(s, m_originStation);
+            calcStationVelocityInGround(getOriginBody(), m_originStation, s);
 
         // Compute the lengthening speed contributed by each cable segment.
         for (CableSegmentIndex ix(0); ix < getNumCableSegments(); ++ix) {
@@ -2655,7 +2866,10 @@ private:
 
                 // Ending point and velocity of straight line segment.
                 const Vec3& x_GP = viaPoint.getStation_G(s);
-                const Vec3 v_GP = CalcPointVelocityInGround(mobod, x_GP);
+                const Vec3 v_GP = calcStationVelocityInGround(
+                    mobod,
+                    viaPoint.getStation(),
+                    s);
 
                 // Compute the lengthening.
                 lengthDot += dot(UnitVec3(x_GP - x_GQ), v_GP - v_GQ);
@@ -2668,9 +2882,10 @@ private:
 
         // Ending point and velocity of straight line segment (the cable
         // termination).
-        const Vec3 v_GP = getTerminationBody().findStationVelocityInGround(
-            s,
-            m_terminationStation);
+        const Vec3 v_GP = calcStationVelocityInGround(
+            getTerminationBody(),
+            m_terminationStation,
+            s);
         Vec3 x_GP = dataPos.terminationPoint_G;
 
         // Compute lengthening.
@@ -2692,11 +2907,11 @@ private:
 
     // Path origin attachment point (a body and a station on the body).
     MobilizedBodyIndex m_originBody = MobilizedBodyIndex::Invalid();
-    Vec3 m_originStation{NaN};
+    CableStation m_originStation{Vec3(NaN)};
 
     // Path termination attachment point (a body and a station on the body).
     MobilizedBodyIndex m_terminationBody = MobilizedBodyIndex::Invalid();
-    Vec3 m_terminationStation{NaN};
+    CableStation m_terminationStation{Vec3(NaN)};
 
     // Path CurveSegments over the obstacles.
     Array_<CurveSegment, ObstacleIndex> m_curveSegments;
@@ -2822,10 +3037,7 @@ Vec3 CurveSegment::findPrevPathPoint_G(const State& state) const
 
     // There is no via point at the start of this cable segment: the previous
     // point is the path's origin point.
-    return getCable()
-        .getOriginBody()
-        .getBodyTransform(state)
-        .shiftFrameStationToBase(cable.getOriginStation());
+    return cable.calcOriginPointInGround(state);
 }
 
 Vec3 CurveSegment::findNextPathPoint_G(const State& state) const
@@ -2857,9 +3069,7 @@ Vec3 CurveSegment::findNextPathPoint_G(const State& state) const
 
     // There is no via point at the end of this cable segment: the next point
     // is the path's termination point.
-    return cable.getTerminationBody()
-        .getBodyTransform(state)
-        .shiftFrameStationToBase(cable.getTerminationStation());
+    return cable.calcTerminationPointInGround(state);
 }
 
 //==============================================================================
@@ -3007,6 +3217,52 @@ void CableSpan::Impl::applyBodyForces(
     }
 }
 
+void CableSpan::Impl::applyMobilityForces(
+    const State& s,
+    Real tension,
+    Vector& mobilityForces) const
+{
+    realizePosition(s);
+
+    if (tension < 0.) {
+        return;
+    }
+
+    // The tension force applied at a moving station s_B(q) does work through
+    // the coordinates q: f_q = tension * (R_GB * ds_B/dq)^T * t, where t is the
+    // unit force direction at the station. Accumulate in q-space and map to
+    // mobility (u-space) forces with N^T.
+    const SimbodyMatterSubsystem& matter = getOriginBody().getMatterSubsystem();
+    const CableSpanData::Position& dataPos = getDataPos(s);
+    Vector forces_q(s.getNQ(), 0.);
+    bool hasMovingStation = false;
+    auto addStationForces = [&](const MobilizedBody& body,
+                                const CableStation& station,
+                                const Vec3& unitForce_G) {
+        if (station.isMoving()) {
+            station.addInGeneralizedForces(matter, s, body,
+                tension * unitForce_G, forces_q);
+            hasMovingStation = true;
+        }
+    };
+    addStationForces(getOriginBody(), m_originStation,
+        Vec3(dataPos.originTangent_G));
+    for (const ViaPoint& viaPoint : m_viaPoints) {
+        addStationForces(viaPoint.getMobilizedBody(), viaPoint.getStation(),
+            dataPos.viaPointOutTangents_G[viaPoint.getIndex()] -
+                dataPos.viaPointInTangents_G[viaPoint.getIndex()]);
+    }
+    addStationForces(getTerminationBody(), m_terminationStation,
+        -Vec3(dataPos.terminationTangent_G));
+
+    if (!hasMovingStation) {
+        return;
+    }
+    Vector forces_u;
+    matter.multiplyByN(s, true, forces_q, forces_u);
+    mobilityForces += forces_u;
+}
+
 Real CableSpan::Impl::calcCablePower(const State& state, Real tension) const
 {
     realizePosition(state);
@@ -3046,6 +3302,29 @@ Real CableSpan::Impl::calcCablePower(const State& state, Real tension) const
         SpatialVec v = getTerminationBody().getBodyVelocity(state);
         unitPower += ~unitForce_G * v;
     }
+
+    // Moving stations also do work through their motion relative to their
+    // bodies.
+    const SimbodyMatterSubsystem& matter = getOriginBody().getMatterSubsystem();
+    const CableSpanData::Position& dataPos = getDataPos(state);
+    auto addStationPower = [&](const MobilizedBody& body,
+                               const CableStation& station,
+                               const Vec3& unitForce_G) {
+        if (station.isMoving()) {
+            unitPower += dot(unitForce_G,
+                body.getBodyRotation(state) *
+                    station.calcStationDot_B(matter, state));
+        }
+    };
+    addStationPower(getOriginBody(), m_originStation,
+        Vec3(dataPos.originTangent_G));
+    for (const ViaPoint& viaPoint : m_viaPoints) {
+        addStationPower(viaPoint.getMobilizedBody(), viaPoint.getStation(),
+            dataPos.viaPointOutTangents_G[viaPoint.getIndex()] -
+                dataPos.viaPointInTangents_G[viaPoint.getIndex()]);
+    }
+    addStationPower(getTerminationBody(), m_terminationStation,
+        -Vec3(dataPos.terminationTangent_G));
 
     return unitPower * tension;
 }
@@ -4800,6 +5079,15 @@ void CableSpan::setOriginStation(const Vec3& originStation)
     m_impl->setOriginStation(originStation);
 }
 
+void CableSpan::setOriginStation(
+    std::shared_ptr<const Function_<Vec3>> originStation,
+    const Array_<MobilizedBodyIndex>& coordBodies,
+    const Array_<MobilizerQIndex>& coordIndices)
+{
+    m_impl->setOriginStation(
+        CableStation(std::move(originStation), coordBodies, coordIndices));
+}
+
 Vec3 CableSpan::getTerminationStation() const
 {
     return m_impl->getTerminationStation();
@@ -4808,6 +5096,15 @@ Vec3 CableSpan::getTerminationStation() const
 void CableSpan::setTerminationStation(const Vec3& terminationStation)
 {
     m_impl->setTerminationStation(terminationStation);
+}
+
+void CableSpan::setTerminationStation(
+    std::shared_ptr<const Function_<Vec3>> terminationStation,
+    const Array_<MobilizedBodyIndex>& coordBodies,
+    const Array_<MobilizerQIndex>& coordIndices)
+{
+    m_impl->setTerminationStation(
+        CableStation(std::move(terminationStation), coordBodies, coordIndices));
 }
 
 void CableSpan::calcOriginUnitForce(
@@ -4874,7 +5171,18 @@ ViaPointIndex CableSpan::addViaPoint(
     MobilizedBodyIndex viaPointBody,
     const Vec3& station_B)
 {
-    return updImpl().addViaPoint(viaPointBody, station_B);
+    return updImpl().addViaPoint(viaPointBody, CableStation(station_B));
+}
+
+ViaPointIndex CableSpan::addViaPoint(
+    MobilizedBodyIndex viaPointBody,
+    std::shared_ptr<const Function_<Vec3>> station_B,
+    const Array_<MobilizedBodyIndex>& coordBodies,
+    const Array_<MobilizerQIndex>& coordIndices)
+{
+    return updImpl().addViaPoint(
+        viaPointBody,
+        CableStation(std::move(station_B), coordBodies, coordIndices));
 }
 
 int CableSpan::getNumViaPoints() const
@@ -5055,6 +5363,14 @@ void CableSpan::applyBodyForces(
     Vector_<SpatialVec>& bodyForcesInG) const
 {
     return getImpl().applyBodyForces(s, tension, bodyForcesInG);
+}
+
+void CableSpan::applyMobilityForces(
+    const State& s,
+    Real tension,
+    Vector& mobilityForces) const
+{
+    getImpl().applyMobilityForces(s, tension, mobilityForces);
 }
 
 void CableSpan::calcDecorativePathPoints(

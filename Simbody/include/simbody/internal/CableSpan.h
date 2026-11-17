@@ -257,6 +257,24 @@ public:
         MobilizedBodyIndex viaPointBody,
         const Vec3& station_B);
 
+    /** Add a "moving" via point whose station in the body frame is a function
+    of a set of generalized coordinates. The k-th argument of the function is
+    the coordinate with mobilizer q index coordIndices[k] of the mobilized body
+    coordBodies[k]. The function must support first derivatives.
+
+    @param viaPointBody The body that the via point's station is expressed in.
+    @param station_B    The via point's station in the body frame as a function
+                        of the coordinates.
+    @param coordBodies  The mobilized body of each coordinate argument.
+    @param coordIndices The mobilizer q index of each coordinate argument.
+
+    @return The index of the added via point in this cable. **/
+    CableSpanViaPointIndex addViaPoint(
+        MobilizedBodyIndex viaPointBody,
+        std::shared_ptr<const Function_<Vec3>> station_B,
+        const Array_<MobilizedBodyIndex>& coordBodies,
+        const Array_<MobilizerQIndex>& coordIndices);
+
     /** Get the number of via points added to the path. **/
     int getNumViaPoints() const;
 
@@ -284,17 +302,44 @@ public:
     is attached to. **/
     void setTerminationBodyIndex(MobilizedBodyIndex terminationBody);
 
-    /** Get the cable's origin point defined in body fixed coordinates. **/
+    /** Get the cable's origin point defined in body fixed coordinates. Returns
+    NaNs if the origin is a "moving" station. **/
     Vec3 getOriginStation() const;
 
     /** Set the cable's origin point defined in body fixed coordinates. **/
     void setOriginStation(const Vec3& originStation);
 
-    /** Get the cable's termination point defined in body fixed coordinates. **/
+    /** Make the cable origin a "moving" station whose location in the body
+    frame is a function of a set of generalized coordinates.
+
+    @param originStation The origin's station in the body frame as a function of
+                         the coordinates.
+    @param coordBodies   The mobilized body of each coordinate argument.
+    @param coordIndices  The mobilizer q index of each coordinate argument. **/
+    void setOriginStation(
+        std::shared_ptr<const Function_<Vec3>> originStation,
+        const Array_<MobilizedBodyIndex>& coordBodies,
+        const Array_<MobilizerQIndex>& coordIndices);
+
+    /** Get the cable's termination point defined in body fixed coordinates
+    (NaN if the termination is a moving station). **/
     Vec3 getTerminationStation() const;
 
     /** Set the cable's termination point defined in body fixed coordinates. **/
     void setTerminationStation(const Vec3& terminationStation);
+
+    /** Make the cable termination a "moving" station whose location in the body
+    frame is a function of a set of generalized coordinates.
+
+    @param terminationStation The termination's station in the body frame as a
+                              function of the coordinates.
+    @param coordBodies        The mobilized body of each coordinate argument.
+    @param coordIndices       The mobilizer q index of each coordinate argument.
+    **/
+    void setTerminationStation(
+        std::shared_ptr<const Function_<Vec3>> terminationStation,
+        const Array_<MobilizedBodyIndex>& coordBodies,
+        const Array_<MobilizerQIndex>& coordIndices);
 
     ///@}
 
@@ -429,7 +474,9 @@ public:
         CableSpanViaPointIndex ix,
         MobilizedBodyIndex body);
 
-    /** Get the station of the via point in body fixed coordinates.
+    /** Get the station of the via point in body fixed coordinates. Returns
+    NaNs if the via point is a "moving" station.
+
     @param ix The index of the via point in this CableSpan.
     @return The station of the via point in body fixed coordinates. **/
     Vec3 getViaPointStation(CableSpanViaPointIndex ix) const;
@@ -539,6 +586,20 @@ public:
         const State& state,
         Real tension,
         Vector_<SpatialVec>& bodyForcesInG) const;
+
+    /** Given a tension > 0 acting uniformly along this cable, compute the
+    generalized forces produced by "moving" stations whose body frame locations
+    are a function of generalized coordinates. A moving station s_B(q) does
+    work through the coordinates q it depends on, so the tension contributes the
+    generalized forces tension * (R_GB * ds_B/dq)^T * t, where t is the unit
+    force direction at the station. These are mapped to mobility forces and
+    added into the supplied Vector, which has one entry per mobility. If the
+    supplied tension is <= 0, or the cable has no moving stations, this method
+    does nothing. **/
+    void applyMobilityForces(
+        const State& state,
+        Real tension,
+        Vector& mobilityForces) const;
 
     /** Compute the cable power.
     State must be realized to Stage::Position.
