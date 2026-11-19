@@ -867,6 +867,27 @@ void addInPositionConstraintForces
        (s,multipliers,bodyForcesInA,qForces);
 }
 
+// Derivative of addInPositionConstraintForces() along the motion given by V_AB
+// and constrainedQDot, with the multipliers held fixed. Returns false if this
+// Constraint does not supply these partials.
+bool addInPositionConstraintForcesPartial
+    (const State& s,
+     const Array_<Real>&                             multipliers, // mp of these
+     const Array_<SpatialVec, ConstrainedBodyIndex>& V_AB,
+     const Array_<Real,       ConstrainedQIndex>&    constrainedQDot,
+     Array_<SpatialVec, ConstrainedBodyIndex>&       dBodyForcesInA,
+     Array_<Real,       ConstrainedQIndex>&          dQForces) const
+{
+    assert(multipliers.size()     == calcNumPositionEquationsInUse(s));
+    assert(V_AB.size()            == getNumConstrainedBodies());
+    assert(constrainedQDot.size() == getNumConstrainedQ(s));
+    assert(dBodyForcesInA.size()  == getNumConstrainedBodies());
+    assert(dQForces.size()        == getNumConstrainedQ(s));
+
+    return addInPositionConstraintForcesPartialVirtual
+       (s,multipliers,V_AB,constrainedQDot,dBodyForcesInA,dQForces);
+}
+
 // Calculate velocity errors (errors produced by nonholonomic constraint
 // equations) given spatial velocity of the constrained bodies and the
 // values of the constrained u's. Pull t, X_AB, q from state.
@@ -1015,6 +1036,17 @@ virtual void addInPositionConstraintForcesVirtual
     Array_<SpatialVec,ConstrainedBodyIndex>&        bodyForcesInA,
     Array_<Real,      ConstrainedQIndex>&           qForces) 
     const;
+
+// Optional. Pull t, X_AB and q from state. The default returns false, meaning
+// this Constraint does not supply its force partials.
+virtual bool addInPositionConstraintForcesPartialVirtual
+   (const State&                                    state, // Stage::Position
+    const Array_<Real>&                             multipliers, // mp of these
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForcesInA,
+    Array_<Real,      ConstrainedQIndex>&           dQForces)
+    const { return false; }
 
     // These must be defined if there are velocity (nonholonomic) constraints.
 
@@ -2396,6 +2428,50 @@ void addInPositionConstraintForcesVirtual
     addInStationForce(s, B, p_BC, -force_A, bodyForcesInA);
 }
 
+// The multipliers are constant in A, so only the frame axes and the moment
+// arms move. Each axis fixed on a body turns with that body's angular
+// velocity. The moment arm on F is r_F = R_AF p_FF2. The one on B runs from Bo
+// to the coincident point C, that is p_AF2 - p_AB, so it moves with both
+// bodies:
+//
+//     d(r_F)          = w_F x r_F
+//     d(p_AF2 - p_AB) = v_F + w_F x r_F - v_B
+bool addInPositionConstraintForcesPartialVirtual
+   (const State&                                    s,      // Stage::Position
+    const Array_<Real>&                             multipliers, // mp of these
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForcesInA,
+    Array_<Real,      ConstrainedQIndex>&           dQForces)
+    const override
+{
+    assert(multipliers.size()==6 && dBodyForcesInA.size()==2
+           && dQForces.size()==0);
+
+    const Vec3& torques = Vec3::getAs(&multipliers[0]);
+    const Vec3& force_A = Vec3::getAs(&multipliers[3]);
+
+    const Rotation& R_AB = getBodyRotationFromState(s, B);
+    const Rotation& R_AF = getBodyRotationFromState(s, F);
+    const Rotation  RB = R_AB * defaultFrameB.R(); // now expressed in A
+    const Rotation  RF = R_AF * defaultFrameF.R();
+    const Vec3& w_B = V_AB[B][0];  const Vec3& v_B = V_AB[B][1];
+    const Vec3& w_F = V_AB[F][0];  const Vec3& v_F = V_AB[F][1];
+
+    const Vec3 dtorque_F_A =
+          torques[0] * ((w_F % RF.x()) % RB.y() + RF.x() % (w_B % RB.y()))
+        + torques[1] * ((w_F % RF.y()) % RB.z() + RF.y() % (w_B % RB.z()))
+        + torques[2] * ((w_F % RF.z()) % RB.x() + RF.z() % (w_B % RB.x()));
+
+    const Vec3 r_F   = R_AF * defaultFrameF.p();
+    const Vec3 dr_F  = w_F % r_F;
+    const Vec3 dr_BC = v_F + dr_F - v_B;
+
+    dBodyForcesInA[F][0] +=   dtorque_F_A + dr_F  % force_A;
+    dBodyForcesInA[B][0] += -(dtorque_F_A + dr_BC % force_A);
+    return true;
+}
+
 SimTK_DOWNCAST(WeldImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
                                     private:
@@ -3006,6 +3082,16 @@ void addInPositionConstraintForcesVirtual
 {   getImplementation().addInPositionConstraintForces
         (s,multipliers,bodyForcesInA,qForces); }
 
+bool addInPositionConstraintForcesPartialVirtual
+   (const State&                                    s,
+    const Array_<Real>&                             multipliers,
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForcesInA,
+    Array_<Real,      ConstrainedQIndex>&           dQForces) const override
+{   return getImplementation().addInPositionConstraintForcesPartial
+        (s,multipliers,V_AB,constrainedQDot,dBodyForcesInA,dQForces); }
+
 void calcVelocityErrorsVirtual     
    (const State&                                    state,
     const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB, 
@@ -3115,6 +3201,14 @@ void addInPositionConstraintForces
     const Array_<Real>&                         multipliers,
     Array_<SpatialVec,ConstrainedBodyIndex>&    bodyForces,
     Array_<Real,ConstrainedQIndex>&             qForces) const override;
+
+bool addInPositionConstraintForcesPartial
+   (const State&                                    state,
+    const Array_<Real>&                             multipliers,
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForces,
+    Array_<Real,      ConstrainedQIndex>&           dQForces) const override;
 
 //------------------------------------------------------------------------------
                                     private:

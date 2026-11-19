@@ -2528,6 +2528,44 @@ addInPositionConstraintForces
     }
 }
 
+// The force on coordinate i is lambda df/dq_i, so along qdot its derivative is
+//
+//     lambda sum_j d2f/(dq_i dq_j) qdot_j
+//
+// which needs the second derivatives the constructor already requires.
+bool Constraint::CoordinateCouplerImpl::
+addInPositionConstraintForcesPartial
+   (const State&                                    s,
+    const Array_<Real>&                             multipliers,
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForces,
+    Array_<Real,      ConstrainedQIndex>&           dQForces) const
+{
+    assert(multipliers.size() == 1);
+    assert(dBodyForces.size() == 0);
+
+    const Real lambda = multipliers[0];
+
+    for (int i = 0; i < temp.size(); ++i)
+        temp[i] = getOneQFromState(s, coordBodies[i], coordIndices[i]);
+
+    Array_<int> components(2);
+    for (int i = 0; i < temp.size(); ++i) {
+        components[0] = i;
+        Real dfq = 0;
+        for (int j = 0; j < temp.size(); ++j) {
+            components[1] = j;
+            dfq += function->calcDerivative(components, temp)
+                   * getOneQDot(s, constrainedQDot,
+                                coordBodies[j], coordIndices[j]);
+        }
+        addInOneQForce(s, coordBodies[i], coordIndices[i], lambda*dfq,
+                       dQForces);
+    }
+    return true;
+}
+
 
 
 //==============================================================================

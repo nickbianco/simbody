@@ -841,6 +841,480 @@ void testCustomMobilizerWithoutPartials() {
     }
 }
 
+
+//==============================================================================
+//                       CONSTRAINED RESIDUAL DERIVATIVES
+//==============================================================================
+// calcResidualForceDerivatives() is held to calcResidualForce() the same way
+// the unconstrained operator is held to its sibling, with the multipliers
+// fixed while q and u are perturbed.
+
+static Vector makeLambda(int m) {
+    Vector lambda(m);
+    for (int i=0; i < m; ++i)
+        lambda[i] = 0.6 - 0.23*i + 0.15*(i%3);
+    return lambda;
+}
+
+static void checkConstrainedAgainstFiniteDifferences(
+    const MultibodySystem& system,
+    const State&           state,
+    Real                   relTol = 1e-6)
+{
+    const SimbodyMatterSubsystem& matter = system.getMatterSubsystem();
+    const int nu = state.getNU();
+    const int nb = matter.getNumBodies();
+    const int m  = state.getNMultipliers();
+    SimTK_TEST(m > 0);
+
+    const Vector              udot       = makeUdot(nu);
+    const Vector              mobForces  = makeMobilityForces(nu);
+    const Vector_<SpatialVec> bodyForces = makeBodyForces(nb);
+    const Vector              lambda     = makeLambda(m);
+
+    Vector residual;
+    Matrix dTdq, dTdu, dTdlambda;
+    matter.calcResidualForceDerivatives(state, mobForces, bodyForces, udot,
+                                        lambda, residual, dTdq, dTdu,
+                                        dTdlambda);
+    SimTK_TEST(dTdq.nrow()==nu && dTdq.ncol()==nu);
+    SimTK_TEST(dTdu.nrow()==nu && dTdu.ncol()==nu);
+    SimTK_TEST(dTdlambda.nrow()==nu && dTdlambda.ncol()==m);
+
+    Vector tau;
+    matter.calcResidualForce(state, mobForces, bodyForces, udot, lambda, tau);
+    SimTK_TEST_EQ(residual, tau);
+    Real tauScale = 1;
+    for (int i=0; i < nu; ++i) tauScale = std::max(tauScale, std::abs(tau[i]));
+    const Real tol = relTol * tauScale;
+
+    // The residual is linear in lambda, so dTdlambda is ~G exactly.
+    Matrix Gt;
+    matter.calcGTranspose(state, Gt);
+    SimTK_TEST_EQ(dTdlambda, Gt);
+
+    const Real h = 1e-5;
+    Vector tp, tm;
+    for (int j=0; j < nu; ++j) {
+        Vector e(nu, Real(0)); e[j] = 1;
+        Vector Ne; matter.multiplyByN(state, false, e, Ne);
+        State qp = state, qm = state;
+        qp.updQ() += h*Ne;  qm.updQ() -= h*Ne;
+        system.realize(qp, Stage::Velocity);
+        system.realize(qm, Stage::Velocity);
+        matter.calcResidualForce(qp, mobForces, bodyForces, udot, lambda, tp);
+        matter.calcResidualForce(qm, mobForces, bodyForces, udot, lambda, tm);
+        SimTK_TEST_EQ_TOL(dTdq(j), (tp-tm)/(2*h), tol);
+
+        State up = state, um = state;
+        up.updU()[j] += h;  um.updU()[j] -= h;
+        system.realize(up, Stage::Velocity);
+        system.realize(um, Stage::Velocity);
+        matter.calcResidualForce(up, mobForces, bodyForces, udot, lambda, tp);
+        matter.calcResidualForce(um, mobForces, bodyForces, udot, lambda, tm);
+        SimTK_TEST_EQ_TOL(dTdu(j), (tp-tm)/(2*h), tol);
+    }
+}
+
+// f(x) = x0^2 x1 + sin(x0) - 0.4 x1 x2 + 0.2 x2^3, chosen so that every entry
+// of its Hessian is nonzero somewhere and a dropped term cannot hide.
+namespace {
+class CouplerFunction : public Function {
+public:
+    Real calcValue(const Vector& x) const override {
+        return x[0]*x[0]*x[1] + std::sin(x[0]) - 0.4*x[1]*x[2]
+             + 0.2*x[2]*x[2]*x[2];
+    }
+    Real calcDerivative(const Array_<int>& d, const Vector& x) const override {
+        if (d.size() == 1) {
+            switch (d[0]) {
+            case 0: return 2*x[0]*x[1] + std::cos(x[0]);
+            case 1: return x[0]*x[0] - 0.4*x[2];
+            case 2: return -0.4*x[1] + 0.6*x[2]*x[2];
+            }
+        }
+        if (d.size() == 2) {
+            const int i = std::min(d[0], d[1]), j = std::max(d[0], d[1]);
+            if (i == 0 && j == 0) return 2*x[1] - std::sin(x[0]);
+            if (i == 0 && j == 1) return 2*x[0];
+            if (i == 1 && j == 2) return -0.4;
+            if (i == 2 && j == 2) return 1.2*x[2];
+            return 0;
+        }
+        return 0;
+    }
+    int getArgumentSize() const override { return 3; }
+    int getMaxDerivativeOrder() const override { return 2; }
+};
+}
+
+// A chain welded back to Ground, so the Ancestor is Ground. The chain includes
+// a quaternion Ball, which is fine here because a Weld applies only body
+// forces.
+void testWeldToGround() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body(cylinderProps(1.2, Vec3(0.02,-0.01,0.03), 0.2, 0.04));
+
+    MobilizedBody::Pin  link1(matter.Ground(),
+        Transform(Rotation(0.2, XAxis), Vec3(0.03,0.1,-0.02)), body,
+        Transform(Rotation(0.1, ZAxis), Vec3(0,0.2,0)));
+    MobilizedBody::Ball link2(link1,
+        Transform(Rotation(0.3, YAxis), Vec3(0,-0.2,0.02)), body,
+        Transform(Rotation(-0.2, XAxis), Vec3(0.01,0.2,0)));
+    MobilizedBody::Slider link3(link2,
+        Transform(Rotation(0.4, ZAxis), Vec3(0,-0.2,0)), body,
+        Transform(Rotation(0.15, YAxis), Vec3(0,0.2,0.01)));
+    Constraint::Weld weld(matter.Ground(),
+        Transform(Rotation(0.25, YAxis), Vec3(0.1,-0.5,0.05)), link3,
+        Transform(Rotation(-0.3, ZAxis), Vec3(0.02,-0.15,0.01)));
+
+    State state = system.realizeTopology();
+    link1.setAngle(state, 0.45);  link1.setRate(state, -0.9);
+    link2.setQToFitRotation(state,
+        Rotation(BodyRotationSequence, 0.3, XAxis, -0.4, YAxis, 0.2, ZAxis));
+    link2.setUToFitAngularVelocity(state, Vec3(0.8,-0.5,1.1));
+    link3.setLength(state, 0.12);  link3.setRate(state, 0.7);
+    system.realize(state, Stage::Velocity);
+    checkConstrainedAgainstFiniteDifferences(system, state);
+}
+
+// A Weld between the tips of two branches of a floating base, so the Ancestor
+// is the moving base and the R_GA term is exercised.
+void testWeldBetweenMovingBodies() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body1(cylinderProps(2.0, Vec3( 0.03,-0.02, 0.05), 0.30, 0.05));
+    Body::Rigid body2(cylinderProps(1.1, Vec3(-0.02, 0.04,-0.01), 0.22, 0.04));
+
+    MobilizedBody::Free base(matter.Ground(),
+        Transform(Rotation(0.2, XAxis), Vec3(0.05,0.1,-0.02)), body1,
+        Transform(Rotation(0.15, YAxis), Vec3(0,0.3,0)));
+    MobilizedBody::Pin  left1(base,
+        Transform(Rotation(0.3, ZAxis), Vec3(0.1,-0.3,0.02)), body2,
+        Transform(Rotation(0.1, XAxis), Vec3(0,0.22,0)));
+    MobilizedBody::Universal left2(left1,
+        Transform(Rotation(-0.2, YAxis), Vec3(0,-0.22,0.01)), body2,
+        Transform(Rotation(0.25, ZAxis), Vec3(0.01,0.22,0)));
+    MobilizedBody::Gimbal right1(base,
+        Transform(Rotation(-0.35, XAxis), Vec3(-0.1,-0.3,0.03)), body2,
+        Transform(Rotation(0.05, YAxis), Vec3(0,0.22,0)));
+    Constraint::Weld weld(left2,
+        Transform(Rotation(0.2, XAxis), Vec3(0.02,-0.2,0.01)), right1,
+        Transform(Rotation(-0.15, ZAxis), Vec3(-0.01,-0.2,0.03)));
+
+    State state = system.realizeTopology();
+    base.setQToFitTransform(state,
+        Transform(Rotation(BodyRotationSequence, 0.3, XAxis, -0.45, YAxis,
+                           0.25, ZAxis), Vec3(0.15, 0.40,-0.20)));
+    base.setUToFitVelocity(state,
+        SpatialVec(Vec3(0.70,-1.10,0.50), Vec3(-0.40,0.90,1.30)));
+    left1.setAngle(state, 0.55);  left1.setRate(state, -1.2);
+    for (int i=0; i < 2; ++i) {
+        left2.setOneQ(state, i, 0.2 - 0.33*i);
+        left2.setOneU(state, i, 0.4 - 0.51*i);
+    }
+    for (int i=0; i < 3; ++i) {
+        right1.setOneQ(state, i, -0.3 + 0.27*i);
+        right1.setOneU(state, i, 0.9 - 0.44*i);
+    }
+    system.realize(state, Stage::Velocity);
+    SimTK_TEST(weld.getAncestorMobilizedBody().getMobilizedBodyIndex()
+               == base.getMobilizedBodyIndex());
+    checkConstrainedAgainstFiniteDifferences(system, state);
+}
+
+// A coupler on three coordinates of mobilizers whose N is the identity.
+// Gimbal belongs here: its generalized speeds are its angle rates.
+void testCoordinateCoupler() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body(cylinderProps(1.0, Vec3(0.02,0.01,-0.03), 0.2, 0.04));
+
+    MobilizedBody::Pin    pin(matter.Ground(),
+        Transform(Rotation(0.2, XAxis), Vec3(0.02,0.1,0)), body,
+        Transform(Rotation(0.1, YAxis), Vec3(0,0.2,0)));
+    MobilizedBody::Gimbal gimbal(pin,
+        Transform(Rotation(0.3, ZAxis), Vec3(0,-0.2,0.02)), body,
+        Transform(Rotation(-0.1, XAxis), Vec3(0.01,0.2,0)));
+    MobilizedBody::Slider slider(gimbal,
+        Transform(Rotation(0.25, YAxis), Vec3(0,-0.2,0)), body,
+        Transform(Rotation(0.2, ZAxis), Vec3(0,0.2,0.01)));
+
+    Array_<MobilizedBodyIndex> coordBody;
+    Array_<MobilizerQIndex>    coordIndex;
+    coordBody.push_back(pin.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(0));
+    coordBody.push_back(gimbal.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(1));
+    coordBody.push_back(slider.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(0));
+    Constraint::CoordinateCoupler coupler(matter, new CouplerFunction,
+                                          coordBody, coordIndex);
+
+    State state = system.realizeTopology();
+    const int nu = state.getNU();
+    for (int i=0; i < nu; ++i) {
+        state.updQ()[i] = 0.35 - 0.17*i;
+        state.updU()[i] = -0.6 + 0.29*i;
+    }
+    system.realize(state, Stage::Velocity);
+    checkConstrainedAgainstFiniteDifferences(system, state);
+}
+
+// Both supported Constraints at once, so their contributions have to
+// accumulate into shared bodies and mobilities.
+void testWeldAndCouplerTogether() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body(cylinderProps(1.3, Vec3(0.01,-0.02,0.02), 0.2, 0.04));
+
+    MobilizedBody::Pin link1(matter.Ground(),
+        Transform(Rotation(0.1, ZAxis), Vec3(0.02,0.1,0)), body,
+        Transform(Rotation(0.2, XAxis), Vec3(0,0.2,0)));
+    MobilizedBody::Pin link2(link1,
+        Transform(Rotation(-0.3, YAxis), Vec3(0,-0.2,0.02)), body,
+        Transform(Rotation(0.15, ZAxis), Vec3(0.01,0.2,0)));
+    MobilizedBody::Universal link3(link2,
+        Transform(Rotation(0.2, XAxis), Vec3(0,-0.2,0)), body,
+        Transform(Rotation(-0.25, YAxis), Vec3(0,0.2,0.01)));
+    Constraint::Weld weld(link1,
+        Transform(Rotation(0.3, YAxis), Vec3(0.05,-0.4,0.02)), link3,
+        Transform(Rotation(0.1, XAxis), Vec3(0.01,-0.2,-0.02)));
+
+    Array_<MobilizedBodyIndex> coordBody;
+    Array_<MobilizerQIndex>    coordIndex;
+    coordBody.push_back(link2.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(0));
+    coordBody.push_back(link3.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(0));
+    coordBody.push_back(link3.getMobilizedBodyIndex());
+    coordIndex.push_back(MobilizerQIndex(1));
+    Constraint::CoordinateCoupler coupler(matter, new CouplerFunction,
+                                          coordBody, coordIndex);
+
+    State state = system.realizeTopology();
+    const int nu = state.getNU();
+    for (int i=0; i < nu; ++i) {
+        state.updQ()[i] = -0.25 + 0.21*i;
+        state.updU()[i] = 0.5 - 0.31*i;
+    }
+    system.realize(state, Stage::Velocity);
+    checkConstrainedAgainstFiniteDifferences(system, state);
+}
+
+// A coupler acting on a FunctionBased mobilizer, as an OpenSim
+// CoordinateCouplerConstraint on a CustomJoint does. FunctionBased reaches the
+// operator as a Custom mobilizer, so this checks that it is accepted as having
+// N = I. As in checkFunctionBased(), the q side rebuilds the system at each
+// perturbed configuration so that no stale H cache is ever used.
+namespace {
+struct CoupledFunctionBasedModel {
+    MultibodySystem        system;
+    SimbodyMatterSubsystem matter;
+    State                  state;
+
+    CoupledFunctionBasedModel(const Vector& q, const Vector& u)
+    :   matter(system) {
+        Body::Rigid body(cylinderProps(1.3, Vec3(0.03,-0.02,0.04),
+                                       0.22, 0.045));
+        MobilizedBody::Pin inboard(matter.Ground(),
+            Transform(Rotation(0.23, XAxis), Vec3(0.04,0.09,-0.03)), body,
+            Transform(Rotation(0.17, YAxis), Vec3(0,0.26,0)));
+
+        Array_<const Function*> functions(6);
+        Array_<Array_<int> >    coordIndices(6);
+        for (int i=0; i < 6; ++i) {
+            if (i < 2) {
+                Vector c(3);
+                c[0] = 0.3 - 0.1*i; c[1] = 0.7 + 0.2*i; c[2] = 0.05*i;
+                functions[i]    = new Function::Polynomial(c);
+                coordIndices[i] = Array_<int>(1, i);
+            } else {
+                functions[i]    = new Function::Constant(0, 0);
+                coordIndices[i] = Array_<int>();
+            }
+        }
+        MobilizedBody::FunctionBased tested(inboard,
+            Transform(Rotation(0.31, ZAxis), Vec3(0.01,-0.24,0.05)), body,
+            Transform(Rotation(0.13, XAxis), Vec3(0.02,0.21,0)),
+            2, functions, coordIndices);
+
+        Array_<MobilizedBodyIndex> coordBody;
+        Array_<MobilizerQIndex>    coordIndex;
+        coordBody.push_back(inboard.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(0));
+        coordBody.push_back(tested.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(0));
+        coordBody.push_back(tested.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(1));
+        Constraint::CoordinateCoupler coupler(matter, new CouplerFunction,
+                                              coordBody, coordIndex);
+
+        state = system.realizeTopology();
+        system.realize(state, Stage::Velocity);
+        if (q.size() == state.getNQ()) state.updQ() = q;
+        if (u.size() == state.getNU()) state.updU() = u;
+        system.realize(state, Stage::Velocity);
+    }
+};
+}
+
+void testCoordinateCouplerOnFunctionBased() {
+    Vector q0(3), u0(3);
+    for (int i=0; i < 3; ++i) { q0[i] = 0.21 - 0.09*i; u0[i] = -0.37 + 0.14*i; }
+
+    CoupledFunctionBasedModel model(q0, u0);
+    const int nu = model.state.getNU(), nb = model.matter.getNumBodies();
+    const int m  = model.state.getNMultipliers();
+    const Vector              udot       = makeUdot(nu);
+    const Vector              mobForces  = makeMobilityForces(nu);
+    const Vector_<SpatialVec> bodyForces = makeBodyForces(nb);
+    const Vector              lambda     = makeLambda(m);
+
+    Vector residual;
+    Matrix dTdq, dTdu, dTdlambda;
+    model.matter.calcResidualForceDerivatives(model.state, mobForces,
+        bodyForces, udot, lambda, residual, dTdq, dTdu, dTdlambda);
+
+    Vector tau;
+    model.matter.calcResidualForce(model.state, mobForces, bodyForces, udot,
+                                   lambda, tau);
+    SimTK_TEST_EQ(residual, tau);
+    Real tauScale = 1;
+    for (int i=0; i < nu; ++i) tauScale = std::max(tauScale, std::abs(tau[i]));
+    const Real tol = 1e-6 * tauScale;
+
+    const Real h = 1e-5;
+    Vector tp, tm;
+    for (int j=0; j < nu; ++j) {
+        Vector e(nu, Real(0)); e[j] = 1;
+        Vector Ne; model.matter.multiplyByN(model.state, false, e, Ne);
+
+        CoupledFunctionBasedModel mp(q0 + h*Ne, u0), mm(q0 - h*Ne, u0);
+        mp.matter.calcResidualForce(mp.state, mobForces, bodyForces, udot,
+                                    lambda, tp);
+        mm.matter.calcResidualForce(mm.state, mobForces, bodyForces, udot,
+                                    lambda, tm);
+        SimTK_TEST_EQ_TOL(dTdq(j), (tp-tm)/(2*h), tol);
+
+        State up = model.state, um = model.state;
+        up.updU()[j] += h;  um.updU()[j] -= h;
+        model.system.realize(up, Stage::Velocity);
+        model.system.realize(um, Stage::Velocity);
+        model.matter.calcResidualForce(up, mobForces, bodyForces, udot,
+                                       lambda, tp);
+        model.matter.calcResidualForce(um, mobForces, bodyForces, udot,
+                                       lambda, tm);
+        SimTK_TEST_EQ_TOL(dTdu(j), (tp-tm)/(2*h), tol);
+    }
+}
+
+// Without multipliers there are no constraint forces, so the results must be
+// those of the unconstrained operator, with dTdlambda still ~G, and even an
+// unsupported Constraint must not cause a throw. With multipliers, an
+// unsupported Constraint, a velocity-level one, or a coupler on a quaternion
+// Ball must each be rejected, while a disabled unsupported Constraint is
+// ignored and the supported Weld beside it still checks out.
+void testConstrainedInputHandling() {
+    MultibodySystem system;
+    SimbodyMatterSubsystem matter(system);
+    Body::Rigid body(cylinderProps(1.0, Vec3(0.02,0,0), 0.2, 0.04));
+    MobilizedBody::Pin  p1(matter.Ground(), Transform(), body,
+                           Transform(Vec3(0,0.2,0)));
+    MobilizedBody::Ball b1(p1, Transform(), body, Transform(Vec3(0,0.2,0)));
+    MobilizedBody::Pin  p2(b1, Transform(), body, Transform(Vec3(0,0.2,0)));
+    Constraint::Ball ball(matter.Ground(), Vec3(0.1,-0.6,0),
+                          p2, Vec3(0,-0.2,0));
+    Constraint::Weld weld(matter.Ground(), Transform(Vec3(0.05,-0.3,0.02)), p1,
+                          Transform(Rotation(0.2, ZAxis), Vec3(0,-0.1,0)));
+
+    State state = system.realizeTopology();
+    b1.setQToFitRotation(state, Rotation(0.4, XAxis));
+    p1.setAngle(state, 0.3);  p2.setAngle(state, -0.2);
+    state.updU() = 0.21;
+    system.realize(state, Stage::Velocity);
+
+    const int nu = state.getNU(), m = state.getNMultipliers();
+    const Vector udot = makeUdot(nu);
+
+    Vector r, rRef;
+    Matrix dq, du, dl, dqRef, duRef, Gt;
+    matter.calcResidualForceDerivatives(state, Vector(),
+        Vector_<SpatialVec>(), udot, Vector(), r, dq, du, dl);
+    matter.calcResidualForceDerivativesIgnoringConstraints(state, Vector(),
+        Vector_<SpatialVec>(), udot, rRef, dqRef, duRef);
+    matter.calcGTranspose(state, Gt);
+    SimTK_TEST_EQ(r, rRef);
+    SimTK_TEST_EQ(dq, dqRef);
+    SimTK_TEST_EQ(du, duRef);
+    SimTK_TEST_EQ(dl, Gt);
+
+    SimTK_TEST_MUST_THROW(matter.calcResidualForceDerivatives(state, Vector(),
+        Vector_<SpatialVec>(), udot, makeLambda(m), r, dq, du, dl));
+    SimTK_TEST_MUST_THROW(matter.calcResidualForceDerivatives(state, Vector(),
+        Vector_<SpatialVec>(), udot, makeLambda(m+1), r, dq, du, dl));
+
+    ball.disable(state);
+    system.realize(state, Stage::Velocity);
+    SimTK_TEST(state.getNMultipliers() == 6);
+    checkConstrainedAgainstFiniteDifferences(system, state);
+
+    // A coupler on quaternion coordinates of a Ball mobilizer.
+    {   MultibodySystem sys;
+        SimbodyMatterSubsystem mat(sys);
+        MobilizedBody::Pin  pin(mat.Ground(), Transform(), body,
+                                Transform(Vec3(0,0.2,0)));
+        MobilizedBody::Ball quat(pin, Transform(), body,
+                                 Transform(Vec3(0,0.2,0)));
+        Array_<MobilizedBodyIndex> coordBody;
+        Array_<MobilizerQIndex>    coordIndex;
+        coordBody.push_back(pin.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(0));
+        coordBody.push_back(quat.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(1));
+        coordBody.push_back(quat.getMobilizedBodyIndex());
+        coordIndex.push_back(MobilizerQIndex(2));
+        Constraint::CoordinateCoupler coupler(mat, new CouplerFunction,
+                                              coordBody, coordIndex);
+        State s = sys.realizeTopology();
+        quat.setQToFitRotation(s, Rotation(0.3, YAxis));
+        sys.realize(s, Stage::Velocity);
+        bool rejected = false;
+        try {
+            mat.calcResidualForceDerivatives(s, Vector(),
+                Vector_<SpatialVec>(), Vector(),
+                makeLambda(s.getNMultipliers()), r, dq, du, dl);
+        } catch (const std::exception& e) {
+            SimTK_TEST(std::string(e.what()).find("N matrix")
+                       != std::string::npos);
+            rejected = true;
+        }
+        SimTK_TEST(rejected);
+    }
+
+    // A velocity-level Constraint has no force partials yet.
+    {   MultibodySystem sys;
+        SimbodyMatterSubsystem mat(sys);
+        MobilizedBody::Pin pin(mat.Ground(), Transform(), body,
+                               Transform(Vec3(0,0.2,0)));
+        Constraint::ConstantSpeed speed(pin, 0.3);
+        State s = sys.realizeTopology();
+        sys.realize(s, Stage::Velocity);
+        bool rejected = false;
+        try {
+            mat.calcResidualForceDerivatives(s, Vector(),
+                Vector_<SpatialVec>(), Vector(),
+                makeLambda(s.getNMultipliers()), r, dq, du, dl);
+        } catch (const std::exception& e) {
+            SimTK_TEST(std::string(e.what()).find("velocity-level")
+                       != std::string::npos);
+            rejected = true;
+        }
+        SimTK_TEST(rejected);
+    }
+}
+
 int main() {
     SimTK_START_TEST("TestInverseDynamicsDerivatives");
         SimTK_SUBTEST(testSinglePin);
@@ -856,5 +1330,11 @@ int main() {
         SimTK_SUBTEST(testReversedMobilizersInChain);
         SimTK_SUBTEST(testCustomMobilizerWithPartials);
         SimTK_SUBTEST(testCustomMobilizerWithoutPartials);
+        SimTK_SUBTEST(testWeldToGround);
+        SimTK_SUBTEST(testWeldBetweenMovingBodies);
+        SimTK_SUBTEST(testCoordinateCoupler);
+        SimTK_SUBTEST(testWeldAndCouplerTogether);
+        SimTK_SUBTEST(testCoordinateCouplerOnFunctionBased);
+        SimTK_SUBTEST(testConstrainedInputHandling);
     SimTK_END_TEST();
 }

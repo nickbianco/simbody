@@ -5815,6 +5815,185 @@ void SimbodyMatterSubsystemRep::calcTreeResidualForceDerivatives(
     }
 }
 
+
+
+//==============================================================================
+//                     CALC CONSTRAINT FORCE DERIVATIVES
+//==============================================================================
+// The constraint forces enter the residual as ~G lambda = ~J F_c + f_c, with
+// F_c the body forces and f_c the mobility forces that
+// calcConstraintForcesFromMultipliers() produces from lambda. Holding lambda
+// fixed, the derivative along mobility j is
+//
+//     d(~J) F_c + ~J dF_c + df_c
+//
+// The first term comes from calcTreeResidualForceDerivatives(), which is handed
+// F_c and f_c as applied forces. This method adds the other two.
+//
+// A derivative along mobility j is a time derivative along the motion u = e_j,
+// so each Constraint is handed that motion in the same form its velocity
+// errors use: V_AB for its bodies and qdot = N e_j for its coordinates. Its
+// forces come back in its Ancestor frame A, so
+//
+//     dF_G = R_GA dF_A + w_GA x (R_GA F_A)
+//
+// with w_GA the angular velocity of A in that motion. The q-forces of
+// holonomic constraints reach u-space as f_c = ~N f_q, whose derivative is
+// ~N df_q only where N does not depend on q. Anything else throws.
+
+// True when this mobilizer's N is the identity at every q. Custom mobilizers
+// may supply any N, but FunctionBased never overrides the identity default.
+static bool hasIdentityN(const SimbodyMatterSubsystemRep& matter,
+                         const MobilizedBody&             mobod)
+{
+    const MobilizedBodyIndex mbx = mobod.getMobilizedBodyIndex();
+    if (matter.getRigidBodyNode(mbx).isQDotAlwaysTheSameAsU())
+        return true;
+    const MobilizedBody::CustomImpl* custom =
+        dynamic_cast<const MobilizedBody::CustomImpl*>(&mobod.getImpl());
+    return custom && dynamic_cast<const MobilizedBody::FunctionBasedImpl*>(
+                         &custom->getImplementation());
+}
+
+void SimbodyMatterSubsystemRep::calcConstraintForceDerivatives(
+    const State&               s,
+    const Vector&              lambda,
+    Matrix&                    dTdq) const
+{
+    const char* opName =
+        "SimbodyMatterSubsystem::calcResidualForceDerivatives()";
+
+    const SBInstanceCache& ic = getInstanceCache(s);
+    const int nb = getNumBodies();
+    const int nu = getNU(s);
+    assert(lambda.size() == ic.totalNHolonomicConstraintEquationsInUse
+                          + ic.totalNNonholonomicConstraintEquationsInUse
+                          + ic.totalNAccelerationOnlyConstraintEquationsInUse);
+
+    // Per-Constraint setup
+    // --------------------
+    // Gather each enabled Constraint's multipliers, check that its partials are
+    // available, and keep its forces in A when A is not Ground, for the R_GA
+    // term above. A probe with zero motion checks the partials, so an
+    // unsupported Constraint throws even when no column would reach it.
+    Array_<ConstraintIndex>                         active;
+    Array_<Array_<Real> >                           lambdap;
+    Array_<Array_<SpatialVec,ConstrainedBodyIndex> > F_A;
+    for (ConstraintIndex cx(0); cx < constraints.size(); ++cx) {
+        if (isConstraintDisabled(s,cx))
+            continue;
+        const ConstraintImpl& crep = constraints[cx]->getImpl();
+        const SBInstancePerConstraintInfo& cInfo =
+            ic.getConstraintInstanceInfo(cx);
+        const Segment& holoSeg = cInfo.holoErrSegment;
+
+        SimTK_ERRCHK1_ALWAYS(cInfo.nonholoErrSegment.length == 0
+                             && cInfo.accOnlyErrSegment.length == 0, opName,
+            "Constraint %d has velocity-level or acceleration-only equations,"
+            " whose force derivatives are not supported.", (int)cx);
+        for (ConstrainedMobilizerIndex cmx(0);
+             cmx < cInfo.getNumConstrainedMobilizers(); ++cmx)
+            SimTK_ERRCHK1_ALWAYS(hasIdentityN(*this,
+                    crep.getMobilizedBodyFromConstrainedMobilizer(cmx)),
+                opName,
+                "Constraint %d applies generalized forces through a mobilizer"
+                " whose N matrix may depend on q, which is not supported.",
+                (int)cx);
+
+        Array_<Real> lam(holoSeg.length);
+        for (int i=0; i < holoSeg.length; ++i)
+            lam[i] = lambda[holoSeg.offset + i];
+
+        const int ncb = crep.getNumConstrainedBodies();
+        const int ncq = cInfo.getNumConstrainedQ();
+        const SpatialVec zeroV(Vec3(0), Vec3(0));
+        const Array_<SpatialVec,ConstrainedBodyIndex> V0(ncb, zeroV);
+        const Array_<Real,ConstrainedQIndex>          qdot0(ncq, Real(0));
+        Array_<SpatialVec,ConstrainedBodyIndex>       dF0(ncb, zeroV);
+        Array_<Real,ConstrainedQIndex>                dfq0(ncq, Real(0));
+        SimTK_ERRCHK1_ALWAYS(crep.addInPositionConstraintForcesPartial(
+                                 s, lam, V0, qdot0, dF0, dfq0), opName,
+            "Constraint %d cannot supply the partials of its constraint"
+            " forces, so the analytic residual force derivatives are not"
+            " available for it.", (int)cx);
+
+        Array_<SpatialVec,ConstrainedBodyIndex> F(ncb, zeroV);
+        if (crep.isAncestorDifferentFromGround()) {
+            Array_<Real,ConstrainedQIndex> fq(ncq, Real(0));
+            crep.addInPositionConstraintForces(s, lam, F, fq);
+        }
+
+        active.push_back(cx);
+        lambdap.push_back(lam);
+        F_A.push_back(F);
+    }
+    if (active.empty())
+        return;
+
+    // Per-column derivative
+    // ---------------------
+    // Both J e_j and the projection through ~J are O(n), so this costs
+    // O(n nu) in all. It does not yet exploit the structural zeros that the
+    // tree derivatives do.
+    Vector                                  e(nu, Real(0)), qdot, Jtf;
+    Vector_<SpatialVec>                     V_GB;
+    Array_<SpatialVec,MobilizedBodyIndex>   allV_GB(nb);
+    Vector_<SpatialVec>                     dF_G(nb);
+    Vector                                  df_u(nu);
+    Array_<SpatialVec,ConstrainedBodyIndex> V_AB, dF;
+    Array_<Real,ConstrainedQIndex>          cqdot, dfq;
+    Array_<Real,ConstrainedUIndex>          dfu;
+    for (int j=0; j < nu; ++j) {
+        e = 0; e[j] = 1;
+        multiplyBySystemJacobian(s, e, V_GB);
+        multiplyByN(s, false, e, qdot);
+        for (MobilizedBodyIndex mbx(0); mbx < nb; ++mbx)
+            allV_GB[mbx] = V_GB[mbx];
+
+        dF_G = SpatialVec(Vec3(0), Vec3(0));
+        df_u = 0;
+        for (unsigned a=0; a < active.size(); ++a) {
+            const ConstraintImpl& crep = constraints[active[a]]->getImpl();
+            const SBInstancePerConstraintInfo& cInfo =
+                ic.getConstraintInstanceInfo(active[a]);
+            const int ncb = crep.getNumConstrainedBodies();
+            const int ncq = cInfo.getNumConstrainedQ();
+            const int ncu = cInfo.getNumConstrainedU();
+
+            crep.convertBodyVelocityToConstrainedBodyVelocity(s, allV_GB, V_AB);
+            cqdot.resize(ncq);
+            for (ConstrainedQIndex cqx(0); cqx < ncq; ++cqx)
+                cqdot[cqx] = qdot[cInfo.getQIndexFromConstrainedQ(cqx)];
+
+            dF.resize(ncb);  dF.fill(SpatialVec(Vec3(0), Vec3(0)));
+            dfq.resize(ncq); dfq.fill(Real(0));
+            crep.addInPositionConstraintForcesPartial(s, lambdap[a], V_AB,
+                                                      cqdot, dF, dfq);
+
+            if (crep.isAncestorDifferentFromGround()) {
+                const MobilizedBody& A = crep.getAncestorMobilizedBody();
+                const Rotation& R_GA = A.getBodyRotation(s);
+                const Vec3&     w_GA = allV_GB[A.getMobilizedBodyIndex()][0];
+                for (ConstrainedBodyIndex cbx(0); cbx < ncb; ++cbx) {
+                    const SpatialVec& Fa = F_A[a][cbx];
+                    dF[cbx] = SpatialVec(R_GA*dF[cbx][0] + w_GA % (R_GA*Fa[0]),
+                                         R_GA*dF[cbx][1] + w_GA % (R_GA*Fa[1]));
+                }
+            }
+            for (ConstrainedBodyIndex cbx(0); cbx < ncb; ++cbx)
+                dF_G[crep.getMobilizedBodyIndexOfConstrainedBody(cbx)]
+                    += dF[cbx];
+
+            crep.convertQForcesToUForces(s, dfq, dfu);
+            for (ConstrainedUIndex cux(0); cux < ncu; ++cux)
+                df_u[cInfo.getUIndexFromConstrainedU(cux)] += dfu[cux];
+        }
+
+        multiplyBySystemJacobianTranspose(s, dF_G, Jtf);
+        dTdq(j) += Jtf + df_u;
+    }
+}
+
 //==============================================================================
 //                               MULTIPLY BY N
 //==============================================================================

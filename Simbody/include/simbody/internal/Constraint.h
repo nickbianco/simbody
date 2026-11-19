@@ -1869,6 +1869,36 @@ virtual void addInPositionConstraintForces
     const Array_<Real>&                         multipliers,
     Array_<SpatialVec,ConstrainedBodyIndex>&    bodyForcesInA,
     Array_<Real,      ConstrainedQIndex>&       qForces) const;
+
+/** Optional: calculate the derivative of the forces that
+addInPositionConstraintForces() produces, along a motion of the system and with
+the \a multipliers held fixed.
+
+The motion is supplied in the same form calcPositionDotErrors() receives it:
+the spatial velocity \a V_AB of each Constrained Body in the Ancestor frame,
+and the time derivatives \a constrainedQDot of the Constrained Qs. Write the
+resulting rates of change of the body forces and q forces to
+\a dBodyForcesInA and \a dQForces, which have the same sizes and meaning as
+the force arrays of addInPositionConstraintForces(). As there, you must
+<em>add in</em> your contributions.
+
+Return \c true if you computed the result. The default returns \c false,
+meaning "I do not supply analytic partials", which is what keeps existing
+Implementations working unchanged. Operators that need these partials -- see
+SimbodyMatterSubsystem::calcResidualForceDerivatives() -- refuse to run for a
+Constraint that returns \c false, rather than returning a wrong answer.
+
+The state is guaranteed to have been realized to at least Position stage.
+
+@see addInPositionConstraintForces(), calcPositionDotErrors() **/
+virtual bool addInPositionConstraintForcesPartial
+   (const State&                                    state,
+    const Array_<Real>&                             multipliers,
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB,
+    const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
+    Array_<SpatialVec,ConstrainedBodyIndex>&        dBodyForcesInA,
+    Array_<Real,      ConstrainedQIndex>&           dQForces) const
+{   return false; }
 /**@}**/
 
 /** @name         Velocity (Nonholonomic) Constraint Virtuals

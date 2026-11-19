@@ -451,6 +451,85 @@ void SimbodyMatterSubsystem::calcResidualForce
 
 
 //==============================================================================
+//                      CALC RESIDUAL FORCE DERIVATIVES
+//==============================================================================
+// The constrained residual is the unconstrained one with the constraint forces
+// added to the applied forces, exactly as in calcResidualForce() above. Its
+// derivatives are those of the unconstrained residual under those forces, plus
+// the change of the constraint forces themselves with q.
+void SimbodyMatterSubsystem::calcResidualForceDerivatives
+   (const State&               state,
+    const Vector&              appliedMobilityForces,
+    const Vector_<SpatialVec>& appliedBodyForcesInG,
+    const Vector&              knownUdot,
+    const Vector&              knownLambda,
+    Vector&                    residualMobilityForces,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu,
+    Matrix&                    dTdlambda) const
+{
+    const SimbodyMatterSubsystemRep& rep = getRep();
+    const int nb = rep.getNumBodies();
+    const int nu = rep.getNU(state);
+    const int m  = rep.getNMultipliers(state);
+
+    SimTK_APIARGCHECK2_ALWAYS(
+        appliedMobilityForces.size()==0 || appliedMobilityForces.size()==nu,
+        "SimbodyMatterSubsystem", "calcResidualForceDerivatives",
+        "Got %d appliedMobilityForces but there are %d mobilities.",
+        appliedMobilityForces.size(), nu);
+    SimTK_APIARGCHECK2_ALWAYS(
+        appliedBodyForcesInG.size()==0 || appliedBodyForcesInG.size()==nb,
+        "SimbodyMatterSubsystem", "calcResidualForceDerivatives",
+        "Got %d appliedBodyForces but there are %d bodies (including Ground).",
+        appliedBodyForcesInG.size(), nb);
+    SimTK_APIARGCHECK2_ALWAYS(
+        knownUdot.size()==0 || knownUdot.size()==nu,
+        "SimbodyMatterSubsystem", "calcResidualForceDerivatives",
+        "Got %d knownUdots but there are %d mobilities.",
+        knownUdot.size(), nu);
+    SimTK_APIARGCHECK2_ALWAYS(
+        knownLambda.size()==0 || knownLambda.size()==m,
+        "SimbodyMatterSubsystem", "calcResidualForceDerivatives",
+        "Got %d knownLambdas but there are %d constraint equations.",
+        knownLambda.size(), m);
+
+    // The residual is linear in lambda, with coefficient ~G for every kind of
+    // Constraint.
+    calcGTranspose(state, dTdlambda);
+
+    if (knownLambda.size() == 0) { // no constraint forces
+        calcResidualForceDerivativesIgnoringConstraints(state,
+            appliedMobilityForces, appliedBodyForcesInG, knownUdot,
+            residualMobilityForces, dTdq, dTdu);
+        return;
+    }
+
+    // As in calcResidualForce(), negate lambda so that the constraint forces
+    // have the sign of applied forces.
+    Vector_<SpatialVec> bodyForcesInG(nb);
+    Vector              mobilityForces(nu);
+    Vector              negLambda = -knownLambda;
+    rep.calcConstraintForcesFromMultipliers(state, negLambda,
+        bodyForcesInG, mobilityForces);
+
+    if (appliedBodyForcesInG.size())
+        bodyForcesInG  += appliedBodyForcesInG;
+    if (appliedMobilityForces.size())
+        mobilityForces += appliedMobilityForces;
+
+    calcResidualForceDerivativesIgnoringConstraints(state,
+        mobilityForces, bodyForcesInG, knownUdot,
+        residualMobilityForces, dTdq, dTdu);
+
+    // The constraint forces enter the residual with the sign of ~G lambda, so
+    // their own change with q is added using lambda itself.
+    rep.calcConstraintForceDerivatives(state, knownLambda, dTdq);
+}
+
+
+
+//==============================================================================
 //                               MULTIPLY BY M
 //==============================================================================
 // Check arguments, copy in/out of contiguous Vectors if necessary, call the

@@ -2519,6 +2519,61 @@ void calcResidualForce
     const Vector&              knownLambda,
     Vector&                    residualMobilityForces) const;
 
+/** Calculate the analytic first-order partial derivatives of the residual
+returned by calcResidualForce(), with respect to the generalized coordinates
+q, the generalized speeds u, and the Lagrange multipliers lambda.
+
+The arguments up to \a residualMobilityForces have the same meaning as for
+calcResidualForce().
+
+@param[out] dTdq
+     The nu X nu matrix of partials with respect to q, taken along the
+     mobility directions as for
+     calcResidualForceDerivativesIgnoringConstraints(). It includes the
+     dependence of the constraint forces ~G*lambda on q, with \a knownLambda
+     held fixed.
+@param[out] dTdu
+     The nu X nu matrix of partials with respect to u.
+@param[out] dTdlambda
+     The nu X m matrix of partials with respect to lambda. The residual is
+     linear in lambda, so this is ~G, the same matrix calcGTranspose()
+     returns. It is filled in even when \a knownLambda is zero length.
+
+All outputs are resized if necessary. As for
+calcResidualForceDerivativesIgnoringConstraints(), the applied forces are
+treated as constants.
+
+When \a knownLambda is zero length there are no constraint forces, and \a dTdq
+and \a dTdu are those of calcResidualForceDerivativesIgnoringConstraints().
+Otherwise every enabled Constraint must be able to supply the partials of its
+constraint forces. Currently that is the case for Constraint::Weld,
+Constraint::CoordinateCoupler, and any Constraint::Custom whose Implementation
+overrides addInPositionConstraintForcesPartial(). A Constraint that applies
+generalized forces must do so only through mobilizers whose N matrix does not
+depend on q, which excludes for example quaternion-based Ball and Free
+mobilizers.
+
+@par Required stage
+  \c Stage::Velocity
+
+@throws An exception if any mobilizer cannot supply the partials described for
+calcResidualForceDerivativesIgnoringConstraints(), or, when \a knownLambda is
+not zero length, if any enabled Constraint cannot supply its constraint force
+partials.
+
+@see calcResidualForce(), calcResidualForceDerivativesIgnoringConstraints(),
+     calcGTranspose() **/
+void calcResidualForceDerivatives
+   (const State&               state,
+    const Vector&              appliedMobilityForces,
+    const Vector_<SpatialVec>& appliedBodyForces,
+    const Vector&              knownUdot,
+    const Vector&              knownLambda,
+    Vector&                    residualMobilityForces,
+    Matrix&                    dTdq,
+    Matrix&                    dTdu,
+    Matrix&                    dTdlambda) const;
+
 
 /** This operator calculates the composite body inertias R given a State 
 realized to Position stage. Composite body inertias are the spatial mass 

@@ -672,6 +672,17 @@ public:
         Matrix&                    dTdq,
         Matrix&                    dTdu) const;
 
+    // Add to dTdq the part of d(~G lambda)/dq * N that comes from the
+    // constraint forces themselves changing with q at fixed lambda. The other
+    // part, ~J(q) changing under those forces, is what
+    // calcTreeResidualForceDerivatives() produces when the constraint forces
+    // are passed to it as applied forces. Throws if an enabled Constraint
+    // cannot supply its force partials. Requires Stage::Position.
+    void calcConstraintForceDerivatives(
+        const State&               s,
+        const Vector&              lambda,
+        Matrix&                    dTdq) const;
+
 
 
     // Must be in Stage::Position to calculate out_q = N(q)*in_u (e.g., qdot=N*u)
