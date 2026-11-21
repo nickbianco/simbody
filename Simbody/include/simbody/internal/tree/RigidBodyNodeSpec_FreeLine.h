@@ -29,9 +29,10 @@
  * known as a Cartesian joint.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
 
 
     // FREE LINE //
@@ -67,19 +68,24 @@
 //     NOTE: THAT IS NOT THE SAME FRAME AS FOR A FREE JOINT
 // Thus the qdots have to be derived from the generalized speeds to
 // be turned into either 4 quaternion derivatives or 3 Euler angle derivatives.
-class RBNodeFreeLine : public RigidBodyNodeSpec<5, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeFreeLine_ : public RigidBodyNodeSpec_<T, 5, false> {
 public:
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 5, false> Spec;
 
-typedef typename RigidBodyNodeSpec<5, false>::HType HType;
-virtual const char* type() { return "full"; }
+typedef typename Spec::HType HType;
+const char* type() const override { return "full"; }
 
-RBNodeFreeLine(const MassProperties& mProps_B,
+RBNodeFreeLine_(const MassProperties_<T>& mProps_B,
                bool                  isReversed,
                UIndex&               nextUSlot,
                USquaredIndex&        nextUSqSlot,
                QIndex&               nextQSlot)
-  : RigidBodyNodeSpec<5, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotMayDifferFromU, RigidBodyNode::QuaternionMayBeUsed, isReversed)
+  :   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+                         Base::QDotMayDifferFromU, Base::QuaternionMayBeUsed, isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
 }
@@ -90,14 +96,14 @@ RBNodeFreeLine(const MassProperties& mProps_B,
 // which works fine for the normal FreeLine joint but produces wrong behavior
 // when the mobilizer is reversed.
 void setQToFitTransformImpl(const SBStateDigest& sbs, const Transform& X_FM, 
-                            Vector& q) const override 
+                            Vector& q) const 
 {
     setQToFitTranslationImpl(sbs, X_FM.p(), q); // see below
     setQToFitRotationImpl(sbs, X_FM.R(), q);
 }
 
 void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
-                          Vector& q) const override
+                          Vector& q) const
 {
     if (this->getUseEulerAngles(sbs.getModelVars()))
         this->toQVec3(q,0) = R_FM.convertRotationToBodyFixedXYZ();
@@ -109,7 +115,7 @@ void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM,
 // in F. With a free joint we never have to *change* orientation coordinates in 
 // order to achieve a translation.
 void setQToFitTranslationImpl(const SBStateDigest& sbs,
-                              const Vec3& p_FM, Vector& q) const override {
+                              const Vec3& p_FM, Vector& q) const {
     if (this->getUseEulerAngles(sbs.getModelVars()))
         this->toQVec3(q,3) = p_FM; // skip the 3 Euler angles
     else
@@ -123,7 +129,7 @@ void setQToFitTranslationImpl(const SBStateDigest& sbs,
 // normalized first.
 void setUToFitAngularVelocityImpl(const SBStateDigest& sbs, 
                                   const Vector& q, const Vec3& w_FM,
-                                  Vector& u) const override
+                                  Vector& u) const
 {
     Rotation R_FM;
     if (this->getUseEulerAngles(sbs.getModelVars()))
@@ -141,7 +147,7 @@ void setUToFitAngularVelocityImpl(const SBStateDigest& sbs,
 // Our 3 translational generalized speeds are the linear velocity of M's origin
 // in F, expressed in F. The user gives us that same vector.
 void setUToFitLinearVelocityImpl(const SBStateDigest& sbs,
-                                 const Vector& q, const Vec3& v_FM, Vector& u) const override
+                                 const Vector& q, const Vec3& v_FM, Vector& u) const
 {
     this->toUVec3(u,2) = v_FM;
 }
@@ -157,45 +163,45 @@ enum {QuatOONorm=0};
 int calcQPoolSize(const SBModelVars& mv) const override
 {   return this->getUseEulerAngles(mv) ? AnglePoolSize : QuatPoolSize; }
 
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q,      int nq,
-                             Real*       qCache, int nQCache,
-                             Real*       qErr,   int nQErr) const override
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q,      int nq,
+                             RealP*       qCache, int nQCache,
+                             RealP*       qErr,   int nQErr) const override
 {
     if (this->getUseEulerAngles(sbs.getModelVars())) {
         assert(q && nq==6 && qCache && nQCache==AnglePoolSize && nQErr==0);
-        const Real cy = std::cos(q[1]);
-        Vec3::updAs(&qCache[AngleCosQ]) =
-            Vec3(std::cos(q[0]), cy, std::cos(q[2]));
-        Vec3::updAs(&qCache[AngleSinQ]) =
-            Vec3(std::sin(q[0]), std::sin(q[1]), std::sin(q[2]));
+        const RealP cy = cos(q[1]);
+        Vec3P::updAs(&qCache[AngleCosQ]) =
+            Vec3P(cos(q[0]), cy, cos(q[2]));
+        Vec3P::updAs(&qCache[AngleSinQ]) =
+            Vec3P(sin(q[0]), sin(q[1]), sin(q[2]));
         qCache[AngleOOCosQy] = 1/cy; // trouble at 90 degrees
     } else {
         assert(q && nq==7 && qCache && nQCache==QuatPoolSize && 
                qErr && nQErr==1);
-        const Real quatLen = Vec4::getAs(q).norm();
-        qErr[0] = quatLen - Real(1);    // normalization error
+        const RealP quatLen = Vec4P::getAs(q).norm();
+        qErr[0] = quatLen - RealP(1);    // normalization error
         qCache[QuatOONorm] = 1/quatLen; // save for later
     }
 }
 
-void calcX_FM(const SBStateDigest& sbs,
-              const Real* q,      int nq,
-              const Real* qCache, int nQCache,
-              Transform&  X_F0M0) const override
+void calcX_FM(const SBStateDigest_<T>& sbs,
+              const RealP* q,      int nq,
+              const RealP* qCache, int nQCache,
+              TransformP&  X_F0M0) const override
 {
     if (this->getUseEulerAngles(sbs.getModelVars())) {
         assert(q && nq==6 && qCache && nQCache==AnglePoolSize);
         X_F0M0.updR().setRotationToBodyFixedXYZ // 18 flops
-           (Vec3::getAs(&qCache[AngleCosQ]), Vec3::getAs(&qCache[AngleSinQ]));
-        X_F0M0.updP() = Vec3::getAs(&q[3]); // a012 x y z
+           (Vec3P::getAs(&qCache[AngleCosQ]), Vec3P::getAs(&qCache[AngleSinQ]));
+        X_F0M0.updP() = Vec3P::getAs(&q[3]); // a012 x y z
     } else {
         assert(q && nq==7 && qCache && nQCache==QuatPoolSize);
         // Must use a normalized quaternion to generate the rotation matrix.
         // Here we normalize with just 4 flops using precalculated 1/norm(q).
-        const Quaternion quat(Vec4::getAs(q)*qCache[QuatOONorm], true); 
+        const Quaternion_<T> quat(Vec4P::getAs(q)*qCache[QuatOONorm], true); 
         X_F0M0.updR().setRotationFromQuaternion(quat); // 29 flops
-        X_F0M0.updP() = Vec3::getAs(&q[4]); // q0123 x y z
+        X_F0M0.updP() = Vec3P::getAs(&q[4]); // q0123 x y z
     }
 }
 
@@ -205,23 +211,23 @@ void calcX_FM(const SBStateDigest& sbs,
 //         expressed in *M*, and
 //   (2) the (linear) velocity of M's origin in F, expressed in F.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const override
 {
-    const SBTreePositionCache& pc = sbs.updTreePositionCache(); // "upd" because we're realizing positions now
-    const Transform  X_F0M0 = this->findX_F0M0(pc);
+    const SBTreePositionCache_<T>& pc = sbs.updTreePositionCache(); // "upd" because we're realizing positions now
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
-    const Vec3&     Mx_F = R_FM.x(); // M's x axis, expressed in F
-    const Vec3&     My_F = R_FM.y(); // M's y axis, expressed in F
+    const RotationP& R_FM = X_F0M0.R();
+    const Vec3P&     Mx_F = R_FM.x(); // M's x axis, expressed in F
+    const Vec3P&     My_F = R_FM.y(); // M's y axis, expressed in F
 
-    H_FM(0) = SpatialVec( Mx_F, Vec3(0) );  // x,y ang. vel. in M, exp. in F
-    H_FM(1) = SpatialVec( My_F, Vec3(0) );
+    H_FM(0) = SpatialVecP( Mx_F, Vec3P(0) );  // x,y ang. vel. in M, exp. in F
+    H_FM(1) = SpatialVecP( My_F, Vec3P(0) );
 
-    H_FM(2) = SpatialVec( Vec3(0), Vec3(1,0,0) );   // translations in F
-    H_FM(3) = SpatialVec( Vec3(0), Vec3(0,1,0) );
-    H_FM(4) = SpatialVec( Vec3(0), Vec3(0,0,1) );
+    H_FM(2) = SpatialVecP( Vec3P(0), Vec3P(1,0,0) );   // translations in F
+    H_FM(3) = SpatialVecP( Vec3P(0), Vec3P(0,1,0) );
+    H_FM(4) = SpatialVecP( Vec3P(0), Vec3P(0,0,1) );
 }
 
 // Since the first two rows of the Jacobian above are not constant in F,
@@ -230,27 +236,27 @@ void calcAcrossJointVelocityJacobian(
 // its time derivative in A is the angular velocity of B in A crossed with
 // the vector, i.e., d_A/dt r_B_A = w_AB % r_B_A.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const override
 {
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    const SBTreeVelocityCache& vc = sbs.updTreeVelocityCache(); // "upd" because we're realizing velocities now
-    const Transform  X_F0M0 = this->findX_F0M0(pc);
+    const SBTreePositionCache_<T>& pc = sbs.getTreePositionCache();
+    const SBTreeVelocityCache_<T>& vc = sbs.updTreeVelocityCache(); // "upd" because we're realizing velocities now
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
-    const Vec3&     Mx_F = R_FM.x(); // M's x axis, expressed in F
-    const Vec3&     My_F = R_FM.y(); // M's y axis, expressed in F
+    const RotationP& R_FM = X_F0M0.R();
+    const Vec3P&     Mx_F = R_FM.x(); // M's x axis, expressed in F
+    const Vec3P&     My_F = R_FM.y(); // M's y axis, expressed in F
 
-    const Vec3      w_FM = this->find_w_F0M0(pc,vc); // angular velocity of M in F
+    const Vec3P      w_FM = this->find_w_F0M0(pc,vc); // angular velocity of M in F
 
-    HDot_FM(0) = SpatialVec( w_FM % Mx_F, Vec3(0) );
-    HDot_FM(1) = SpatialVec( w_FM % My_F, Vec3(0) );
+    HDot_FM(0) = SpatialVecP( w_FM % Mx_F, Vec3P(0) );
+    HDot_FM(1) = SpatialVecP( w_FM % My_F, Vec3P(0) );
 
     // For translation in F.
-    HDot_FM(2) = SpatialVec( Vec3(0), Vec3(0) );
-    HDot_FM(3) = SpatialVec( Vec3(0), Vec3(0) );
-    HDot_FM(4) = SpatialVec( Vec3(0), Vec3(0) );
+    HDot_FM(2) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(3) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(4) = SpatialVecP( Vec3P(0), Vec3P(0) );
 }
 
 // CAUTION: we do not zero the unused 4th element of q for Euler angles; it
@@ -261,44 +267,44 @@ void calcAcrossJointVelocityJacobianDot(
 // velocity of child in parent, but expressed in child), while the q 
 // quantity is the derivative of a quaternion or Euler sequence representing 
 // R_FM, i.e. orientation of child in parent.
-void multiplyByN(const SBStateDigest& sbs, bool matrixOnRight, 
-                 const Real* in, Real* out) const override
+void multiplyByN(const SBStateDigest_<T>& sbs, bool matrixOnRight, 
+                 const RealP* in, RealP* out) const override
 {
     assert(sbs.getStage() >= Stage::Position);
     assert(in && out);
 
     const SBModelVars&          mv   = sbs.getModelVars();
-    const SBTreePositionCache&  pc   = sbs.getTreePositionCache();
-    const Vector&               allQ = sbs.getQ();
+    const SBTreePositionCache_<T>&  pc   = sbs.getTreePositionCache();
+    const auto&                 allQ = sbs.getQ();
 
     if (this->getUseEulerAngles(mv)) {
-        const Vec3& q = this->fromQVec3(allQ,0);
-        const Mat32 N_FM = // N here mixes parent and body frames (convenient)
-            Rotation::calcNForBodyXYZInBodyFrame(q)
-                        .getSubMat<3,2>(0,0); // drop 3rd column
+        const Vec3P& q = this->fromQVec3(allQ,0);
+        const Mat<3,2,T> N_FM = // N here mixes parent and body frames (convenient)
+            RotationP::calcNForBodyXYZInBodyFrame(q)
+                        .template getSubMat<3,2>(0,0); // drop 3rd column
         // Translational part of N is identity so just copy in to out.
         if (matrixOnRight) {
-            Row2::updAs(out)   = Row3::getAs(in) * N_FM;
-            Row3::updAs(out+2) = Row3::getAs(in+3);// translation
+            Row<2,T>::updAs(out)   = Row<3,T>::getAs(in) * N_FM;
+            Row<3,T>::updAs(out+2) = Row<3,T>::getAs(in+3);// translation
         } else {
-            Vec3::updAs(out)   = N_FM * Vec2::getAs(in);        
-            Vec3::updAs(out+3) = Vec3::getAs(in+2);// translation
+            Vec3P::updAs(out)   = N_FM * Vec<2,T>::getAs(in);        
+            Vec3P::updAs(out+3) = Vec3P::getAs(in+2);// translation
         }
     } else {
         // Quaternion: N block is only available expecting angular velocity 
         // in the parent frame F, but we have it in M for this joint so we
         // have to calculate N_FM = N_FF*R_FM.
-        const Rotation  R_FM = this->findX_F0M0(pc).R();
-        const Vec4& q = this->fromQuat(allQ);
-        const Mat42 N_FM = (Rotation::calcUnnormalizedNForQuaternion(q)*R_FM)
-                            .getSubMat<4,2>(0,0); // drop 3rd column
+        const RotationP  R_FM = this->findX_F0M0(pc).R();
+        const Vec4P& q = this->fromQuat(allQ);
+        const Mat<4,2,T> N_FM = (RotationP::calcUnnormalizedNForQuaternion(q)*R_FM)
+                            .template getSubMat<4,2>(0,0); // drop 3rd column
         // Translational part of N is identity so just copy in to out.
         if (matrixOnRight) {
-            Row2::updAs(out)   = Row4::getAs(in) * N_FM;
-            Row3::updAs(out+2) = Row3::getAs(in+4); // translation
+            Row<2,T>::updAs(out)   = Row<4,T>::getAs(in) * N_FM;
+            Row<3,T>::updAs(out+2) = Row<3,T>::getAs(in+4); // translation
         } else { // matrix on left
-            Vec4::updAs(out)   = N_FM * Vec2::getAs(in);
-            Vec3::updAs(out+4) = Vec3::getAs(in+2); // translation
+            Vec4P::updAs(out)   = N_FM * Vec<2,T>::getAs(in);
+            Vec3P::updAs(out+4) = Vec3P::getAs(in+2); // translation
         }
     }
 }
@@ -306,73 +312,73 @@ void multiplyByN(const SBStateDigest& sbs, bool matrixOnRight,
 
 // Compute out_u = inv(N) * in_q
 //   or    out_q = in_u * inv(N)
-void multiplyByNInv(const SBStateDigest& sbs, bool matrixOnRight, 
-                    const Real* in, Real* out) const override
+void multiplyByNInv(const SBStateDigest_<T>& sbs, bool matrixOnRight, 
+                    const RealP* in, RealP* out) const override
 {
     assert(sbs.getStage() >= Stage::Position);
     assert(in && out);
 
     const SBModelVars&          mv   = sbs.getModelVars();
-    const SBTreePositionCache&  pc   = sbs.getTreePositionCache();
-    const Vector&               allQ = sbs.getQ();
+    const SBTreePositionCache_<T>&  pc   = sbs.getTreePositionCache();
+    const auto&                 allQ = sbs.getQ();
 
     if (this->getUseEulerAngles(mv)) {
-        const Vec3& q = this->fromQVec3(allQ,0);
-        const Mat23 NInv_MF = Rotation::calcNInvForBodyXYZInBodyFrame(q)
-                                .getSubMat<2,3>(0,0);   // drop 3rd row
+        const Vec3P& q = this->fromQVec3(allQ,0);
+        const Mat<2,3,T> NInv_MF = RotationP::calcNInvForBodyXYZInBodyFrame(q)
+                                .template getSubMat<2,3>(0,0);   // drop 3rd row
         // Translational part of NInv block is identity.
         if (matrixOnRight) {
-            Row3::updAs(out)   = Row2::getAs(in) * NInv_MF;
-            Row3::updAs(out+3) = Row3::getAs(in+2); // translation
+            Row<3,T>::updAs(out)   = Row<2,T>::getAs(in) * NInv_MF;
+            Row<3,T>::updAs(out+3) = Row<3,T>::getAs(in+2); // translation
         } else {
-            Vec2::updAs(out)   = NInv_MF * Vec3::getAs(in);
-            Vec3::updAs(out+2) = Vec3::getAs(in+3); // translation
+            Vec<2,T>::updAs(out)   = NInv_MF * Vec3P::getAs(in);
+            Vec3P::updAs(out+2) = Vec3P::getAs(in+3); // translation
         }
     } else {           
         // Quaternion: NInv block is only available expecting angular 
         // velocity in the parent frame F, but we have it in M for 
         // this joint so we have to calculate NInv_MF = R_MF*NInv_FF.
-        const Rotation  R_FM = this->findX_F0M0(pc).R();
-        const Vec4& q = this->fromQuat(allQ);
-        const Mat24 NInv_MF = (~R_FM*Rotation::calcUnnormalizedNInvForQuaternion(q))
-                                .getSubMat<2,4>(0,0);   // drop 3rd row
+        const RotationP  R_FM = this->findX_F0M0(pc).R();
+        const Vec4P& q = this->fromQuat(allQ);
+        const Mat<2,4,T> NInv_MF = (~R_FM*RotationP::calcUnnormalizedNInvForQuaternion(q))
+                                .template getSubMat<2,4>(0,0);   // drop 3rd row
         // Translational part of NInv block is identity.
         if (matrixOnRight) {
-            Row4::updAs(out)   = Row2::getAs(in) * NInv_MF;
-            Row3::updAs(out+4) = Row3::getAs(in+2); // translation
+            Row<4,T>::updAs(out)   = Row<2,T>::getAs(in) * NInv_MF;
+            Row<3,T>::updAs(out+4) = Row<3,T>::getAs(in+2); // translation
         } else { // matrix on left
-            Vec2::updAs(out)   = NInv_MF * Vec4::getAs(in);
-            Vec3::updAs(out+2) = Vec3::getAs(in+4); // translation
+            Vec<2,T>::updAs(out)   = NInv_MF * Vec4P::getAs(in);
+            Vec3P::updAs(out+2) = Vec3P::getAs(in+4); // translation
         }
     }
 }
 
 // Compute out_q = NDot * in_u
 //   or    out_u = in_q * NDot
-void multiplyByNDot(const SBStateDigest& sbs, bool matrixOnRight, 
-                 const Real* in, Real* out) const override
+void multiplyByNDot(const SBStateDigest_<T>& sbs, bool matrixOnRight, 
+                 const RealP* in, RealP* out) const override
 {
     assert(sbs.getStage() >= Stage::Velocity);
     assert(in && out);
 
     const SBModelVars&          mv      = sbs.getModelVars();
-    const SBTreePositionCache&  pc      = sbs.getTreePositionCache();
-    const Vector&               allQ    = sbs.getQ();
-    const Vector&               allQDot = sbs.getQDot();
+    const SBTreePositionCache_<T>&  pc      = sbs.getTreePositionCache();
+    const auto&                 allQ    = sbs.getQ();
+    const auto&                 allQDot = sbs.getQDot();
 
     if (this->getUseEulerAngles(mv)) {
-        const Vec3& q = this->fromQVec3(allQ,0);
-        const Vec3& qdot = this->fromQVec3(allQDot,0);
-        const Mat32 NDot_FM = // NDot here mixes parent and body frames (convenient)
-            Rotation::calcNDotForBodyXYZInBodyFrame(q, qdot)
-                        .getSubMat<3,2>(0,0); // drop 3rd column
+        const Vec3P& q = this->fromQVec3(allQ,0);
+        const Vec3P& qdot = this->fromQVec3(allQDot,0);
+        const Mat<3,2,T> NDot_FM = // NDot here mixes parent and body frames (convenient)
+            RotationP::calcNDotForBodyXYZInBodyFrame(q, qdot)
+                        .template getSubMat<3,2>(0,0); // drop 3rd column
         // Translational part of NDot is zero so set out to zero.
         if (matrixOnRight) {
-            Row2::updAs(out)   = Row3::getAs(in) * NDot_FM;
-            Row3::updAs(out+2) = 0; // translation
+            Row<2,T>::updAs(out)   = Row<3,T>::getAs(in) * NDot_FM;
+            Row<3,T>::updAs(out+2) = 0; // translation
         } else {
-            Vec3::updAs(out)   = NDot_FM * Vec2::getAs(in);        
-            Vec3::updAs(out+3) = 0; // translation
+            Vec3P::updAs(out)   = NDot_FM * Vec<2,T>::getAs(in);        
+            Vec3P::updAs(out+3) = 0; // translation
         }
     } else {
         // Quaternion: NDot block is only available expecting angular velocity 
@@ -380,89 +386,89 @@ void multiplyByNDot(const SBStateDigest& sbs, bool matrixOnRight,
         // have to differentiate N_FM = N_FF*R_FM, giving
         // NDot_FM = NDot_FF*R_FM + N_FF*RDot_FM with RDot_FM = w_FM x R_FM
         // and w_FM expressed in F.
-        const Rotation  R_FM = this->findX_F0M0(pc).R();
-        const Vec4& q    = this->fromQuat(allQ);
-        const Vec4& qdot = this->fromQuat(allQDot);
-        const Vec3  w_FM_M = Vec3(this->fromU(sbs.getU())[0],
+        const RotationP  R_FM = this->findX_F0M0(pc).R();
+        const Vec4P& q    = this->fromQuat(allQ);
+        const Vec4P& qdot = this->fromQuat(allQDot);
+        const Vec3P  w_FM_M = Vec3P(this->fromU(sbs.getU())[0],
                                   this->fromU(sbs.getU())[1], 0);
-        const Mat33 RDot_FM = crossMat(R_FM*w_FM_M) * R_FM.asMat33();
-        const Mat42 NDot_FM = 
-           (Rotation::calcUnnormalizedNDotForQuaternion(qdot)*R_FM
-            + Rotation::calcUnnormalizedNForQuaternion(q)*RDot_FM)
-                        .getSubMat<4,2>(0,0); // drop 3rd column
+        const Mat33P RDot_FM = crossMat(R_FM*w_FM_M) * R_FM.asMat33();
+        const Mat<4,2,T> NDot_FM = 
+           (RotationP::calcUnnormalizedNDotForQuaternion(qdot)*R_FM
+            + RotationP::calcUnnormalizedNForQuaternion(q)*RDot_FM)
+                        .template getSubMat<4,2>(0,0); // drop 3rd column
         // Translational part of N is identity so just copy in to out.
         if (matrixOnRight) {
-            Row2::updAs(out)   = Row4::getAs(in) * NDot_FM;
-            Row3::updAs(out+2) = 0; // translation
+            Row<2,T>::updAs(out)   = Row<4,T>::getAs(in) * NDot_FM;
+            Row<3,T>::updAs(out+2) = 0; // translation
         } else { // matrix on left
-            Vec4::updAs(out)   = NDot_FM * Vec2::getAs(in);
-            Vec3::updAs(out+4) = 0; // translation
+            Vec4P::updAs(out)   = NDot_FM * Vec<2,T>::getAs(in);
+            Vec3P::updAs(out+4) = 0; // translation
         }
     }
 }
 
 
 void calcQDot(
-    const SBStateDigest&   sbs,
-    const Real*            u,
-    Real*                  qdot) const override
+    const SBStateDigest_<T>&   sbs,
+    const RealP*            u,
+    RealP*                  qdot) const override
 {
     const SBModelVars&          mv = sbs.getModelVars();
-    const SBTreePositionCache&  pc = sbs.getTreePositionCache();
-    const Vec3  w_FM_M = Vec3(u[0], u[1], 0); // Angular velocity in M
-    const Vec3& v_FM   = Vec3::getAs(&u[2]);  // Linear velocity in F
+    const SBTreePositionCache_<T>&  pc = sbs.getTreePositionCache();
+    const Vec3P  w_FM_M = Vec3P(u[0], u[1], 0); // Angular velocity in M
+    const Vec3P& v_FM   = Vec3P::getAs(&u[2]);  // Linear velocity in F
 
     if (this->getUseEulerAngles(mv)) {
-        const Vec3& theta = this->fromQVec3(sbs.getQ(),0); // Euler angles
-        Vec3::updAs(qdot) = Rotation::convertAngVelInBodyFrameToBodyXYZDot(theta,
+        const Vec3P& theta = this->fromQVec3(sbs.getQ(),0); // Euler angles
+        Vec3P::updAs(qdot) = RotationP::convertAngVelInBodyFrameToBodyXYZDot(theta,
                                         w_FM_M); // need w in *body*, not parent
-        Vec3::updAs(&qdot[3]) = v_FM;
+        Vec3P::updAs(&qdot[3]) = v_FM;
         qdot[6] = 0;
     } else {
-        const Rotation  R_FM = this->findX_F0M0(pc).R();
-        const Vec4& quat = this->fromQuat(sbs.getQ());
-        Vec4::updAs(qdot)   = Rotation::convertAngVelToQuaternionDot(quat,
+        const RotationP  R_FM = this->findX_F0M0(pc).R();
+        const Vec4P& quat = this->fromQuat(sbs.getQ());
+        Vec4P::updAs(qdot)   = RotationP::convertAngVelToQuaternionDot(quat,
                                         R_FM*w_FM_M); // need w in *parent* frame here
-        Vec3::updAs(&qdot[4]) = v_FM;
+        Vec3P::updAs(&qdot[4]) = v_FM;
     }
 }
 
 void calcQDotDot(
-    const SBStateDigest&   sbs,
-    const Real*            udot, 
-    Real*                  qdotdot) const override
+    const SBStateDigest_<T>&   sbs,
+    const RealP*            udot, 
+    RealP*                  qdotdot) const override
 {
     const SBModelVars&          mv = sbs.getModelVars();
-    const SBTreePositionCache&  pc = sbs.getTreePositionCache();
-    const Vec3  w_FM_M     = Vec3(this->fromU(sbs.getU())[0], this->fromU(sbs.getU())[1], 0); // Angular velocity of M in F, exp. in M
-    const Vec3& v_FM       = this->fromUVec3(sbs.getU(),2); // linear velocity of M in F, expressed in M
-    const Vec3  w_FM_M_dot = Vec3(udot[0], udot[1], 0);
-    const Vec3& v_FM_dot   = Vec3::getAs(&udot[2]);
+    const SBTreePositionCache_<T>&  pc = sbs.getTreePositionCache();
+    const Vec3P  w_FM_M     = Vec3P(this->fromU(sbs.getU())[0], this->fromU(sbs.getU())[1], 0); // Angular velocity of M in F, exp. in M
+    const Vec3P& v_FM       = this->fromUVec3(sbs.getU(),2); // linear velocity of M in F, expressed in M
+    const Vec3P  w_FM_M_dot = Vec3P(udot[0], udot[1], 0);
+    const Vec3P& v_FM_dot   = Vec3P::getAs(&udot[2]);
 
     if (this->getUseEulerAngles(mv)) {
-        const Vec3& theta  = this->fromQVec3(sbs.getQ(),0); // Euler angles
-        Vec3::updAs(qdotdot) = Rotation::convertAngVelDotInBodyFrameToBodyXYZDotDot
+        const Vec3P& theta  = this->fromQVec3(sbs.getQ(),0); // Euler angles
+        Vec3P::updAs(qdotdot) = RotationP::convertAngVelDotInBodyFrameToBodyXYZDotDot
                                          (theta, w_FM_M, w_FM_M_dot); // needed in body frame here
-        Vec3::updAs(&qdotdot[3]) = v_FM_dot;
+        Vec3P::updAs(&qdotdot[3]) = v_FM_dot;
         qdotdot[6] = 0;
     } else {
-        const Rotation  R_FM = this->findX_F0M0(pc).R();
-        const Vec4& quat  = this->fromQuat(sbs.getQ());
-        Vec4::updAs(qdotdot)   = Rotation::convertAngVelDotToQuaternionDotDot
+        const RotationP  R_FM = this->findX_F0M0(pc).R();
+        const Vec4P& quat  = this->fromQuat(sbs.getQ());
+        Vec4P::updAs(qdotdot)   = RotationP::convertAngVelDotToQuaternionDotDot
                                          (quat,R_FM*w_FM_M,R_FM*w_FM_M_dot); // needed in parent frame
-        Vec3::updAs(&qdotdot[4]) = v_FM_dot;
+        Vec3P::updAs(&qdotdot[4]) = v_FM_dot;
     }
 }
 
 int  getMaxNQ()                   const override {return 7;}
 int  getNQInUse(const SBModelVars& mv) const override {return this->getUseEulerAngles(mv) ? 6 : 7;} 
-bool isUsingQuaternion(const SBStateDigest& sbs, MobilizerQIndex& startOfQuaternion) const override {
+bool isUsingQuaternion(const SBStateDigest_<T>& sbs, MobilizerQIndex& startOfQuaternion) const {
     if (this->getUseEulerAngles(sbs.getModelVars())) {startOfQuaternion.invalidate(); return false;}
     startOfQuaternion = MobilizerQIndex(0); // quaternion comes first
     return true;
 }
 
-void setMobilizerDefaultPositionValues(const SBModelVars& mv, Vector& q) const override
+void setMobilizerDefaultPositionValues(const SBModelVars& mv, Vector& q) const
 {
     if (this->getUseEulerAngles(mv)) {
         this->toQVec3(q,4) = Vec3(0); // TODO: kludge, clear unused element
@@ -476,7 +482,7 @@ void setMobilizerDefaultPositionValues(const SBModelVars& mv, Vector& q) const o
 bool enforceQuaternionConstraints(
     const SBStateDigest& sbs, 
     Vector&             q,
-    Vector&             qErrest) const override
+    Vector&             qErrest) const
 {
     if (this->getUseEulerAngles(sbs.getModelVars())) 
         return false; // no change
@@ -492,14 +498,14 @@ bool enforceQuaternionConstraints(
     return true;
 }
 
-void convertToEulerAngles(const Vector& inputQ, Vector& outputQ) const override
+void convertToEulerAngles(const Vector& inputQ, Vector& outputQ) const
 {
     this->toQVec3(outputQ, 4) = Vec3(0); // clear unused element
     this->toQVec3(outputQ, 3) = this->fromQVec3(inputQ, 4);
     this->toQVec3(outputQ, 0) = Rotation(Quaternion(this->fromQuat(inputQ))).convertRotationToBodyFixedXYZ();
 }
 
-void convertToQuaternions(const Vector& inputQ, Vector& outputQ) const override
+void convertToQuaternions(const Vector& inputQ, Vector& outputQ) const
 {
     this->toQVec3(outputQ, 4) = this->fromQVec3(inputQ, 3);
     Rotation rot;
@@ -509,6 +515,11 @@ void convertToQuaternions(const Vector& inputQ, Vector& outputQ) const override
 
 
 };
+
+// The default Real precision version.
+typedef RBNodeFreeLine_<Real> RBNodeFreeLine;
+
+} // namespace SimTK
 
 
 

@@ -1,0 +1,165 @@
+#ifndef SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_TRANSLATION_H_
+#define SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_TRANSLATION_H_
+
+/* -------------------------------------------------------------------------- *
+ *                               Simbody(tm)                                  *
+ * -------------------------------------------------------------------------- *
+ * This is part of the SimTK biosimulation toolkit originating from           *
+ * Simbios, the NIH National Center for Physics-Based Simulation of           *
+ * Biological Structures at Stanford, funded under the NIH Roadmap for        *
+ * Medical Research, grant U54 GM072970. See https://simtk.org/home/simbody.  *
+ *                                                                            *
+ * Portions copyright (c) 2005-12 Stanford University and the Authors.        *
+ * Authors: Michael Sherman                                                   *
+ * Contributors: Derived from IVM code written by Charles Schwieters          *
+ *                                                                            *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
+ * not use this file except in compliance with the License. You may obtain a  *
+ * copy of the License at http://www.apache.org/licenses/LICENSE-2.0.         *
+ *                                                                            *
+ * Unless required by applicable law or agreed to in writing, software        *
+ * distributed under the License is distributed on an "AS IS" BASIS,          *
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   *
+ * See the License for the specific language governing permissions and        *
+ * limitations under the License.                                             *
+ * -------------------------------------------------------------------------- */
+
+/**@file
+ * Define the RigidBodyNode that implements a Translation mobilizer, also
+ * known as a Cartesian joint.
+ */
+
+#include "RigidBodyNode.h"
+#include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
+
+    // TRANSLATION (CARTESIAN) //
+
+// Translate (Cartesian) joint. This provides three degrees of translational 
+// freedom which is suitable (e.g.) for connecting a free atom to ground. The 
+// Cartesian directions are the axes of the parent body's F frame, with M=F 
+// when all 3 coords are 0, and the orientation of M in F is 0 (identity) 
+// forever.
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeTranslate_ : public RigidBodyNodeSpec_<T, 3, true> {
+public:
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 3, true> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "translate"; }
+
+RBNodeTranslate_(const MassProperties_<T>& mProps_B,
+                bool                  isReversed,
+                UIndex&               nextUSlot,
+                USquaredIndex&        nextUSqSlot,
+                QIndex&               nextQSlot)
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+                         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed, 
+                         isReversed)
+{
+    this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
+}
+
+    // Implementations of virtual methods.
+
+void setQToFitRotationImpl(const SBStateDigest& sbs, const Rotation& R_FM, 
+                           Vector& q) const {
+    // the only rotation this mobilizer can represent is identity
+}
+void setQToFitTranslationImpl(const SBStateDigest& sbs, const Vec3&  p_FM, 
+                              Vector& q) const {
+    // here's what this joint is really good at!
+    this->toQ(q) = p_FM;
+}
+
+void setUToFitAngularVelocityImpl(const SBStateDigest& sbs, const Vector&, 
+                                  const Vec3& w_FM, Vector& u) const {
+    // The only angular velocity this can represent is zero.
+}
+void setUToFitLinearVelocityImpl
+   (const SBStateDigest& sbs, const Vector&, const Vec3& v_FM, Vector& u) const
+{
+    // linear velocity is in a Cartesian joint's sweet spot
+    this->toU(u) = v_FM;
+}
+
+// A translation joint doesn't need to cache any q calculations.
+int calcQPoolSize(const SBModelVars&) const
+{   return 0; }
+
+// Nothing to precalculate.
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q, int nq,
+                             RealP* qCache,  int nQCache,
+                             RealP* qErr,    int nQErr) const
+{
+    assert(q && nq==3 && nQCache==0 && nQErr==0);
+}
+
+// This is free.
+void calcX_FM(const SBStateDigest_<T>& sbs,
+              const RealP* q,      int nq,
+              const RealP* qCache, int nQCache,
+              TransformP&  X_FM) const
+{
+    assert(q && nq==3 && nQCache==0);
+    // Translation vector q is expressed in F (and M since they have same 
+    // orientation). A translation (Cartesian) joint can't change orientation. 
+    X_FM = TransformP(RotationP(), Vec3P::getAs(&q[0]));
+}
+
+// Generalized speeds together are the velocity of M's origin in the F frame,
+// expressed in F. So individually they produce velocity along F's x,y,z
+// axes respectively.
+void calcAcrossJointVelocityJacobian(
+    const SBStateDigest_<T>& sbs,
+    HType&               H_FM) const
+{
+    H_FM(0) = SpatialVecP( Vec3P(0), Vec3P(1,0,0) );
+    H_FM(1) = SpatialVecP( Vec3P(0), Vec3P(0,1,0) );
+    H_FM(2) = SpatialVecP( Vec3P(0), Vec3P(0,0,1) );
+}
+
+// Since the Jacobian above is constant in F, its time derivative is zero.
+void calcAcrossJointVelocityJacobianDot(
+    const SBStateDigest_<T>& sbs,
+    HType&               HDot_FM) const
+{
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(1) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(2) = SpatialVecP( Vec3P(0), Vec3P(0) );
+}
+
+// Override the computation of reverse-H for this simple mobilizer.
+void calcReverseMobilizerH_FM(
+    const SBStateDigest_<T>& sbs,
+    HType&               H_FM) const
+{
+    H_FM(0) = SpatialVecP( Vec3P(0), Vec3P(-1, 0, 0) );
+    H_FM(1) = SpatialVecP( Vec3P(0), Vec3P( 0,-1, 0) );
+    H_FM(2) = SpatialVecP( Vec3P(0), Vec3P( 0, 0,-1) );
+}
+
+// Override the computation of reverse-HDot for this simple mobilizer.
+void calcReverseMobilizerHDot_FM(
+    const SBStateDigest_<T>& sbs,
+    HType&               HDot_FM) const
+{
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(1) = SpatialVecP( Vec3P(0), Vec3P(0) );
+    HDot_FM(2) = SpatialVecP( Vec3P(0), Vec3P(0) );
+}
+
+};
+
+// The default Real precision version.
+typedef RBNodeTranslate_<Real> RBNodeTranslate;
+
+} // namespace SimTK
+
+
+#endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_TRANSLATION_H_
+

@@ -29,8 +29,8 @@
  */
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "RigidBodyNode.h"
-#include "RigidBodyNodeSpec.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec.h"
 #include "MobilizedBodyImpl.h" // need Custom::ImplementationImpl
 
 

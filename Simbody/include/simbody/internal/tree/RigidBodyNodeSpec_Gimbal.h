@@ -28,9 +28,10 @@
  * Define the RigidBodyNode that implements a Gimbal mobilizer.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
 
 
     // GIMBAL //
@@ -48,21 +49,25 @@
 // modeling option allows the Ball to be switched to use Euler angles when 
 // convenient.
 
-class RBNodeGimbal : public RigidBodyNodeSpec<3, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeGimbal_ : public RigidBodyNodeSpec_<T, 3, false> {
 public:
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 3, false> Spec;
 
-typedef typename RigidBodyNodeSpec<3, false>::HType HType;
-virtual const char* type() { return "gimbal"; }
+typedef typename Spec::HType HType;
+const char* type() const override { return "gimbal"; }
 
-RBNodeGimbal( const MassProperties& mProps_B,
+RBNodeGimbal_(const MassProperties_<T>& mProps_B,
               bool                  isReversed,
               UIndex&               nextUSlot,
               USquaredIndex&        nextUSqSlot,
               QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<3, false>
-       (mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-        RigidBodyNode::QDotIsAlwaysTheSameAsU, 
-        RigidBodyNode::QuaternionIsNeverUsed, 
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+        Base::QDotIsAlwaysTheSameAsU, 
+        Base::QuaternionIsNeverUsed, 
         isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
@@ -117,32 +122,32 @@ int calcQPoolSize(const SBModelVars& mv) const
 // This is expensive since we have three sin/cos computations and a divide
 // to do, approx. 150 flops. But we hope to re-use these calculations several
 // times before we're done with a complete realization.
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q,      int nq,
-                             Real*       qCache, int nQCache,
-                             Real*       qErr,   int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q,      int nq,
+                             RealP*       qCache, int nQCache,
+                             RealP*       qErr,   int nQErr) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize && nQErr==0);
 
-    const Real cy = std::cos(q[1]);
-    Vec3::updAs(&qCache[CosQ]) =
-        Vec3(std::cos(q[0]), cy, std::cos(q[2]));
-    Vec3::updAs(&qCache[SinQ]) =
-        Vec3(std::sin(q[0]), std::sin(q[1]), std::sin(q[2]));
+    const RealP cy = cos(q[1]);
+    Vec3P::updAs(&qCache[CosQ]) =
+        Vec3P(cos(q[0]), cy, cos(q[2]));
+    Vec3P::updAs(&qCache[SinQ]) =
+        Vec3P(sin(q[0]), sin(q[1]), sin(q[2]));
     qCache[OOCosQy] = 1/cy; // trouble at 90 or 270 (-90) degrees
 }
 
 // Because of the precalculations we can calculate the cross-mobilizer
 // transform in only 18 flops.
-void calcX_FM(const SBStateDigest& sbs,
-              const Real* q,      int nq,
-              const Real* qCache, int nQCache,
-              Transform&  X_F0M0) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+              const RealP* q,      int nq,
+              const RealP* qCache, int nQCache,
+              TransformP&  X_F0M0) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize);
 
     X_F0M0.updR().setRotationToBodyFixedXYZ // 18 flops
-        (Vec3::getAs(&qCache[CosQ]), Vec3::getAs(&qCache[SinQ]));
+        (Vec3P::getAs(&qCache[CosQ]), Vec3P::getAs(&qCache[SinQ]));
     X_F0M0.updP() = 0; // This joint can't translate.
 }
 
@@ -154,53 +159,58 @@ void calcX_FM(const SBStateDigest& sbs,
 // Using the precalculations this requires only 3 flops, although there is
 // a fair bit of poking around in memory required.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
     const SBModelCache&        mc = sbs.getModelCache();
     // Use "upd" here because we're realizing positions now.
-    const SBTreePositionCache& pc = sbs.updTreePositionCache();
-    const Real*                pool = this->getQPool(mc, pc);
+    const SBTreePositionCache_<T>& pc = sbs.updTreePositionCache();
+    const RealP*                pool = this->getQPool(mc, pc);
 
-    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
-    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
+    const RealP c0 = pool[CosQ], c1 = pool[CosQ+1];
+    const RealP s0 = pool[SinQ], s1 = pool[SinQ+1];
 
-    // Fill in columns of H_FM. See Rotation::calcNInvForBodyXYZInParentFrame().
-    H_FM(0) = SpatialVec( Vec3(1,     0,    0),    Vec3(0) );
-    H_FM(1) = SpatialVec( Vec3(0,    c0,    s0),   Vec3(0) );
-    H_FM(2) = SpatialVec( Vec3(s1, -s0*c1, c0*c1), Vec3(0) );
+    // Fill in columns of H_FM. See RotationP::calcNInvForBodyXYZInParentFrame().
+    H_FM(0) = SpatialVecP( Vec3P(1,     0,    0),    Vec3P(0) );
+    H_FM(1) = SpatialVecP( Vec3P(0,    c0,    s0),   Vec3P(0) );
+    H_FM(2) = SpatialVecP( Vec3P(s1, -s0*c1, c0*c1), Vec3P(0) );
 }
 
 // Differentiate H_FM to get HDot_FM. Note that this depends on qdot:
 //    d/dt cos(q0) = -sin(q0)*qdot0, etc.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
     const SBModelCache&        mc = sbs.getModelCache();
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreePositionCache_<T>& pc = sbs.getTreePositionCache();
 
-    const Real* pool = this->getQPool(mc, pc);
-    const Real c0 = pool[CosQ], c1 = pool[CosQ+1];
-    const Real s0 = pool[SinQ], s1 = pool[SinQ+1];
+    const RealP* pool = this->getQPool(mc, pc);
+    const RealP c0 = pool[CosQ], c1 = pool[CosQ+1];
+    const RealP s0 = pool[SinQ], s1 = pool[SinQ+1];
 
     // Use "upd" here because we're realizing velocities now.
-    const Vec3& qdot = this->fromQ(sbs.updQDot());
-    const Real qd0 = qdot[0], qd1 = qdot[1];
+    const Vec3P& qdot = this->fromQ(sbs.updQDot());
+    const RealP qd0 = qdot[0], qd1 = qdot[1];
 
-    const Real dc0 = -s0*qd0, dc1 = -s1*qd1; // derivatives of c0,c1,s0,s1
-    const Real ds0 =  c0*qd0, ds1 =  c1*qd1;
+    const RealP dc0 = -s0*qd0, dc1 = -s1*qd1; // derivatives of c0,c1,s0,s1
+    const RealP ds0 =  c0*qd0, ds1 =  c1*qd1;
 
     // Compare with H_FM above.
-    HDot_FM(0) = SpatialVec(Vec3(0,         0,              0),       Vec3(0));
-    HDot_FM(1) = SpatialVec(Vec3(0,        dc0,            ds0),      Vec3(0));
-    HDot_FM(2) = SpatialVec(Vec3(ds1, -ds0*c1-s0*dc1, dc0*c1+c0*dc1), Vec3(0));
+    HDot_FM(0) = SpatialVecP(Vec3P(0,         0,              0),       Vec3P(0));
+    HDot_FM(1) = SpatialVecP(Vec3P(0,        dc0,            ds0),      Vec3P(0));
+    HDot_FM(2) = SpatialVecP(Vec3P(ds1, -ds0*c1-s0*dc1, dc0*c1+c0*dc1), Vec3P(0));
 }
 
 // Can use default for calcQDot, multiplyByN, etc., since qdot==u for Gimbal
 // mobilizer.
 
 };
+
+// The default Real precision version.
+typedef RBNodeGimbal_<Real> RBNodeGimbal;
+
+} // namespace SimTK
 
 
 

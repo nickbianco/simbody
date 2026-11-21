@@ -131,20 +131,10 @@ struct Parameters {
     Real m_length{NaN};   // the required distance between Sf and Sb
 };
 
-struct PositionCache {
-    Vec3 p_FSf_A, p_BSb_A;  // stations expressed in A
-    Vec3 p_SfSb_A;          // vector from Sf to Sb, exp. in A
-    Real r, oor;            // r=||p_SfSb_A||; oor=1/r (might be Infinity)
-    UnitVec3 Cz_A;          // force application direction, usually p_SfSb/r
-    bool isSingular;        // if r is too small to be useful
-};
-
-struct VelocityCache {
-    Vec3 wXwX_p_FSf_A;      // w_AF x (w_AF x p_FSf_A)  [coriolis accel.]
-    Vec3 wXwX_p_BSb_A;      // w_AB x (w_AB x p_BSb_A)  [coriolis accel.]
-    Vec3 pd_SfSb_A;         // v_ASb - vASf
-    Vec3 Czd_A;             // d/dt_A Cz_A -- depends on isSingular
-};
+// The position and velocity quantities that are cached (see
+// RodConstraintKernel in ConstraintKernels.h).
+using PositionCache = RodConstraintKernel::PositionCache<Real>;
+using VelocityCache = RodConstraintKernel::VelocityCache<Real>;
 
 RodImpl() : ConstraintImpl(1, 0, 0), 
             m_def_p_FSf(0), m_def_p_BSb(0), m_def_length(NaN) {}
@@ -179,11 +169,17 @@ const VelocityCache& ensureVelocityCacheRealized(const State& state) const;
 
 // Implementation of virtuals required for holonomic constraints.
 
+// The equations above are in RodConstraintKernel (ConstraintKernels.h),
+// which is shared with other scalar types.
+RodConstraintKernel getKernel(const State& s) const {
+    const Parameters& params = getParameters(s);
+    return RodConstraintKernel{params.m_p_FSf, params.m_p_BSb, 
+                               params.m_length};
+}
+
 /*  --------------------------------
     perr = ||p_SfSb|| - d
     --------------------------------
-    ~60 flops
-
 Note that the give State does not necessarily correspond to the given X_AB
 and constrainedQ so we can't cache the results.
 
@@ -198,21 +194,8 @@ void calcPositionErrorsVirtual
     const override
 {
     assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size() == 1);
-
-    const Parameters& params = getParameters(s);
-    const Vec3&       p_FSf = params.m_p_FSf;
-    const Vec3&       p_BSb = params.m_p_BSb;
-    const Real        d     = params.m_length;
-
-    // 36 flops for these two together.
-    const Vec3 p_ASf =  findStationLocation(allX_AB, m_mobod_F, p_FSf); 
-    const Vec3 p_ASb =  findStationLocation(allX_AB, m_mobod_B, p_BSb); 
-
-    const Vec3 p_SfSb_A = p_ASb - p_ASf;    //  3 flops
-    const Real r = p_SfSb_A.norm();         // ~20 flops
-
-    // Calculate this scalar using A-frame vectors; any frame would have done.
-    perr[0] = r - d;  //  1 flop
+    getKernel(s).calcPositionErrors(allX_AB[m_mobod_F], allX_AB[m_mobod_B],
+                                    &perr[0]);
 }
 
 /*  --------------------------------
@@ -221,8 +204,6 @@ void calcPositionErrorsVirtual
     and   Cz = {p_SfSb_A / r,  r!=0
                {Fz_A,          r==0
     --------------------------------
-    32 flops if position info is already available.
-
 Note that we can't cache the velocity results here because we don't know that
 V_AB and qdot were taken from the given State.
 */
@@ -234,18 +215,8 @@ void calcPositionDotErrorsVirtual
     const override 
 {
     assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size() == 1);
-    const PositionCache& pc = ensurePositionCacheRealized(s);
-
-    const SpatialVec& V_AF = allV_AB[m_mobod_F];
-    const Vec3& w_AF = V_AF[0]; const Vec3& v_AF = V_AF[1];
-
-    const SpatialVec& V_AB = allV_AB[m_mobod_B];
-    const Vec3& w_AB = V_AB[0]; const Vec3& v_AB = V_AB[1];
-
-    const Vec3 v_ASf = v_AF + w_AF % pc.p_FSf_A;        // 12 flops
-    const Vec3 v_ASb = v_AB + w_AB % pc.p_BSb_A;        // 12 flops
-    const Vec3 pd_SfSb_A = v_ASb - v_ASf;               //  3 flops
-    pverr[0] = ~pd_SfSb_A * pc.Cz_A;                    //  5 flops
+    getKernel(s).calcPositionDotErrors(ensurePositionCacheRealized(s),
+        allV_AB[m_mobod_F], allV_AB[m_mobod_B], &pverr[0]);
 }
 
 /*  ------------------------------------------------------------
@@ -256,7 +227,6 @@ void calcPositionDotErrorsVirtual
     and   Czd = d/dt_A Cz = {(pd_SfSb - Cz * (pd_SfSb . Cz))/r
                             {w_AF x Fz_A,     r==0
     ------------------------------------------------------------ 
-    44 flops if position & velocity info already calculated
 */
 void calcPositionDotDotErrorsVirtual      
    (const State&                                    s,      // Stage::Velocity
@@ -266,31 +236,12 @@ void calcPositionDotDotErrorsVirtual
     const override
 {
     assert(allA_AB.size()==2&&constrainedQDotDot.size()==0&&paerr.size()==1);
-
-    // Ensuring the velocity cache is realized also ensures that the position
-    // cache has been realized.
     const VelocityCache& vc = ensureVelocityCacheRealized(s);
     const PositionCache& pc = getPositionCache(s);
-
-    // 30 flops for these two together.
-    const Vec3 a_ASf = findStationInAAcceleration(s, allA_AB, m_mobod_F, 
-                                                  pc.p_FSf_A, vc.wXwX_p_FSf_A);
-    const Vec3 a_ASb = findStationInAAcceleration(s, allA_AB, m_mobod_B, 
-                                                  pc.p_BSb_A, vc.wXwX_p_BSb_A);
-
-    const Vec3 pdd_SfSb_A = a_ASb - a_ASf; // 2nd deriv in A,        3 flops
-    paerr[0] = ~pdd_SfSb_A * pc.Cz_A + ~vc.pd_SfSb_A * vc.Czd_A; // 11 flops
+    getKernel(s).calcPositionDotDotErrors(pc, vc, 
+        allA_AB[m_mobod_F], allA_AB[m_mobod_B], &paerr[0]);
 }
 
-// Because the normal force is applied along the line between the points, it
-// does not matter where along that line we apply the force -- the force and
-// resulting moment are the same anywhere along the line. Thus we are not 
-// required to use the same point in space here -- for convenience we'll just
-// apply forces to the defining end points, whose locations we have available.
-//
-// apply f=lambda*Cz to the end point on body B (B2),
-//       -f          to the end point on body F (B1)
-// 33 flops if position info already available.
 void addInPositionConstraintForcesVirtual
    (const State&                                    s,      // Stage::Position
     const Array_<Real>&                             multipliers, // mp of these
@@ -299,16 +250,14 @@ void addInPositionConstraintForcesVirtual
     const override
 {
     assert(multipliers.size()==1&&bodyForcesInA.size()==2&&qForces.size()==0);
-    const Real lambda = multipliers[0];
-
-    const PositionCache& pc = ensurePositionCacheRealized(s);
-
-    const Vec3 force_A = lambda * pc.Cz_A;     // 3 flops
-
-    // 30 flops for the next two calls
-    addInStationInAForce(pc.p_BSb_A, force_A, bodyForcesInA[m_mobod_B]);
-    subInStationInAForce(pc.p_FSf_A, force_A, bodyForcesInA[m_mobod_F]);
+    getKernel(s).addInPositionConstraintForces(ensurePositionCacheRealized(s),
+        &multipliers[0], bodyForcesInA[m_mobod_F], bodyForcesInA[m_mobod_B]);
 }
+
+void createConstraintNode(ConstraintNodeFactory& factory,
+                          const ConstraintNodeInfo& info,
+                          const State& s) const override
+{   factory.createRod(info, m_mobod_F, m_mobod_B, getKernel(s)); }
 
 SimTK_DOWNCAST(RodImpl, ConstraintImpl);
 //------------------------------------------------------------------------------

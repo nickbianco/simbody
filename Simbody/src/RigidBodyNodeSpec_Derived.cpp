@@ -26,24 +26,24 @@
  * RigidBodyNodeSpec that aren't defined in the headers.
  */
 
-#include "RigidBodyNodeSpec_Pin.h"
-#include "RigidBodyNodeSpec_Slider.h"
-#include "RigidBodyNodeSpec_Cylinder.h"
-#include "RigidBodyNodeSpec_SphericalCoords.h"
-#include "RigidBodyNodeSpec_Ball.h"
-#include "RigidBodyNodeSpec_Ellipsoid.h"
-#include "RigidBodyNodeSpec_Free.h"
-#include "RigidBodyNodeSpec_Screw.h"
-#include "RigidBodyNodeSpec_Universal.h"
-#include "RigidBodyNodeSpec_PolarCoords.h"
-#include "RigidBodyNodeSpec_Planar.h"
-#include "RigidBodyNodeSpec_Gimbal.h"
-#include "RigidBodyNodeSpec_Bushing.h"
-#include "RigidBodyNodeSpec_FreeLine.h"
-#include "RigidBodyNodeSpec_LineOrientation.h"
-#include "RigidBodyNodeSpec_CantileverFreeBeam.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Pin.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Slider.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Cylinder.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_SphericalCoords.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Ball.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Ellipsoid.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Free.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Screw.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Universal.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_PolarCoords.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Planar.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Gimbal.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Bushing.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_FreeLine.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_LineOrientation.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_CantileverFreeBeam.h"
 #include "RigidBodyNodeSpec_Custom.h"
-#include "RigidBodyNodeSpec_Translation.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Translation.h"
 
     /////////////////////////////////////////////////////////
     // MoblizedBodyImpl::createRigidBodyNode() definitions //
@@ -53,6 +53,7 @@
 // These probably don't belong here.
 
 #include "MobilizedBodyImpl.h"
+#include "simbody/internal/tree/RigidBodyNodeFactory.h"
 
 RigidBodyNode* MobilizedBody::PinImpl::createRigidBodyNode(
     UIndex&        nextUSlot,
@@ -206,6 +207,13 @@ RigidBodyNode* MobilizedBody::EllipsoidImpl::createRigidBodyNode(
         nextUSlot, nextUSqSlot, nextQSlot);
 }
 
+namespace SimTK {
+template <> const Vec3& RBNodeEllipsoid_<Real>::
+getRadii(const SBStateDigest& sbs) const {
+    return impl->getRadii(sbs.getState());
+}
+}
+
 RigidBodyNode* MobilizedBody::LineOrientationImpl::createRigidBodyNode(
     UIndex&        nextUSlot,
     USquaredIndex& nextUSqSlot,
@@ -287,3 +295,71 @@ RigidBodyNode* MobilizedBody::CustomImpl::createRigidBodyNode(
     }
 }
 
+
+    //////////////////////////////////////////////////////////////////////////
+    // MobilizedBodyImpl::createRigidBodyNode(RigidBodyNodeFactory&) visitors //
+    //////////////////////////////////////////////////////////////////////////
+
+// These create the RigidBodyNode for a scalar type other than Real by calling
+// the factory's method for each mobilizer type. See
+// simbody/internal/tree/RigidBodyNodeFactory.h.
+#define SimTK_RBNODE_FACTORY_VISIT(Mobilizer)                                  \
+void MobilizedBody::Mobilizer##Impl::createRigidBodyNode(                     \
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const       \
+{   factory.create##Mobilizer(info); }
+
+SimTK_RBNODE_FACTORY_VISIT(Ground)
+SimTK_RBNODE_FACTORY_VISIT(Weld)
+SimTK_RBNODE_FACTORY_VISIT(Pin)
+SimTK_RBNODE_FACTORY_VISIT(Slider)
+SimTK_RBNODE_FACTORY_VISIT(Universal)
+SimTK_RBNODE_FACTORY_VISIT(Cylinder)
+SimTK_RBNODE_FACTORY_VISIT(BendStretch)
+SimTK_RBNODE_FACTORY_VISIT(Planar)
+SimTK_RBNODE_FACTORY_VISIT(Gimbal)
+SimTK_RBNODE_FACTORY_VISIT(Bushing)
+SimTK_RBNODE_FACTORY_VISIT(Ball)
+SimTK_RBNODE_FACTORY_VISIT(Translation)
+SimTK_RBNODE_FACTORY_VISIT(Free)
+SimTK_RBNODE_FACTORY_VISIT(LineOrientation)
+SimTK_RBNODE_FACTORY_VISIT(FreeLine)
+
+#undef SimTK_RBNODE_FACTORY_VISIT
+
+// These mobilizers' nodes also take parameters.
+
+// FunctionBased mobilizers (such as OpenSim's CustomJoint) are Custom
+// mobilizers with a built-in implementation; other Custom mobilizers can't be
+// used with other scalar types.
+void MobilizedBody::FunctionBasedImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{
+    std::vector<std::vector<int>> indices;
+    for (const Array_<int>& c : coordIndices)
+        indices.emplace_back(c.begin(), c.end());
+    factory.createFunctionBased(info, nu,
+        std::vector<const Function*>(functions.begin(), functions.end()),
+        indices, kernel);
+}
+
+void MobilizedBody::CustomImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{
+    if (const auto* functionBased = 
+            dynamic_cast<const FunctionBasedImpl*>(&getImplementation()))
+        functionBased->createRigidBodyNode(factory, info);
+    else
+        factory.createCustom(info);
+}
+void MobilizedBody::EllipsoidImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{   factory.createEllipsoid(info, getRadii(*info.state), getMirrorAxis()); }
+void MobilizedBody::SphericalCoordsImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{   factory.createSphericalCoords(info, az0, negAz, ze0, negZe, axisT, negT); }
+void MobilizedBody::ScrewImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{   factory.createScrew(info, getDefaultPitch()); }
+void MobilizedBody::CantileverFreeBeamImpl::createRigidBodyNode(
+    RigidBodyNodeFactory& factory, const RigidBodyNodeInfo& info) const
+{   factory.createCantileverFreeBeam(info, getDefaultLength()); }

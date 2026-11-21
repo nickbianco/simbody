@@ -28,9 +28,10 @@
  * Define the RigidBodyNode that implements a SphericalCoods mobilizer.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
 
 /* This is a mobilizer whose generalized coordinates are directly interpretable
 as a spherical coordinate system in this order: azimuth (longitude), zenith 
@@ -87,15 +88,20 @@ One common convention for atomic (torsion,bend,stretch) uses the default
 spherical coordinate system but the final stretch is along the -z direction. 
 For that, take all defaults but set s2=-1. */
 
-class RBNodeSphericalCoords : public RigidBodyNodeSpec<3, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeSphericalCoords_ : public RigidBodyNodeSpec_<T, 3, false> {
 public:
-typedef typename RigidBodyNodeSpec<3, false>::HType HType;
-virtual const char* type() { return "spherical coords"; }
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 3, false> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "spherical coords"; }
 
-RBNodeSphericalCoords(const MassProperties&   mProps_B,
-                        Real                  azimuthOffset, // radians
+RBNodeSphericalCoords_(const MassProperties_<T>&   mProps_B,
+                        Real                   azimuthOffset, // radians
                         bool                  azimuthNegated,
-                        Real                  zenithOffset,
+                        Real                   zenithOffset,
                         bool                  zenithNegated,
                         CoordinateAxis        translationAxis, // only x or z
                         bool                  translationNegated,
@@ -103,12 +109,12 @@ RBNodeSphericalCoords(const MassProperties&   mProps_B,
                         UIndex&               nextUSlot,
                         USquaredIndex&        nextUSqSlot,
                         QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<3, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+                         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed, 
                          isReversed),
     az0(azimuthOffset), ze0(zenithOffset), axisT(translationAxis),
-    signAz(Real(azimuthNegated ? -1 : 1)), signZe(Real(zenithNegated ? -1 : 1)), 
-    signT(Real(translationNegated ? -1 : 1))
+    signAz(RealP(azimuthNegated ? -1 : 1)), signZe(RealP(zenithNegated ? -1 : 1)), 
+    signT(RealP(translationNegated ? -1 : 1))
 {
     SimTK_ASSERT_ALWAYS( translationAxis != YAxis,
         "RBNodeSphericalCoords: translation axis must be x or z; not y.");
@@ -181,34 +187,34 @@ int calcQPoolSize(const SBModelVars&) const
 // the offsets so we need only 4 flops to get sin or cos of the actual angles 
 // given sin and cos of the generalized coordinates.
 // Cost here is about 100 flops.
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q, int nq,
-                             Real* qCache,  int nQCache,
-                             Real* qErr,    int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q, int nq,
+                             RealP* qCache,  int nQCache,
+                             RealP* qErr,    int nQErr) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize && nQErr==0);
-    Vec2::updAs(&qCache[CosQ]) = Vec2(std::cos(q[0]),std::cos(q[1]));
-    Vec2::updAs(&qCache[SinQ]) = Vec2(std::sin(q[0]),std::sin(q[1]));
+    Vec<2,T>::updAs(&qCache[CosQ]) = Vec<2,T>(cos(q[0]),cos(q[1]));
+    Vec<2,T>::updAs(&qCache[SinQ]) = Vec<2,T>(sin(q[0]),sin(q[1]));
 }
 
 // TODO: should be using sin/cos cache but isn't.
-void calcX_FM(const SBStateDigest& sbs,
-              const Real* q,      int nq,
-              const Real* qCache, int nQCache,
-              Transform&  X_FM) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+              const RealP* q,      int nq,
+              const RealP* qCache, int nQCache,
+              TransformP&  X_FM) const
 {
     assert(q && nq==3 && qCache && nQCache==PoolSize);
     // Calculate azimuth and zenith angles from the first two qs.
-    const Vec2 azZe = calcAzZe(q[0], q[1]); 
+    const Vec<2,T> azZe = calcAzZe(q[0], q[1]); 
 
     // Calculate R_FM from q's. This is always a body fixed Z-Y (3-2)
     // sequence although the angles may be negated and shifted from the 
     // generalized coordinates. 
     // TODO: use qCache for speed.
-    X_FM.updR() = Rotation( BodyRotationSequence, 
+    X_FM.updR() = RotationP( BodyRotationSequence, 
                             azZe[0], ZAxis, azZe[1], YAxis );
 
-    const Real t = signT * q[2];
+    const RealP t = signT * q[2];
     X_FM.updP() = t * X_FM.R()(axisT); // i.e., t*Mx or t*Mz, expressed in F
 }
 
@@ -220,28 +226,28 @@ void calcX_FM(const SBStateDigest& sbs,
 // either Mx or My and is likewise transformed.
 // 18 flops normally; 36 if reversed.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
     // "upd" because we're realizing positions now
-    const SBTreePositionCache& pc = sbs.updTreePositionCache(); 
-    const Transform  X_F0M0 = this->findX_F0M0(pc);   // 18 flops if reversed
+    const SBTreePositionCache_<T>& pc = sbs.updTreePositionCache(); 
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);   // 18 flops if reversed
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
-    const Vec3&     p_FM = X_F0M0.p();
+    const RotationP& R_FM = X_F0M0.R();
+    const Vec3P&     p_FM = X_F0M0.p();
 
-    const Vec3 sFz = Vec3(0,0,signAz);  // signed Fz for 1st rotation
-    const Vec3 sMy = signZe*R_FM.y();   // signed My for 2nd rotation (3 flops)
-    const Vec3 sMt = signT*R_FM(axisT); // signed Mz or Mx for trans. (3 flops)
+    const Vec3P sFz = Vec3P(0,0,signAz);  // signed Fz for 1st rotation
+    const Vec3P sMy = signZe*R_FM.y();   // signed My for 2nd rotation (3 flops)
+    const Vec3P sMt = signT*R_FM(axisT); // signed Mz or Mx for trans. (3 flops)
 
     // We need sFz % p_FM but sFz is the z or -z axis so this is a very
     // cheap calculation.
-    const Vec3 sFzXp_FM = Vec3( -sFz[2]*p_FM[1], sFz[2]*p_FM[0], 0); // 3 flops
+    const Vec3P sFzXp_FM = Vec3P( -sFz[2]*p_FM[1], sFz[2]*p_FM[0], 0); // 3 flops
 
-    H_FM(0) = SpatialVec(  sFz    ,  sFzXp_FM );
-    H_FM(1) = SpatialVec(  sMy    , sMy % p_FM );                    // 9 flops
-    H_FM(2) = SpatialVec( Vec3(0) ,    sMt );
+    H_FM(0) = SpatialVecP(  sFz    ,  sFzXp_FM );
+    H_FM(1) = SpatialVecP(  sMy    , sMy % p_FM );                    // 9 flops
+    H_FM(2) = SpatialVecP( Vec3P(0) ,    sMt );
 }
 
 // Since the last two rows of H_FM above are not constant in F, their time 
@@ -250,60 +256,65 @@ void calcAcrossJointVelocityJacobian(
 // derivative in A is the angular velocity of B in A crossed with the vector, 
 // i.e., d_A/dt r_B_A = w_AB % r_B_A. 48 flops normally; 111 if reversed.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreePositionCache_<T>& pc = sbs.getTreePositionCache();
     // "upd" because we're realizing velocities now
-    const SBTreeVelocityCache& vc = sbs.updTreeVelocityCache(); 
+    const SBTreeVelocityCache_<T>& vc = sbs.updTreeVelocityCache(); 
 
-    const Transform  X_F0M0 = this->findX_F0M0(pc);       // 18 flops if reversed
-    const SpatialVec V_F0M0 = this->findV_F0M0(pc,vc);    // 45 flops if reversed
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);       // 18 flops if reversed
+    const SpatialVecP V_F0M0 = this->findV_F0M0(pc,vc);    // 45 flops if reversed
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
-    const Vec3&     p_FM = X_F0M0.p();
+    const RotationP& R_FM = X_F0M0.R();
+    const Vec3P&     p_FM = X_F0M0.p();
 
-    const Vec3  sFz = Vec3(0,0,signAz);  // signed Fz for 1st rotation
-    const Vec3  sMy = signZe*R_FM.y();   // signed My for 2nd rotation (3 flops)
-    const Vec3  sMt = signT*R_FM(axisT); // signed Mz or Mx for trans. (3 flops)
+    const Vec3P  sFz = Vec3P(0,0,signAz);  // signed Fz for 1st rotation
+    const Vec3P  sMy = signZe*R_FM.y();   // signed My for 2nd rotation (3 flops)
+    const Vec3P  sMt = signT*R_FM(axisT); // signed Mz or Mx for trans. (3 flops)
 
-    const Vec3  w_FM = V_F0M0[0]; // angular velocity of M in F
-    const Vec3& v_FM = V_F0M0[1]; // linear velocity of OM in F
+    const Vec3P  w_FM = V_F0M0[0]; // angular velocity of M in F
+    const Vec3P& v_FM = V_F0M0[1]; // linear velocity of OM in F
 
-    const Vec3  dsMy = w_FM % sMy;  // time derivative of sMy         (9 flops)
-    const Vec3  dsMt = w_FM % sMt;  // time derivative of sMz or sMx  (9 flops)
+    const Vec3P  dsMy = w_FM % sMy;  // time derivative of sMy         (9 flops)
+    const Vec3P  dsMt = w_FM % sMt;  // time derivative of sMz or sMx  (9 flops)
 
     // We need d/dt (sFz % p_FM) = (sFz % v_FM). But since sFz is the 
     // z or -z axis  this is a very cheap calculation.
-    const Vec3  sFzXv_FM = Vec3( -sFz[2]*v_FM[1], sFz[2]*v_FM[0], 0); // 3 flops
+    const Vec3P  sFzXv_FM = Vec3P( -sFz[2]*v_FM[1], sFz[2]*v_FM[0], 0); // 3 flops
 
-    HDot_FM(0) = SpatialVec( Vec3(0) ,         sFzXv_FM );
-    HDot_FM(1) = SpatialVec(  dsMy   , dsMy % p_FM + sMy % v_FM );  // 21 flops
-    HDot_FM(2) = SpatialVec( Vec3(0) ,           dsMt );
+    HDot_FM(0) = SpatialVecP( Vec3P(0) ,         sFzXv_FM );
+    HDot_FM(1) = SpatialVecP(  dsMy   , dsMy % p_FM + sMy % v_FM );  // 21 flops
+    HDot_FM(2) = SpatialVecP( Vec3P(0) ,           dsMt );
 }
 
 private:
-const Real              az0, ze0;               // angle offsets
+const RealP              az0, ze0;               // angle offsets
 const CoordinateAxis    axisT;                  // translation axis (X or Z)
-const Real              signAz, signZe, signT;  // 1 or -1
+const RealP              signAz, signZe, signT;  // 1 or -1
 
 // Calculate azimuth and zenith angles from the first two qs.
-Vec2 calcAzZe(Real q0, Real q1) const {
-    const Real az = signAz * q0 + az0;
-    const Real ze = signZe * q1 + ze0;
-    return Vec2(az,ze);
+Vec<2,T> calcAzZe(RealP q0, RealP q1) const {
+    const RealP az = signAz * q0 + az0;
+    const RealP ze = signZe * q1 + ze0;
+    return Vec<2,T>(az,ze);
 }
 
 // Calculate R_FM from q's. This is always a body fixed 3-2 sequence 
 // although the angles may be negated and shifted from the generalized 
 // coordinates.
-Rotation calcR_FM(const Vector& q) const {
-    const Vec2 azZe = calcAzZe(this->fromQ(q)[0], this->fromQ(q)[1]); 
-    return Rotation( BodyRotationSequence, azZe[0], ZAxis, azZe[1], YAxis );
+RotationP calcR_FM(const Vector& q) const {
+    const Vec<2,T> azZe = calcAzZe(this->fromQ(q)[0], this->fromQ(q)[1]); 
+    return RotationP( BodyRotationSequence, azZe[0], ZAxis, azZe[1], YAxis );
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodeSphericalCoords_<Real> RBNodeSphericalCoords;
+
+} // namespace SimTK
 
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_SPHERICALCOORDS_H_

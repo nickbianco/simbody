@@ -204,11 +204,11 @@ UnitVec3 Constraint::Rod::findRodOrientationInG(const State& s) const {
 
     const MobilizedBody& mobod_A = impl.getAncestorMobilizedBody();
     if (mobod_A.isGround())
-        return pc.Cz_A; // == Cz_G
+        return UnitVec3(pc.Cz_A, true); // == Cz_G
 
     const Transform& X_GA = mobod_A.getBodyTransform(s);
 
-    return X_GA.R() * pc.Cz_A;  // 15 flops
+    return X_GA.R() * UnitVec3(pc.Cz_A, true);  // 15 flops
 }
 
 Real Constraint::Rod::findLengthViolation(const State& s) const {
@@ -295,35 +295,10 @@ ensurePositionCacheRealized(const State& s) const {
     if (getMyMatterSubsystemRep().isCacheValueRealized(s, m_posCacheIx))
         return getPositionCache(s);
 
-    const Parameters& params = getParameters(s);
-    const Vec3&       p_FSf  = params.m_p_FSf;
-    const Vec3&       p_BSb  = params.m_p_BSb;
-    const Real        length = params.m_length;
-
     PositionCache& pc = updPositionCache(s);
-
-    const Transform&  X_AF = getBodyTransformFromState(s, m_mobod_F);
-    const Transform&  X_AB = getBodyTransformFromState(s, m_mobod_B);
-    const Vec3& p_AF = X_AF.p();
-    const Vec3& p_AB = X_AB.p();
-
-    pc.p_FSf_A = X_AF.R() * p_FSf;            // exp. in A, 15 flops
-    const Vec3 p_ASf = X_AF.p() + pc.p_FSf_A; // meas. from Ao, 3 flops
-
-    pc.p_BSb_A = X_AB.R() * p_BSb;            // exp. in A, 15 flops
-    const Vec3 p_ASb = X_AB.p() + pc.p_BSb_A; // meas. from Ao, 3 flops
-
-    pc.p_SfSb_A = p_ASb - p_ASf;  // vec from Sf to Sb, exp. in A, 3 flops
-    pc.r = pc.p_SfSb_A.norm();    // ~20 flops
-    pc.oor = 1/pc.r;              // ~10 flops (might be Infinity)
-
-    // Assume non-singular.
-    pc.Cz_A = UnitVec3(pc.p_SfSb_A * pc.oor, true); // 3 flops
-    pc.isSingular = false;
-    if (pc.r < TinyReal) {
-        pc.isSingular = true;
-        pc.Cz_A = X_AF.z(); // arbitrary
-    }
+    getKernel(s).calcPositionCache(getBodyTransformFromState(s, m_mobod_F),
+                                   getBodyTransformFromState(s, m_mobod_B),
+                                   pc);
 
     getMyMatterSubsystemRep().markCacheValueRealized(s, m_posCacheIx);
     return pc;
@@ -339,31 +314,8 @@ ensureVelocityCacheRealized(const State& s) const {
 
     const PositionCache& pc = ensurePositionCacheRealized(s);
     VelocityCache& vc = updVelocityCache(s);
-
-    const UnitVec3& Cz_A = pc.Cz_A;
-
-    const SpatialVec& V_AF = getBodyVelocityFromState(s, m_mobod_F);
-    const Vec3&       w_AF = V_AF[0];
-    const Vec3&       v_AF = V_AF[1];
-    const SpatialVec& V_AB = getBodyVelocityFromState(s, m_mobod_B);
-    const Vec3&       w_AB = V_AB[0];
-    const Vec3&       v_AB = V_AB[1];
-
-    // These are d/dt_A p_FSf and d/dt_A p_BSb
-    const Vec3 wX_p_FSf_A = w_AF % pc.p_FSf_A;      // 9 flops
-    const Vec3 wX_p_BSb_A = w_AB % pc.p_BSb_A;      // 9 flops
-    const Vec3 v_ASf = v_AF + wX_p_FSf_A;           // 3 flops
-    const Vec3 v_ASb = v_AB + wX_p_BSb_A;           // 3 flops
-    vc.pd_SfSb_A = v_ASb - v_ASf;                   // 3 flops
-
-    // These are the Coriolis accelerations of Sf and Sb, needed later.
-    vc.wXwX_p_FSf_A = w_AF % wX_p_FSf_A;            // 9 flops
-    vc.wXwX_p_BSb_A = w_AB % wX_p_BSb_A;            // 9 flops
-
-    // Calculate d/dt_A Cz.
-    vc.Czd_A = pc.isSingular 
-        ? w_AF % Cz_A // rare
-        : pc.oor*(vc.pd_SfSb_A - (~vc.pd_SfSb_A*Cz_A)*Cz_A); // 12 flops
+    getKernel(s).calcVelocityCache(pc, getBodyVelocityFromState(s, m_mobod_F),
+                                   getBodyVelocityFromState(s, m_mobod_B), vc);
 
     getMyMatterSubsystemRep().markCacheValueRealized(s, m_velCacheIx);
     

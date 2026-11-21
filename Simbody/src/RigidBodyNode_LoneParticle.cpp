@@ -22,9 +22,9 @@
  * -------------------------------------------------------------------------- */
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
 #include "MobilizedBodyImpl.h"
-#include "RigidBodyNodeSpec_Translation.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_Translation.h"
 
 /* This is a specialized class used for mobilizers that satisfy _all_ of the
 following requirements:

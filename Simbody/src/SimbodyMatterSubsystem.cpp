@@ -31,7 +31,9 @@
 
 #include "MobilizedBodyImpl.h"
 #include "SimbodyMatterSubsystemRep.h"
-class RigidBodyNode;
+#include "simbody/internal/tree/RigidBodyNodeFactory.h"
+#include "simbody/internal/tree/ConstraintNodeFactory.h"
+#include "ConstraintImpl.h"
 
 #include <string>
 #include <iostream>
@@ -54,6 +56,85 @@ SimbodyMatterSubsystem::downcast(const Subsystem& s) {
 SimbodyMatterSubsystem::updDowncast(Subsystem& s) {
     assert(isInstanceOf(s));
     return static_cast<SimbodyMatterSubsystem&>(s);
+}
+
+//==============================================================================
+//                         CREATE RIGID BODY NODES
+//==============================================================================
+// Visit each mobilized body with the given factory, to create this subsystem's
+// RigidBodyNodes for a scalar type other than Real. See
+// simbody/internal/tree/RigidBodyNodeFactory.h.
+void SimbodyMatterSubsystem::
+createRigidBodyNodes(RigidBodyNodeFactory& factory, const State& state) const {
+    SimTK_STAGECHECK_GE_ALWAYS(state.getSubsystemStage(getMySubsystemIndex()),
+        Stage::Instance, "SimbodyMatterSubsystem::createRigidBodyNodes()");
+    const SimbodyMatterSubsystemRep& rep = getRep();
+    factory.beginTree(rep.getMatterTopologyCache(), rep.getModelVars(state),
+                      rep.getModelCache(state), rep.getInstanceVars(state),
+                      rep.getInstanceCache(state));
+    // In order of MobilizedBodyIndex, so parents come before children.
+    for (MobilizedBodyIndex b(0); b < getNumBodies(); ++b) {
+        const RigidBodyNode& node = rep.getRigidBodyNode(b);
+        RigidBodyNodeInfo info;
+        info.index          = b;
+        if (node.getParent()) info.parent = node.getParent()->getNodeNum();
+        info.level          = node.getLevel();
+        info.massProperties = node.getMassProperties_OB_B();
+        info.isReversed     = node.isReversed();
+        info.uIndex         = node.getUIndex();
+        info.uSqIndex       = node.getUSqIndex();
+        info.qIndex         = node.getQIndex();
+        info.state          = &state;
+        getMobilizedBody(b).getImpl().createRigidBodyNode(factory, info);
+    }
+    factory.endTree();
+}
+
+void SimbodyMatterSubsystem::
+createConstraintNodes(ConstraintNodeFactory& factory,
+                      const State& state) const {
+    SimTK_STAGECHECK_GE_ALWAYS(state.getSubsystemStage(getMySubsystemIndex()),
+        Stage::Instance, "SimbodyMatterSubsystem::createConstraintNodes()");
+    const SBInstanceCache& ic = getRep().getInstanceCache(state);
+    for (ConstraintIndex cx(0); cx < getNumConstraints(); ++cx) {
+        const Constraint& constraint = getConstraint(cx);
+        if (constraint.isDisabled(state)) continue;
+        const ConstraintImpl& impl = constraint.getImpl();
+        const SBInstancePerConstraintInfo& cInfo = 
+            ic.getConstraintInstanceInfo(cx);
+        ConstraintNodeInfo info;
+        info.index           = cx;
+        info.mp              = cInfo.holoErrSegment.length;
+        info.mv              = cInfo.nonholoErrSegment.length;
+        info.ma              = cInfo.accOnlyErrSegment.length;
+        info.holoOffset      = cInfo.holoErrSegment.offset;
+        info.nonholoOffset   = cInfo.nonholoErrSegment.offset;
+        info.accOnlyOffset   = cInfo.accOnlyErrSegment.offset;
+        for (ConstrainedMobilizerIndex cmx(0); 
+             cmx < cInfo.getNumConstrainedMobilizers(); ++cmx) {
+            const SBInstancePerConstrainedMobilizerInfo& mInfo =
+                cInfo.getConstrainedMobilizerInstanceInfo(cmx);
+            ConstrainedMobilizerNodeInfo m;
+            m.mobod = impl.getMobilizedBodyIndexOfConstrainedMobilizer(cmx);
+            m.firstConstrainedQ = mInfo.firstConstrainedQIndex;
+            m.nq                = mInfo.nQInUse;
+            m.firstConstrainedU = mInfo.firstConstrainedUIndex;
+            m.nu                = mInfo.nUInUse;
+            info.constrainedMobilizers.push_back(m);
+        }
+        for (ConstrainedQIndex cqx(0); cqx < cInfo.getNumConstrainedQ(); ++cqx)
+            info.constrainedQ.push_back(cInfo.getQIndexFromConstrainedQ(cqx));
+        for (ConstrainedUIndex cux(0); cux < cInfo.getNumConstrainedU(); ++cux)
+            info.constrainedU.push_back(cInfo.getUIndexFromConstrainedU(cux));
+        const int ncb = impl.getNumConstrainedBodies();
+        for (ConstrainedBodyIndex cbx(0); cbx < ncb; ++cbx)
+            info.constrainedBodies.push_back(
+                impl.getMobilizedBodyIndexOfConstrainedBody(cbx));
+        info.ancestor = ncb && impl.isAncestorDifferentFromGround()
+            ? impl.getAncestorMobilizedBody().getMobilizedBodyIndex()
+            : MobilizedBodyIndex(GroundIndex);
+        impl.createConstraintNode(factory, info, state);
+    }
 }
 
 const SimbodyMatterSubsystemRep& 

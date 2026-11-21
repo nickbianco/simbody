@@ -39,6 +39,8 @@ namespace SimTK {
 class MobilizedBody;
 class MultibodySystem;
 class Constraint;
+class RigidBodyNodeFactory;
+class ConstraintNodeFactory;
 
 class UnilateralContact;
 class StateLimitedFriction;
@@ -3265,6 +3267,152 @@ const SpatialVec&
 getMobilizerCentrifugalForces(const State& state, MobilizedBodyIndex mbx) const;
 /**@}**/
 
+
+//==============================================================================
+/** @name        Operators for other scalar types
+
+These are the same operators as the ones above with the same names, but for
+a ScalarState<T>, which holds the time and continuous variables (and computed
+quantities) as a scalar type T other than Real, such as an automatic
+differentiation or symbolic type (e.g. casadi::SX); see
+SimTKcommon/internal/ScalarState.h and MultibodySystem::realize(const
+ScalarState<T>&, Stage). Vectors are std::vector<T> over this subsystem's u's,
+body force and spatial acceleration vectors are std::vector<SpatialVec_<T>>
+indexed by MobilizedBodyIndex, and an empty applied force vector is treated
+as all zero.
+
+These are member templates whose definitions are in
+simbody/internal/tree/MultibodyScalarImpl.h; see there for how to instantiate
+them for a particular T. They are not compiled into the SimTKsimbody library.
+
+Only Ground, Weld, Pin, Slider, and Planar mobilizers are currently
+supported, and prescribed motion is not supported. Enabled constraints of
+types Ball, Weld, PointInPlane, PointOnLine, ConstantAngle, Rod, NoSlip1D, and
+CoordinateCoupler (if SimTK::FunctionEvaluator<T> is specialized; see
+SimTKcommon/internal/FunctionEvaluator.h) are supported for evaluating their
+errors and the forces from given multipliers: realizing a ScalarState through Stage::Position and
+Stage::Velocity computes the position and velocity constraint errors
+(ScalarState::getQErr() and getUErr()), and the operators below compute the
+acceleration errors and constraint forces. The constrained dynamics operators
+that solve for the multipliers are Real only.
+**/
+/**@{**/
+
+/** Compute body poses and velocity Jacobians from the configuration q, by
+realizing the ScalarState through Stage::Position. This is normally done by
+MultibodySystem::realize(). **/
+template <class T>
+void realizePositionKinematics(const ScalarState<T>& state) const;
+/** Compute body velocities from the speeds u, by realizing the ScalarState
+through Stage::Velocity. This is normally done by MultibodySystem::realize().
+**/
+template <class T>
+void realizeVelocityKinematics(const ScalarState<T>& state) const;
+/** Compute articulated body inertias if they are not already up to date;
+requires position kinematics. **/
+template <class T>
+void realizeArticulatedBodyInertias(const ScalarState<T>& state) const;
+
+/** Requires Stage::Velocity. @see calcKineticEnergy(const State&) **/
+template <class T>
+T calcKineticEnergy(const ScalarState<T>& state) const;
+
+/** Requires Stage::Position. @see multiplyBySystemJacobian(const State&, 
+const Vector&, Vector_<SpatialVec>&) **/
+template <class T>
+void multiplyBySystemJacobian(const ScalarState<T>&          state,
+                              const std::vector<T>&          u,
+                              std::vector<SpatialVec_<T>>&   Ju) const;
+/** Requires Stage::Position. @see multiplyBySystemJacobianTranspose(
+const State&, const Vector_<SpatialVec>&, Vector&) **/
+template <class T>
+void multiplyBySystemJacobianTranspose(
+                              const ScalarState<T>&               state,
+                              const std::vector<SpatialVec_<T>>&  F_G,
+                              std::vector<T>&                     f) const;
+
+/** Requires Stage::Position. @see multiplyByM(const State&, const Vector&,
+Vector&) **/
+template <class T>
+void multiplyByM(const ScalarState<T>&      state,
+                 const std::vector<T>&      a,
+                 std::vector<T>&            Ma) const;
+/** Requires Stage::Position. @see multiplyByMInv(const State&, 
+const Vector&, Vector&) **/
+template <class T>
+void multiplyByMInv(const ScalarState<T>&       state,
+                    const std::vector<T>&       v,
+                    std::vector<T>&             MinvV) const;
+
+/** Forward dynamics; requires Stage::Velocity.
+@see calcAccelerationIgnoringConstraints(const State&, const Vector&, 
+const Vector_<SpatialVec>&, Vector&, Vector_<SpatialVec>&) **/
+template <class T>
+void calcAccelerationIgnoringConstraints
+   (const ScalarState<T>&               state,
+    const std::vector<T>&               appliedMobilityForces,
+    const std::vector<SpatialVec_<T>>&  appliedBodyForces,
+    std::vector<T>&                     udot,
+    std::vector<SpatialVec_<T>>&        A_GB) const;
+
+/** Inverse dynamics; requires Stage::Velocity.
+@see calcResidualForceIgnoringConstraints(const State&, const Vector&, 
+const Vector_<SpatialVec>&, const Vector&, Vector&) **/
+template <class T>
+void calcResidualForceIgnoringConstraints
+   (const ScalarState<T>&               state,
+    const std::vector<T>&               appliedMobilityForces,
+    const std::vector<SpatialVec_<T>>&  appliedBodyForces,
+    const std::vector<T>&               knownUdot,
+    std::vector<T>&                     residualMobilityForces) const;
+
+/** The acceleration constraint errors for the given udots (or for all-zero
+udots, the bias, if \a knownUDot is empty), ordered as the multipliers are:
+holonomic, nonholonomic, then acceleration-only; requires Stage::Velocity.
+@see calcConstraintAccelerationErrors(const State&, const Vector&, Vector&)
+**/
+template <class T>
+void calcConstraintAccelerationErrors
+   (const ScalarState<T>&               state,
+    const std::vector<T>&               knownUDot,
+    std::vector<T>&                     pvaerr) const;
+
+/** The body forces and mobility forces generated by the enabled constraints
+for the given multipliers; requires Stage::Velocity. Negate the multipliers to
+apply the constraint forces as though they were applied forces.
+@see calcConstraintForcesFromMultipliers(const State&, const Vector&,
+Vector_<SpatialVec>&, Vector&) **/
+template <class T>
+void calcConstraintForcesFromMultipliers
+   (const ScalarState<T>&               state,
+    const std::vector<T>&               multipliers,
+    std::vector<SpatialVec_<T>>&        bodyForcesInG,
+    std::vector<T>&                     mobilityForces) const;
+
+/** f = ~G*lambda, the generalized forces generated by the enabled
+constraints for the given multipliers; requires Stage::Velocity.
+@see multiplyByGTranspose(const State&, const Vector&, Vector&) **/
+template <class T>
+void multiplyByGTranspose(const ScalarState<T>&   state,
+                          const std::vector<T>&   lambda,
+                          std::vector<T>&         f) const;
+
+/** (Advanced) Create this subsystem's RigidBodyNodes for another scalar
+type, using \a factory, a visitor that is called with the Model and Instance
+stage information from \a state (which must be realized through 
+Stage::Instance) and then for each mobilized body. This is used when a
+ScalarState<T> is realized through Stage::Instance; see
+simbody/internal/tree/RigidBodyNodeFactory.h. **/
+void createRigidBodyNodes(RigidBodyNodeFactory& factory,
+                          const State& state) const;
+/** (Advanced) Create the counterparts of this subsystem's enabled Constraints
+for another scalar type, using \a factory, a visitor that is called for each
+enabled Constraint with its parameters from \a state (which must be realized
+through Stage::Instance). This is used when a ScalarState<T> is realized
+through Stage::Instance; see simbody/internal/tree/ConstraintNodeFactory.h. **/
+void createConstraintNodes(ConstraintNodeFactory& factory,
+                           const State& state) const;
+/**@}**/
 
 //==============================================================================
 //     Bookkeeping methods and internal types -- hide from Doxygen

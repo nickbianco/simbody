@@ -29,9 +29,10 @@
  * as a BendStretch joint.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
 
 
     // BEND-STRETCH //
@@ -44,18 +45,23 @@
 // we rotate around z, which moves M's x with respect to F's x. Then
 // we slide along the rotated x axis. The two generalized coordinates are the 
 // rotation and the translation, in that order.
-class RBNodeBendStretch : public RigidBodyNodeSpec<2, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeBendStretch_ : public RigidBodyNodeSpec_<T, 2, false> {
 public:
-typedef typename RigidBodyNodeSpec<2, false>::HType HType;
-virtual const char* type() { return "bendstretch"; }
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 2, false> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "bendstretch"; }
 
-RBNodeBendStretch(const MassProperties&   mProps_B,
+RBNodeBendStretch_(const MassProperties_<T>&   mProps_B,
                     bool                  isReversed,
                     UIndex&               nextUSlot,
                     USquaredIndex&        nextUSqSlot,
                     QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<2, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+                         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed, 
                          isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
@@ -124,26 +130,26 @@ int calcQPoolSize(const SBModelVars&) const
 {   return PoolSize; }
 
 // Precalculation of sin/cos costs around 50 flops.
-void performQPrecalculations(const SBStateDigest& sbs,
-                             const Real* q, int nq,
-                             Real* qCache,  int nQCache,
-                             Real* qErr,    int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                             const RealP* q, int nq,
+                             RealP* qCache,  int nQCache,
+                             RealP* qErr,    int nQErr) const
 {
     assert(q && nq==2 && qCache && nQCache==PoolSize && nQErr==0);
-    qCache[CosQ] = std::cos(q[0]);
-    qCache[SinQ] = std::sin(q[0]);
+    qCache[CosQ] = cos(q[0]);
+    qCache[SinQ] = sin(q[0]);
 }
 
 // This is about 15 flops.
-void calcX_FM(const SBStateDigest& sbs,
-                const Real* q,      int nq,
-                const Real* qCache, int nQCache,
-                Transform&  X_FM) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+                const RealP* q,      int nq,
+                const RealP* qCache, int nQCache,
+                TransformP&  X_FM) const
 {
     assert(q && nq==2 && qCache && nQCache==PoolSize);
     X_FM.updR().setRotationFromAngleAboutZ(qCache[CosQ], qCache[SinQ]);
     // Translational coordinate is in M frame so must be reexpressed in F.
-    X_FM.updP() = X_FM.R()*Vec3(q[1],0,0); // 15 flops; could be cheaper
+    X_FM.updP() = X_FM.R()*Vec3P(q[1],0,0); // 15 flops; could be cheaper
 }
 
 // The generalized speeds for this bend-stretch joint are (1) the angular
@@ -153,20 +159,20 @@ void calcX_FM(const SBStateDigest& sbs,
 // this joint.) 
 // 9 flops (could be cheaper but who cares?)
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
     // use "upd" because we're realizing positions now
-    const SBTreePositionCache& pc = sbs.updTreePositionCache(); 
-    const Transform X_F0M0 = this->findX_F0M0(pc);
-    const Rotation& R_F0M0 = X_F0M0.R();
+    const SBTreePositionCache_<T>& pc = sbs.updTreePositionCache(); 
+    const TransformP X_F0M0 = this->findX_F0M0(pc);
+    const RotationP& R_F0M0 = X_F0M0.R();
 
     // Dropping the 0's here.
-    const Vec3&     p_FM = X_F0M0.p();
-    const Vec3&     Mx_F = R_F0M0.x(); // M's x axis, expressed in F
+    const Vec3P&     p_FM = X_F0M0.p();
+    const Vec3P&     Mx_F = R_F0M0.x(); // M's x axis, expressed in F
 
-    H_FM(0) = SpatialVec( Vec3(0,0,1), Vec3(0,0,1) % p_FM   );
-    H_FM(1) = SpatialVec( Vec3(0),            Mx_F          );
+    H_FM(0) = SpatialVecP( Vec3P(0,0,1), Vec3P(0,0,1) % p_FM   );
+    H_FM(1) = SpatialVecP( Vec3P(0),            Mx_F          );
 }
 
 // Since the the Jacobian above is not constant in F,
@@ -176,26 +182,31 @@ void calcAcrossJointVelocityJacobian(
 // the vector, i.e., d_A/dt r_B_A = w_AB % r_B_A.
 // 18 flops (could be cheaper).
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
-    const SBTreeVelocityCache& vc = sbs.updTreeVelocityCache(); // use "upd" because we're realizing velocities now
+    const SBTreePositionCache_<T>& pc = sbs.getTreePositionCache();
+    const SBTreeVelocityCache_<T>& vc = sbs.updTreeVelocityCache(); // use "upd" because we're realizing velocities now
 
-    const Transform  X_F0M0 = this->findX_F0M0(pc);
-    const Rotation&  R_F0M0 = X_F0M0.R();
-    const SpatialVec V_F0M0 = this->findV_F0M0(pc,vc);
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);
+    const RotationP&  R_F0M0 = X_F0M0.R();
+    const SpatialVecP V_F0M0 = this->findV_F0M0(pc,vc);
 
     // Dropping the 0's here.
-    const Vec3&     Mx_F = R_F0M0.x(); // M's x axis, expressed in F
-    const Vec3&     w_FM = V_F0M0[0]; // angular velocity of M in F
-    const Vec3&     v_FM = V_F0M0[1]; // linear velocity of OM in F
+    const Vec3P&     Mx_F = R_F0M0.x(); // M's x axis, expressed in F
+    const Vec3P&     w_FM = V_F0M0[0]; // angular velocity of M in F
+    const Vec3P&     v_FM = V_F0M0[1]; // linear velocity of OM in F
 
-    HDot_FM(0) = SpatialVec( Vec3(0), Vec3(0,0,1) % v_FM );
-    HDot_FM(1) = SpatialVec( Vec3(0),    w_FM % Mx_F );
+    HDot_FM(0) = SpatialVecP( Vec3P(0), Vec3P(0,0,1) % v_FM );
+    HDot_FM(1) = SpatialVecP( Vec3P(0),    w_FM % Mx_F );
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodeBendStretch_<Real> RBNodeBendStretch;
+
+} // namespace SimTK
 
 
 #endif // SimTK_SIMBODY_RIGID_BODY_NODE_SPEC_POLARCOORDS_H_

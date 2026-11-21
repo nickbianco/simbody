@@ -29,8 +29,9 @@
 #include "simbody/internal/ConditionalConstraint.h"
 
 #include "SimbodyMatterSubsystemRep.h"
-#include "SimbodyTreeState.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
+#include "simbody/internal/tree/TreeSweeps.h"
 #include "MultibodySystemRep.h"
 #include "MobilizedBodyImpl.h"
 #include "ConstraintImpl.h"
@@ -5383,23 +5384,9 @@ void SimbodyMatterSubsystemRep::multiplyByMInv(const State& s,
     Array_<Real>        eps(nu);
     Array_<SpatialVec>  z(nb), zPlus(nb), A_GB(nb);
 
-    // Point to raw data of input arguments.
-    const Real* fPtr     = &f[0];       
-    Real*       MInvfPtr = &MInvf[0];
-
-    for (int i=rbNodeLevels.size()-1 ; i>=0 ; i--) 
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByMInvPass1Inward(ic,tpc,abc,
-                fPtr, z.begin(), zPlus.begin(), eps.begin());
-        }
-
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++)
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByMInvPass2Outward(ic,tpc,abc, 
-                eps.cbegin(), A_GB.begin(), MInvfPtr);
-        }
+    // f and MInvf may be the same Vector.
+    multiplyByMInvSweeps(rbNodeLevels, ic, tpc, abc, &f[0], eps.begin(),
+                         z.begin(), zPlus.begin(), A_GB.begin(), &MInvf[0]);
 }
 //............................. CALC M INVERSE F ...............................
 
@@ -5432,21 +5419,9 @@ void SimbodyMatterSubsystemRep::multiplyByM(const State&    s,
     // Temporaries
     Array_<SpatialVec>  fTmp(nb), A_GB(nb);
 
-    // Point to raw data of input arguments.
-    const Real* aPtr    = &a[0];       
-    Real*       MaPtr   = &Ma[0];
-
-    for (int i=0 ; i<(int)rbNodeLevels.size() ; i++)
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByMPass1Outward(tpc, aPtr, A_GB.begin());
-        }
-
-    for (int i=rbNodeLevels.size()-1 ; i>=0 ; i--) 
-        for (int j=0 ; j<(int)rbNodeLevels[i].size() ; j++) {
-            const RigidBodyNode& node = *rbNodeLevels[i][j];
-            node.multiplyByMPass2Inward(tpc,A_GB.cbegin(),fTmp.begin(),MaPtr);
-        }
+    // a and Ma may be the same Vector.
+    multiplyByMSweeps(rbNodeLevels, tpc, &a[0], A_GB.begin(), fTmp.begin(),
+                      &Ma[0]);
 }
 
 
