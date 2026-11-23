@@ -31,7 +31,6 @@
 
 #include "MobilizedBodyImpl.h"
 #include "SimbodyMatterSubsystemRep.h"
-class RigidBodyNode;
 
 #include <string>
 #include <iostream>

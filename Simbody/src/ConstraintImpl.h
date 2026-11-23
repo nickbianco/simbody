@@ -33,8 +33,11 @@ represent the built-in constraint types. **/
 #include "simbody/internal/Constraint.h"
 #include "simbody/internal/SimbodyMatterSubsystem.h"
 #include "simbody/internal/SimbodyMatterSubtree.h"
+#include "simbody/internal/tree/ConstraintEquations.h"
 
-#include "SimbodyTreeState.h"
+#include <optional>
+
+#include "simbody/internal/tree/SimbodyTreeState.h"
 
 #include <map>
 #include <utility>  // std::pair
@@ -1064,6 +1067,13 @@ virtual void addInAccelerationConstraintForcesVirtual
 virtual void calcDecorativeGeometryAndAppendVirtual
    (const State& s, Stage stage, Array_<DecorativeGeometry>& geom) const {}
 
+// This Constraint's equations, with its parameters from the State, for
+// evaluating them with a scalar type other than Real, or nothing if this
+// constraint type isn't supported for other scalar types. See
+// simbody/internal/tree/ConstraintEquations.h. Called by
+// SimbodyMatterSubsystem::calcConstraintDescriptions().
+virtual std::optional<ConstraintEquations>
+getConstraintEquations(const State& state) const {return std::nullopt;}
 
 void invalidateTopologyCache() const;
 bool subsystemTopologyHasBeenRealized() const;
@@ -1319,9 +1329,13 @@ Real getPointDisplayRadius() const {return pointRadius;}
 //     - ~v_AC*n                  (body B at point C)
 // so we apply a forces lambda*n to F at S, -lambda*n to B at C.
 //
-//    --------------------------------
-//    perr = ~p_BS*n - h
-//    --------------------------------
+// The equations above are in PointInPlaneConstraintKernel
+// (ConstraintEquations.h), which is shared with other scalar types.
+PointInPlaneConstraintKernel getKernel(const State& s) const {
+    return PointInPlaneConstraintKernel{defaultPlaneNormal, defaultPlaneHeight,
+                                        defaultFollowerPoint};
+}
+
 void calcPositionErrorsVirtual      
    (const State&                                    s,      // Stage::Time
     const Array_<Transform,ConstrainedBodyIndex>&   allX_AB, 
@@ -1329,80 +1343,37 @@ void calcPositionErrorsVirtual
     Array_<Real>&                                   perr)   // mp of these
     const override
 {
-    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size() == 1);
-
-    const Vec3       p_AS = findStationLocation(allX_AB, followerBody, 
-                                                defaultFollowerPoint);
-    const Transform& X_AB = getBodyTransform(allX_AB, planeBody);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                     // C is material pt of B coincident with S
-
-    // We'll calculate this scalar using B-frame vectors, but any frame would 
-    // have done.
-    perr[0] = dot(p_BC, defaultPlaneNormal) - defaultPlaneHeight;
+    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size()==1);
+    getKernel(s).calcPositionErrors(allX_AB[planeBody], allX_AB[followerBody], &perr[0]);
 }
 
-//    --------------------------------
-//    verr = ~v_CS_A*n
-//    --------------------------------
 void calcPositionDotErrorsVirtual      
    (const State&                                    s,      // Stage::Position
-    const Array_<SpatialVec,ConstrainedBodyIndex>&  V_AB, 
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
     Array_<Real>&                                   pverr)  // mp of these
-    const override 
+    const override
 {
-    assert(V_AB.size()==2 && constrainedQDot.size()==0 && pverr.size() == 1);
-    //TODO: should be able to get p info from State
-
-    const Vec3       p_AS = findStationLocationFromState(s, followerBody, 
-                                                         defaultFollowerPoint);
-    const Transform& X_AB = getBodyTransformFromState(s, planeBody);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                   // C is material point of B coincident with S
-    const UnitVec3   n_A  = X_AB.R() * defaultPlaneNormal;
-
-    const Vec3       v_AS = findStationVelocity(s, V_AB, followerBody, 
-                                                defaultFollowerPoint);
-    const Vec3       v_AC = findStationVelocity(s, V_AB, planeBody, p_BC);
-
-    // Calculate this scalar using A-frame vectors.
-    pverr[0] = dot( v_AS-v_AC, n_A );
+    assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size()==1);
+    getKernel(s).calcPositionDotErrors(
+        getBodyTransformFromState(s, planeBody), getBodyTransformFromState(s, followerBody),
+        allV_AB[planeBody], allV_AB[followerBody], &pverr[0]);
 }
 
-//    -------------------------------------
-//    aerr = ~(a_CS_A - 2 w_AB X v_CS_A) * n
-//    -------------------------------------
 void calcPositionDotDotErrorsVirtual      
    (const State&                                    s,      // Stage::Velocity
-    const Array_<SpatialVec,ConstrainedBodyIndex>&  A_AB, 
+    const Array_<SpatialVec,ConstrainedBodyIndex>&  allA_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDotDot,
     Array_<Real>&                                   paerr)  // mp of these
     const override
 {
-    assert(A_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size() == 1);
-    //TODO: should be able to get p and v info from State
-    const Vec3       p_AS = findStationLocationFromState(s, followerBody, 
-                                                         defaultFollowerPoint);
-    const Transform& X_AB = getBodyTransformFromState(s, planeBody);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                   // C is material point of B coincident with S
-    const UnitVec3   n_A  = X_AB.R() * defaultPlaneNormal;
-
-    const Vec3&      w_AB = getBodyAngularVelocityFromState(s, planeBody);
-    const Vec3       v_AS = findStationVelocityFromState(s, followerBody, 
-                                                         defaultFollowerPoint);
-    const Vec3       v_AC = findStationVelocityFromState(s, planeBody, p_BC);
-
-    const Vec3       a_AS = findStationAcceleration(s, A_AB, followerBody, 
-                                                    defaultFollowerPoint);;
-    const Vec3       a_AC = findStationAcceleration(s, A_AB, planeBody, p_BC);
-
-    paerr[0] = dot( (a_AS-a_AC) - 2.*w_AB % (v_AS-v_AC), n_A );
+    assert(allA_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size()==1);
+    getKernel(s).calcPositionDotDotErrors(
+        getBodyTransformFromState(s, planeBody), getBodyTransformFromState(s, followerBody),
+        getBodyVelocityFromState(s, planeBody),  getBodyVelocityFromState(s, followerBody),
+        allA_AB[planeBody], allA_AB[followerBody], &paerr[0]);
 }
 
-// apply f=lambda*n to the follower point S of body F,
-//       -f         to point C (coincident point) of body B
 void addInPositionConstraintForcesVirtual
    (const State&                                    s,      // Stage::Position
     const Array_<Real>&                             multipliers, // mp of these
@@ -1412,19 +1383,14 @@ void addInPositionConstraintForcesVirtual
 {
     assert(multipliers.size()==1 && bodyForcesInA.size()==2 
            && qForces.size()==0);
-    const Real lambda = multipliers[0];
-
-    //TODO: should be able to get p info from State
-    const Vec3&      p_FS    = defaultFollowerPoint; // measured & expressed in F
-    const Vec3       p_AS    = findStationLocationFromState(s, followerBody, 
-                                                            defaultFollowerPoint);
-    const Transform& X_AB    = getBodyTransformFromState(s, planeBody);
-    const Vec3       p_BC    = ~X_AB * p_AS;         // measured & expressed in B
-    const Vec3       force_A = X_AB.R()*(lambda*defaultPlaneNormal);
-
-    addInStationForce(s, followerBody, p_FS,  force_A, bodyForcesInA);
-    addInStationForce(s, planeBody,    p_BC, -force_A, bodyForcesInA);
+    getKernel(s).addInPositionConstraintForces(
+        getBodyTransformFromState(s, planeBody), getBodyTransformFromState(s, followerBody),
+        &multipliers[0], bodyForcesInA[planeBody], bodyForcesInA[followerBody]);
 }
+
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override
+{   return TwoBodyConstraintEquations<PointInPlaneConstraintKernel>{planeBody, followerBody, getKernel(s)}; }
 
 SimTK_DOWNCAST(PointInPlaneImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
@@ -1497,10 +1463,13 @@ void realizeTopologyVirtual(State& s) const override {
 // See the point-in-plane constraint for details; here we're just picking x and
 // y as plane normals.
 
-//    --------------------------------
-//    perr = ~(p_BS-p_BP) * x
-//           ~(p_BS-p_BP) * y
-//    --------------------------------
+// The equations above are in PointOnLineConstraintKernel
+// (ConstraintEquations.h), which is shared with other scalar types.
+PointOnLineConstraintKernel getKernel(const State& s) const {
+    return PointOnLineConstraintKernel{x, y, defaultPointOnLine,
+                                       defaultFollowerPoint};
+}
+
 void calcPositionErrorsVirtual      
    (const State&                                    s,      // Stage::Time
     const Array_<Transform,ConstrainedBodyIndex>&   allX_AB, 
@@ -1508,54 +1477,23 @@ void calcPositionErrorsVirtual
     Array_<Real>&                                   perr)   // mp of these
     const override
 {
-    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size() == 2);
-
-    const Transform& X_AB = getBodyTransform(allX_AB, lineBody);
-    const Vec3       p_AS = findStationLocation(allX_AB, followerBody, 
-                                                defaultFollowerPoint);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                   // C is material point of B coincident with S
-    const Vec3       p_PC = p_BC - defaultPointOnLine;
-
-    // We'll calculate these two scalars using B-frame vectors, but any frame 
-    // would have done.
-    perr[0] = ~p_PC * x;
-    perr[1] = ~p_PC * y;
+    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size()==2);
+    getKernel(s).calcPositionErrors(allX_AB[lineBody], allX_AB[followerBody], &perr[0]);
 }
 
-//    --------------------------------
-//    verr = ~v_CS_A*n
-//    --------------------------------
 void calcPositionDotErrorsVirtual      
    (const State&                                    s,      // Stage::Position
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
     Array_<Real>&                                   pverr)  // mp of these
-    const override 
+    const override
 {
-    assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size() == 2);
-    //TODO: should be able to get p info from State
-    const Transform& X_AB = getBodyTransformFromState(s, lineBody);
-    const Vec3       p_AS = findStationLocationFromState(s, followerBody, 
-                                                         defaultFollowerPoint);
-    const Vec3       p_BC = ~X_AB * p_AS;
-    const Vec3       p_PC = p_BC - defaultPointOnLine;
-
-    const Vec3       v_AS = findStationVelocity(s, allV_AB, followerBody, 
-                                                defaultFollowerPoint);
-    const Vec3       v_AC = findStationVelocity(s, allV_AB, lineBody, p_BC);
-
-    const Vec3       v_CS_B = ~X_AB.R()*(v_AS-v_AC); // reexpress in B
-
-    // Calculate these scalar using B-frame vectors, but any frame would 
-    // have done.
-    pverr[0] = ~v_CS_B * x;
-    pverr[1] = ~v_CS_B * y;
+    assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size()==2);
+    getKernel(s).calcPositionDotErrors(
+        getBodyTransformFromState(s, lineBody), getBodyTransformFromState(s, followerBody),
+        allV_AB[lineBody], allV_AB[followerBody], &pverr[0]);
 }
 
-//    -------------------------------------
-//    aerr = ~(a_CS_A - 2 w_AB X v_CS_A) * n
-//    -------------------------------------
 void calcPositionDotDotErrorsVirtual      
    (const State&                                    s,      // Stage::Velocity
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allA_AB, 
@@ -1564,31 +1502,12 @@ void calcPositionDotDotErrorsVirtual
     const override
 {
     assert(allA_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size()==2);
-    //TODO: should be able to get p and v info from State
-    const Transform& X_AB = getBodyTransformFromState(s, lineBody);
-    const Vec3       p_AS = findStationLocationFromState(s, followerBody, 
-                                                         defaultFollowerPoint);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                 // C is material point of B coincident with S
-    const Vec3       p_PC = p_BC - defaultPointOnLine;
-
-    const Vec3&      w_AB = getBodyAngularVelocityFromState(s, lineBody);
-    const Vec3       v_AS = findStationVelocityFromState(s, followerBody, defaultFollowerPoint);
-    const Vec3       v_AC = findStationVelocityFromState(s, lineBody, p_BC);
-
-    const Vec3       a_AS = findStationAcceleration(s, allA_AB, followerBody, 
-                                                    defaultFollowerPoint);
-    const Vec3       a_AC = findStationAcceleration(s, allA_AB, lineBody, p_BC);
-    const Vec3       a_CS_B = ~X_AB.R()*(a_AS-a_AC - 2 * w_AB % (v_AS-v_AC));
-
-    // Calculate these scalar using B-frame vectors, but any frame would 
-    // have done.
-    paerr[0] = ~a_CS_B * x;
-    paerr[1] = ~a_CS_B * y;
+    getKernel(s).calcPositionDotDotErrors(
+        getBodyTransformFromState(s, lineBody), getBodyTransformFromState(s, followerBody),
+        getBodyVelocityFromState(s, lineBody),  getBodyVelocityFromState(s, followerBody),
+        allA_AB[lineBody], allA_AB[followerBody], &paerr[0]);
 }
 
-// apply f=lambda0*x + lambda1*y to the follower point S of body F,
-//      -f                       to point C (coincident point) of body B
 void addInPositionConstraintForcesVirtual
    (const State&                                    s,      // Stage::Position
     const Array_<Real>&                             multipliers, // mp of these
@@ -1598,21 +1517,14 @@ void addInPositionConstraintForcesVirtual
 {
     assert(multipliers.size()==2 && bodyForcesInA.size()==2 
            && qForces.size()==0);
-    const Vec2 lambda = Vec2::getAs(&multipliers[0]);
-
-    //TODO: should be able to get p info from State
-    const Transform& X_AB    = getBodyTransformFromState(s, lineBody);
-    const Vec3&      p_FS    = defaultFollowerPoint; // measured & expressed in F
-    const Vec3       p_AS    = findStationLocationFromState(s, followerBody, 
-                                                            defaultFollowerPoint);
-    const Vec3       p_BC    = ~X_AB * p_AS;         // measured & expressed in B
-
-    const Vec3       force_B = lambda[0] * x + lambda[1] * y;
-    const Vec3       force_A = X_AB.R() * force_B;
-
-    addInStationForce(s, followerBody, p_FS,  force_A, bodyForcesInA);
-    addInStationForce(s, lineBody,     p_BC, -force_A, bodyForcesInA);
+    getKernel(s).addInPositionConstraintForces(
+        getBodyTransformFromState(s, lineBody), getBodyTransformFromState(s, followerBody),
+        &multipliers[0], bodyForcesInA[lineBody], bodyForcesInA[followerBody]);
 }
+
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override
+{   return TwoBodyConstraintEquations<PointOnLineConstraintKernel>{lineBody, followerBody, getKernel(s)}; }
 
 SimTK_DOWNCAST(PointOnLineImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
@@ -1714,9 +1626,13 @@ void realizeTopologyVirtual(State& s) const override {
 //   -lambda * (f_A % b_A) applied to body B
 //
 
-// ------------------------------
-// perr = ~b_A * f_A - cos(theta)
-// ------------------------------
+// The equations above are in ConstantAngleConstraintKernel
+// (ConstraintEquations.h), which is shared with other scalar types.
+ConstantAngleConstraintKernel getKernel(const State& s) const {
+    return ConstantAngleConstraintKernel{defaultAxisB, defaultAxisF,
+                                         cosineOfDefaultAngle};
+}
+
 void calcPositionErrorsVirtual      
    (const State&                                    s,      // Stage::Time
     const Array_<Transform,ConstrainedBodyIndex>&   allX_AB, 
@@ -1724,43 +1640,23 @@ void calcPositionErrorsVirtual
     Array_<Real>&                                   perr)   // mp of these
     const override
 {
-    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size() == 1);
-
-    const Rotation& R_AB = getBodyRotation(allX_AB, B);
-    const Rotation& R_AF = getBodyRotation(allX_AB, F);
-    const UnitVec3  b_A  = R_AB * defaultAxisB;
-    const UnitVec3  f_A  = R_AF * defaultAxisF;
-
-    perr[0] = dot(b_A, f_A) - cosineOfDefaultAngle;
+    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size()==1);
+    getKernel(s).calcPositionErrors(allX_AB[B], allX_AB[F], &perr[0]);
 }
 
-// ----------------------------------
-// pverr = ~(w_AF-w_AB) * (f_A % b_A)
-// ----------------------------------
 void calcPositionDotErrorsVirtual      
    (const State&                                    s,      // Stage::Position
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
     Array_<Real>&                                   pverr)  // mp of these
-    const override 
+    const override
 {
     assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size()==1);
-    //TODO: should be able to get p info from State
-    const Rotation& R_AB = getBodyRotationFromState(s, B);
-    const Rotation& R_AF = getBodyRotationFromState(s, F);
-    const UnitVec3  b_A  = R_AB * defaultAxisB;
-    const UnitVec3  f_A  = R_AF * defaultAxisF;
-
-    const Vec3&     w_AB = getBodyAngularVelocity(allV_AB, B);
-    const Vec3&     w_AF = getBodyAngularVelocity(allV_AB, F);
-
-    pverr[0] = dot( w_AF-w_AB,  f_A % b_A );
+    getKernel(s).calcPositionDotErrors(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        allV_AB[B], allV_AB[F], &pverr[0]);
 }
 
-// --------------------------------------------------------------
-// paerr =  ~(b_AF-b_AB) * (f_A % b_A)
-//        + ~(w_AF-w_AB) * ((w_AF%f_A) % b_A) - (w_AB%b_A) % f_A)
-// --------------------------------------------------------------
 void calcPositionDotDotErrorsVirtual      
    (const State&                                    s,      // Stage::Velocity
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allA_AB, 
@@ -1769,23 +1665,12 @@ void calcPositionDotDotErrorsVirtual
     const override
 {
     assert(allA_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size()==1);
-    //TODO: should be able to get p and v info from State
-    const Rotation& R_AB = getBodyRotationFromState(s, B);
-    const Rotation& R_AF = getBodyRotationFromState(s, F);
-    const UnitVec3  b_A  = R_AB * defaultAxisB;
-    const UnitVec3  f_A  = R_AF * defaultAxisF;
-    const Vec3&     w_AB = getBodyAngularVelocityFromState(s, B);
-    const Vec3&     w_AF = getBodyAngularVelocityFromState(s, F);
-
-    const Vec3&     b_AB = getBodyAngularAcceleration(allA_AB, B);
-    const Vec3&     b_AF = getBodyAngularAcceleration(allA_AB, F);
-
-    paerr[0] =    dot( b_AF-b_AB, f_A % b_A )
-                + dot( w_AF-w_AB, (w_AF%f_A) % b_A - (w_AB%b_A) % f_A);
+    getKernel(s).calcPositionDotDotErrors(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        getBodyVelocityFromState(s, B),  getBodyVelocityFromState(s, F),
+        allA_AB[B], allA_AB[F], &paerr[0]);
 }
 
-//    lambda * (f_A % b_A) applied to body F
-//   -lambda * (f_A % b_A) applied to body B
 void addInPositionConstraintForcesVirtual
    (const State&                                    s,      // Stage::Position
     const Array_<Real>&                             multipliers, // mp of these
@@ -1795,17 +1680,14 @@ void addInPositionConstraintForcesVirtual
 {
     assert(multipliers.size()==1 && bodyForcesInA.size()==2 
            && qForces.size()==0);
-    const Real lambda = multipliers[0];
-    //TODO: should be able to get p info from State
-    const Rotation&  R_AB = getBodyRotationFromState(s, B);
-    const Rotation&  R_AF = getBodyRotationFromState(s, F);
-    const UnitVec3   b_A = R_AB*defaultAxisB;
-    const UnitVec3   f_A = R_AF*defaultAxisF;
-    const Vec3       torque_F_A = lambda * (f_A % b_A); // on F, in A frame
-
-    addInBodyTorque(s, F,  torque_F_A, bodyForcesInA);
-    addInBodyTorque(s, B, -torque_F_A, bodyForcesInA);
+    getKernel(s).addInPositionConstraintForces(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        &multipliers[0], bodyForcesInA[B], bodyForcesInA[F]);
 }
+
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override
+{   return TwoBodyConstraintEquations<ConstantAngleConstraintKernel>{B, F, getKernel(s)}; }
 
 SimTK_DOWNCAST(ConstantAngleImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
@@ -1893,6 +1775,13 @@ std::pair<Vec3,Vec3>& updBodyStations(State& state) const;
 //      
 //
 
+// The equations above are in BallConstraintKernel
+// (ConstraintEquations.h), which is shared with other scalar types.
+BallConstraintKernel getKernel(const State& s) const {
+    const std::pair<Vec3,Vec3>& pts = getBodyStations(s);
+    return BallConstraintKernel{pts.first, pts.second};
+}
+
 void calcPositionErrorsVirtual      
    (const State&                                    s,      // Stage::Time
     const Array_<Transform,ConstrainedBodyIndex>&   allX_AB, 
@@ -1900,39 +1789,21 @@ void calcPositionErrorsVirtual
     Array_<Real>&                                   perr)   // mp of these
     const override
 {
-    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size() == 3);
-
-    const std::pair<Vec3,Vec3>& pts = getBodyStations(s);
-
-    const Vec3 p_AP = findStationLocation(allX_AB, B1, pts.first);
-    const Vec3 p_AS = findStationLocation(allX_AB, B2, pts.second);
-
-    // See above comments -- this is just the constant of integration; there is a missing (p_AS-p_AC)
-    // term (always 0) here which is what we differentiate to get the verr equation.
-    Vec3::updAs(&perr[0]) = p_AS - p_AP;
+    assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size()==3);
+    getKernel(s).calcPositionErrors(allX_AB[B1], allX_AB[B2], &perr[0]);
 }
- 
+
 void calcPositionDotErrorsVirtual      
    (const State&                                    s,      // Stage::Position
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
     Array_<Real>&                                   pverr)  // mp of these
-    const override 
+    const override
 {
     assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size()==3);
-
-    // Note that we're not using point1.
-    const Vec3& point2 = getBodyStations(s).second;
-
-    //TODO: should be able to get p info from State
-    const Transform&  X_AB   = getBodyTransformFromState(s, B1);
-    const Vec3        p_AS   = findStationLocationFromState(s, B2, point2);
-    const Vec3        p_BC   = ~X_AB*p_AS; // C is a material point of body B
-
-    const Vec3        v_AS    = findStationVelocity(s, allV_AB, B2, 
-                                                    point2);
-    const Vec3        v_AC    = findStationVelocity(s, allV_AB, B1, p_BC);
-    Vec3::updAs(&pverr[0]) = v_AS - v_AC;
+    getKernel(s).calcPositionDotErrors(
+        getBodyTransformFromState(s, B1), getBodyTransformFromState(s, B2),
+        allV_AB[B1], allV_AB[B2], &pverr[0]);
 }
 
 void calcPositionDotDotErrorsVirtual      
@@ -1943,20 +1814,10 @@ void calcPositionDotDotErrorsVirtual
     const override
 {
     assert(allA_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size()==3);
-
-    // Note that we're not using point1.
-    const Vec3& point2 = getBodyStations(s).second;
-
-    //TODO: should be able to get p and v info from State
-
-    const Transform&  X_AB   = getBodyTransformFromState(s, B1);
-    const Vec3        p_AS   = findStationLocationFromState(s, B2, point2);
-    const Vec3        p_BC   = ~X_AB*p_AS; // C is a material point of body B
-
-    const Vec3        a_AS    = findStationAcceleration(s, allA_AB, B2, 
-                                                        point2);
-    const Vec3        a_AC    = findStationAcceleration(s, allA_AB, B1, p_BC);
-    Vec3::updAs(&paerr[0]) = a_AS - a_AC;
+    getKernel(s).calcPositionDotDotErrors(
+        getBodyTransformFromState(s, B1), getBodyTransformFromState(s, B2),
+        getBodyVelocityFromState(s, B1),  getBodyVelocityFromState(s, B2),
+        allA_AB[B1], allA_AB[B2], &paerr[0]);
 }
 
 void addInPositionConstraintForcesVirtual
@@ -1968,27 +1829,14 @@ void addInPositionConstraintForcesVirtual
 {
     assert(multipliers.size()==3 && bodyForcesInA.size()==2 
            && qForces.size()==0);
-
-    // Note that we're not using point1.
-    const Vec3& point2 = getBodyStations(s).second;
-
-    //TODO: should be able to get p info from State
-    const Transform& X_AB  = getBodyTransformFromState(s,B1);
-    const Vec3&      p_FS  = point2;
-    const Vec3       p_AS  = findStationLocationFromState(s, B2, p_FS);
-    const Vec3       p_BC = ~X_AB * p_AS; // shift to B origin, reexpress in B;
-                                  // C is material point of B coincident with S
-
-    const Vec3 force_A = Vec3::getAs(&multipliers[0]);
-
-    // Multipliers are force to be applied to S on F, but
-    // apply the -force not to point P of B, but to the point "C" of B
-    // coincident with S, which won't be exactly the same place
-    // as P if the position-level constraint isn't met exactly.
-
-    addInStationForce(s, B2, p_FS,  force_A, bodyForcesInA);
-    addInStationForce(s, B1, p_BC, -force_A, bodyForcesInA);
+    getKernel(s).addInPositionConstraintForces(
+        getBodyTransformFromState(s, B1), getBodyTransformFromState(s, B2),
+        &multipliers[0], bodyForcesInA[B1], bodyForcesInA[B2]);
 }
+
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override
+{   return TwoBodyConstraintEquations<BallConstraintKernel>{B1, B2, getKernel(s)}; }
 
 SimTK_DOWNCAST(BallImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
@@ -2254,6 +2102,12 @@ Vec3 getFrameColor(int which) const {
 // Ball (last 3 equations) theory above. Otherwise just lay back and 
 // enjoy the ride.
 
+// The equations are in WeldConstraintKernel (ConstraintEquations.h), which
+// is shared with other scalar types.
+WeldConstraintKernel getKernel(const State& s) const {
+    return WeldConstraintKernel{defaultFrameB, defaultFrameF};
+}
+
 void calcPositionErrorsVirtual      
    (const State&                                    s,      // Stage::Time
     const Array_<Transform,ConstrainedBodyIndex>&   allX_AB, 
@@ -2262,22 +2116,7 @@ void calcPositionErrorsVirtual
     const override
 {
     assert(allX_AB.size()==2 && constrainedQ.size()==0 && perr.size()==6);
-
-    const Rotation& R_AB = getBodyRotation(allX_AB, B);
-    const Rotation& R_AF = getBodyRotation(allX_AB, F);
-    const Rotation  RB = R_AB * defaultFrameB.R(); // now expressed in A
-    const Rotation  RF = R_AF * defaultFrameF.R();
-
-    // Orientation error
-    Vec3::updAs(&perr[0]) = Vec3(~RF.x()*RB.y(),
-                                 ~RF.y()*RB.z(),
-                                 ~RF.z()*RB.x());
-
-    const Vec3 p_AF1 = findStationLocation(allX_AB, B, defaultFrameB.p());
-    const Vec3 p_AF2 = findStationLocation(allX_AB, F, defaultFrameF.p());
-
-    // position error
-    Vec3::updAs(&perr[3]) = p_AF2 - p_AF1;
+    getKernel(s).calcPositionErrors(allX_AB[B], allX_AB[F], &perr[0]);
 }
 
 void calcPositionDotErrorsVirtual      
@@ -2285,36 +2124,12 @@ void calcPositionDotErrorsVirtual
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
     const Array_<Real,      ConstrainedQIndex>&     constrainedQDot,
     Array_<Real>&                                   pverr)  // mp of these
-    const override 
+    const override
 {
     assert(allV_AB.size()==2 && constrainedQDot.size()==0 && pverr.size()==6);
-    //TODO: should be able to get p info from State
-    const Rotation& R_AB = getBodyRotationFromState(s, B);
-    const Rotation& R_AF = getBodyRotationFromState(s, F);
-    const Rotation  RB = R_AB * defaultFrameB.R(); // now expressed in A
-    const Rotation  RF = R_AF * defaultFrameF.R();
-
-    const Vec3&     w_AB = getBodyAngularVelocity(allV_AB, B);
-    const Vec3&     w_AF = getBodyAngularVelocity(allV_AB, F);
-    const Vec3      w_BF = w_AF-w_AB; // in A
-
-    // orientation error
-    Vec3::updAs(&pverr[0]) = Vec3( ~w_BF * (RF.x() % RB.y()),
-                                   ~w_BF * (RF.y() % RB.z()),
-                                   ~w_BF * (RF.z() % RB.x()) );
-
-    //TODO: should be able to get p info from State
-    const Transform&  X_AB   = getBodyTransformFromState(s, B);
-    const Vec3        p_AF2  = findStationLocationFromState(s, F, 
-                                                            defaultFrameF.p());
-    const Vec3        p_BC   = ~X_AB*p_AF2; // C is a material point of body B
-
-    const Vec3        v_AF2  = findStationVelocity(s, allV_AB, F, 
-                                                   defaultFrameF.p());
-    const Vec3        v_AC   = findStationVelocity(s, allV_AB, B, p_BC);
- 
-    // position error
-    Vec3::updAs(&pverr[3]) = v_AF2 - v_AC;
+    getKernel(s).calcPositionDotErrors(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        allV_AB[B], allV_AB[F], &pverr[0]);
 }
 
 void calcPositionDotDotErrorsVirtual      
@@ -2325,40 +2140,10 @@ void calcPositionDotDotErrorsVirtual
     const override
 {
     assert(allA_AB.size()==2 && constrainedQDotDot.size()==0 && paerr.size()==6);
-    //TODO: should be able to get p and v info from State
-    const Rotation& R_AB = getBodyRotationFromState(s, B);
-    const Rotation& R_AF = getBodyRotationFromState(s, F);
-    const Rotation  RB = R_AB * defaultFrameB.R(); // now expressed in A
-    const Rotation  RF = R_AF * defaultFrameF.R();
-
-    const Vec3&     w_AB = getBodyAngularVelocityFromState(s, B);
-    const Vec3&     w_AF = getBodyAngularVelocityFromState(s, F);
-    const Vec3      w_BF = w_AF-w_AB; // in A
-
-    const Vec3&     b_AB = getBodyAngularAcceleration(allA_AB, B);
-    const Vec3&     b_AF = getBodyAngularAcceleration(allA_AB, F);
-    const Vec3      b_BF = b_AF-b_AB; // in A
-
-    // orientation error
-    Vec3::updAs(&paerr[0]) = 
-        Vec3( dot( b_BF, RF.x() % RB.y() )
-                  + dot( w_BF, (w_AF%RF.x()) % RB.y() - (w_AB%RB.y()) % RF.x()),
-              dot( b_BF, RF.y() % RB.z() )
-                  + dot( w_BF, (w_AF%RF.y()) % RB.z() - (w_AB%RB.z()) % RF.y()),
-              dot( b_BF, RF.z() % RB.x() )
-                  + dot( w_BF, (w_AF%RF.z()) % RB.x() - (w_AB%RB.x()) % RF.z()));
-
-    const Transform&  X_AB   = getBodyTransformFromState(s, B);
-    const Vec3        p_AF2  = findStationLocationFromState(s, F, 
-                                                            defaultFrameF.p());
-    const Vec3        p_BC   = ~X_AB*p_AF2; // C is a material point of body B
-
-    const Vec3        a_AF2  = findStationAcceleration(s, allA_AB, F, 
-                                                       defaultFrameF.p());
-    const Vec3        a_AC   = findStationAcceleration(s, allA_AB, B, p_BC);
-
-    // position error
-    Vec3::updAs(&paerr[3]) = a_AF2 - a_AC;
+    getKernel(s).calcPositionDotDotErrors(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        getBodyVelocityFromState(s, B),  getBodyVelocityFromState(s, F),
+        allA_AB[B], allA_AB[F], &paerr[0]);
 }
 
 void addInPositionConstraintForcesVirtual
@@ -2370,31 +2155,14 @@ void addInPositionConstraintForcesVirtual
 {
     assert(multipliers.size()==6 && bodyForcesInA.size()==2 
            && qForces.size()==0);
-
-    const Vec3& torques = Vec3::getAs(&multipliers[0]);
-    const Vec3& force_A = Vec3::getAs(&multipliers[3]);
-
-    //TODO: should be able to get p info from State
-    const Rotation& R_AB = getBodyRotationFromState(s, B);
-    const Rotation& R_AF = getBodyRotationFromState(s, F);
-    const Rotation  RB = R_AB * defaultFrameB.R(); // now expressed in A
-    const Rotation  RF = R_AF * defaultFrameF.R();
-
-    const Vec3 torque_F_A =   torques[0] * (RF.x() % RB.y())
-                            + torques[1] * (RF.y() % RB.z())
-                            + torques[2] * (RF.z() % RB.x());
-
-    addInBodyTorque(s, F,  torque_F_A, bodyForcesInA);
-    addInBodyTorque(s, B, -torque_F_A, bodyForcesInA);
-
-    const Transform& X_AB  = getBodyTransformFromState(s,B);
-    const Vec3&      p_FF2 = defaultFrameF.p();
-    const Vec3       p_AF2 = findStationLocationFromState(s, F, p_FF2);
-    const Vec3       p_BC = ~X_AB * p_AF2;
-
-    addInStationForce(s, F, p_FF2, force_A, bodyForcesInA);
-    addInStationForce(s, B, p_BC, -force_A, bodyForcesInA);
+    getKernel(s).addInPositionConstraintForces(
+        getBodyTransformFromState(s, B), getBodyTransformFromState(s, F),
+        &multipliers[0], bodyForcesInA[B], bodyForcesInA[F]);
 }
+
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override
+{   return TwoBodyConstraintEquations<WeldConstraintKernel>{B, F, getKernel(s)}; }
 
 SimTK_DOWNCAST(WeldImpl, ConstraintImpl);
 //------------------------------------------------------------------------------
@@ -2480,6 +2248,13 @@ Real getPointDisplayRadius() const {return pointRadius;}
 //    aerr = ~(a_AP1 - a_AP0) * n_A + ~(v_AP1 - v_AP0) * (w_AC X n_A)
 //         = ~(a_AP1 - a_AP0 - w_AC X (v_AP1 - v_AP0)) * n_A
 // 
+// The equations above are in NoSlip1DConstraintKernel (ConstraintEquations.h),
+// which is shared with other scalar types.
+NoSlip1DConstraintKernel getKernel(const State& s) const {
+    const std::pair<Vec3,UnitVec3>& info = getContactInfo(s);
+    return NoSlip1DConstraintKernel{info.first, info.second};
+}
+
 void calcVelocityErrorsVirtual
    (const State&                                    s,      // Stage::Position
     const Array_<SpatialVec,ConstrainedBodyIndex>&  allV_AB, 
@@ -2490,25 +2265,10 @@ void calcVelocityErrorsVirtual
     // There ought to be at least 2 distinct bodies, up to 3.
     assert((allV_AB.size()==2 || allV_AB.size() == 3)
            && constrainedU.size()==0 && verr.size()==1);
-
-    const std::pair<Vec3,UnitVec3>& info = getContactInfo(s);
-    const Vec3&     P_C = info.first;
-    const UnitVec3& n_C = info.second;
-
-    //TODO: should be able to get p info from State
-    const Transform& X_AC  = getBodyTransformFromState(s, caseBody);
-    const Transform& X_AB0 = getBodyTransformFromState(s, movingBody0);
-    const Transform& X_AB1 = getBodyTransformFromState(s, movingBody1);
-    const Vec3       p_AP  =  X_AC * P_C;       // P's location in A
-    const Vec3       p_P0  = ~X_AB0 * p_AP;     // P0's station in B0
-    const Vec3       p_P1  = ~X_AB1 * p_AP;     // P1's station in B1
-    const UnitVec3   n_A   = X_AC.R() * n_C;
-
-    const Vec3       v_AP0 = findStationVelocity(s, allV_AB, movingBody0, p_P0);
-    const Vec3       v_AP1 = findStationVelocity(s, allV_AB, movingBody1, p_P1);
-
-    // Calculate this scalar using A-frame vectors.
-    verr[0] = ~(v_AP1-v_AP0) * n_A;
+    getKernel(s).calcVelocityErrors(getBodyTransformFromState(s, caseBody),
+        getBodyTransformFromState(s, movingBody0),
+        getBodyTransformFromState(s, movingBody1),
+        allV_AB[movingBody0], allV_AB[movingBody1], &verr[0]);
 }
 
 void calcVelocityDotErrorsVirtual      
@@ -2520,29 +2280,13 @@ void calcVelocityDotErrorsVirtual
 {
     assert((allA_AB.size()==2 || allA_AB.size() == 3)
            && constrainedUDot.size()==0 && vaerr.size()==1);
-
-    const std::pair<Vec3,UnitVec3>& info = getContactInfo(s);
-    const Vec3&     P_C = info.first;
-    const UnitVec3& n_C = info.second;
-
-    //TODO: should be able to get p and v info from State
-    const Transform& X_AC  = getBodyTransformFromState(s, caseBody);
-    const Transform& X_AB0 = getBodyTransformFromState(s, movingBody0);
-    const Transform& X_AB1 = getBodyTransformFromState(s, movingBody1);
-    const Vec3       p_AP  =  X_AC * P_C;       // P's location in A
-    const Vec3       p_P0  = ~X_AB0 * p_AP;     // P0's station in B0
-    const Vec3       p_P1  = ~X_AB1 * p_AP;     // P1's station in B1
-    const UnitVec3   n_A   = X_AC.R() * n_C;
-
-    const Vec3  v_AP0 = findStationVelocityFromState(s, movingBody0, p_P0);
-    const Vec3  v_AP1 = findStationVelocityFromState(s, movingBody1, p_P1);
-    const Vec3& w_AC  = getBodyAngularVelocityFromState(s, caseBody);
-
-    const Vec3  a_AP0 = findStationAcceleration(s, allA_AB, movingBody0, p_P0);
-    const Vec3  a_AP1 = findStationAcceleration(s, allA_AB, movingBody1, p_P1);
-
-    // Calculate this scalar using A-frame vectors.
-    vaerr[0] = ~(a_AP1-a_AP0 - w_AC % (v_AP1-v_AP0)) * n_A;
+    getKernel(s).calcVelocityDotErrors(getBodyTransformFromState(s, caseBody),
+        getBodyTransformFromState(s, movingBody0),
+        getBodyTransformFromState(s, movingBody1),
+        getBodyVelocityFromState(s, caseBody),
+        getBodyVelocityFromState(s, movingBody0),
+        getBodyVelocityFromState(s, movingBody1),
+        allA_AB[movingBody0], allA_AB[movingBody1], &vaerr[0]);
 }
 
 // apply f=lambda*n to contact point P1 of B1,
@@ -2555,25 +2299,17 @@ void addInVelocityConstraintForcesVirtual
 {
     assert(multipliers.size()==1 && mobilityForces.size()==0 
            && (bodyForcesInA.size()==2 || bodyForcesInA.size()==3));
+    getKernel(s).addInVelocityConstraintForces(
+        getBodyTransformFromState(s, caseBody),
+        getBodyTransformFromState(s, movingBody0),
+        getBodyTransformFromState(s, movingBody1), &multipliers[0],
+        bodyForcesInA[movingBody0], bodyForcesInA[movingBody1]);
+}
 
-    const std::pair<Vec3,UnitVec3>& info = getContactInfo(s);
-    const Vec3&     P_C = info.first;
-    const UnitVec3& n_C = info.second;
-
-    const Real lambda = multipliers[0];
-
-    //TODO: should be able to get p info from State
-    const Transform& X_AC  = getBodyTransformFromState(s, caseBody);
-    const Transform& X_AB0 = getBodyTransformFromState(s, movingBody0);
-    const Transform& X_AB1 = getBodyTransformFromState(s, movingBody1);
-    const Vec3       p_AP  = X_AC * P_C; // P's location in A
-    const Vec3       p_P0  = ~X_AB0 * p_AP;              // P0's station in B0
-    const Vec3       p_P1  = ~X_AB1 * p_AP;              // P1's station in B1
-
-    const Vec3       force_A = X_AC.R()*(lambda*n_C);
-
-    addInStationForce(s, movingBody1, p_P1,  force_A, bodyForcesInA);
-    addInStationForce(s, movingBody0, p_P0, -force_A, bodyForcesInA);
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& s) const override {
+    return NoSlip1DConstraintEquations{caseBody, movingBody0, movingBody1,
+                                       getKernel(s)};
 }
 
 SimTK_DOWNCAST(NoSlip1DImpl, ConstraintImpl);
@@ -2965,6 +2701,11 @@ Custom::Implementation& updImplementation() {
 }
 
 // Forward all the virtuals to the Custom::Implementation virtuals.
+// Only the CoordinateCoupler among the Custom constraints is supported for
+// other scalar types (defined after CoordinateCouplerImpl below).
+std::optional<ConstraintEquations>
+getConstraintEquations(const State& state) const override;
+
 void realizeTopologyVirtual(State& s) const override {getImplementation().realizeTopology(s);}
 void realizeModelVirtual   (State& s) const override {getImplementation().realizeModel(s);}
 void realizeInstanceVirtual(const State& s) const override {getImplementation().realizeInstance(s);}
@@ -3116,6 +2857,13 @@ void addInPositionConstraintForces
     Array_<SpatialVec,ConstrainedBodyIndex>&    bodyForces,
     Array_<Real,ConstrainedQIndex>&             qForces) const override;
 
+// For creating its counterpart for other scalar types.
+const Function& getFunction() const {return *function;}
+ConstrainedMobilizerIndex getArgumentMobilizer(int i) const
+{   return coordBodies[i]; }
+MobilizerQIndex getArgumentQIndex(int i) const {return coordIndices[i];}
+int getNumArguments() const {return (int)coordBodies.size();}
+
 //------------------------------------------------------------------------------
                                     private:
 friend class Constraint::CoordinateCoupler;
@@ -3137,6 +2885,23 @@ mutable Vector                      temp;
 int*                                referenceCount;
 
 };
+
+
+
+// The CoordinateCoupler is the only Custom constraint supported for other
+// scalar types.
+inline std::optional<ConstraintEquations> Constraint::CustomImpl::
+getConstraintEquations(const State& state) const {
+    const auto* coupler = 
+        dynamic_cast<const CoordinateCouplerImpl*>(&getImplementation());
+    if (!coupler) return std::nullopt;
+    CoordinateCouplerConstraintEquations equations;
+    equations.function = &coupler->getFunction();
+    for (int i=0; i < coupler->getNumArguments(); ++i)
+        equations.arguments.push_back(getConstrainedQIndex(state, 
+            coupler->getArgumentMobilizer(i), coupler->getArgumentQIndex(i)));
+    return equations;
+}
 
 
 

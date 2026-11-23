@@ -33,8 +33,8 @@
 #include "simbody/internal/MobilizedBody.h"
 #include "simbody/internal/MobilizedBody_Ground.h"
 
-#include "SimbodyTreeState.h"
-#include "RigidBodyNode.h"
+#include "simbody/internal/tree/SimbodyTreeState.h"
+#include "simbody/internal/tree/RigidBodyNode.h"
 
 #include <set>
 #include <map>
@@ -49,7 +49,10 @@ using std::pair;
 #include <set>
 #include <algorithm>
 
-class RigidBodyNode;
+namespace SimTK {
+template <class P> class RigidBodyNode_;
+typedef RigidBodyNode_<Real> RigidBodyNode;
+}
 class RBDistanceConstraint;
 class RBStation;
 class RBDirection;
@@ -1046,6 +1049,13 @@ public:
     // The TopologyCache in the State should be a copy of the one
     // we keep locally here. We always use our local copy rather than
     // this one except for checking that the State looks reasonable.
+    // For other scalar types; see SimbodyMatterSubsystem.
+    bool isOwnerOf(const State& state) const;
+    void createRigidBodyNodes(RigidBodyNodeFactory& factory,
+                              const State& state) const;
+    void calcConstraintDescriptions(const State& state,
+        std::vector<ConstraintDescription>& descriptions) const;
+
     const SBTopologyCache& getTopologyCache(const State& s) const {
         assert(subsystemTopologyHasBeenRealized() && topologyCacheIndex >= 0);
         return Value<SBTopologyCache>::downcast

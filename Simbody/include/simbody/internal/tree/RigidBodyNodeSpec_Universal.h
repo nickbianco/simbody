@@ -29,9 +29,10 @@
  * as a UJoint or Hooke's joint.
  */
 
-#include "SimbodyMatterSubsystemRep.h"
 #include "RigidBodyNode.h"
 #include "RigidBodyNodeSpec.h"
+
+namespace SimTK {
 
     // UNIVERSAL (U-JOINT, HOOKE'S JOINT) //
 
@@ -55,18 +56,23 @@
 // Note that the U-Joint degrees of freedom relating the parent's F frame to 
 // the child's M frame are about x and y, with the "long" axis of the
 // driveshaft along z.
-class RBNodeUJoint : public RigidBodyNodeSpec<2, false> {
+// This is templatized on the scalar type T.
+template <class T>
+class RBNodeUJoint_ : public RigidBodyNodeSpec_<T, 2, false> {
 public:
-typedef typename RigidBodyNodeSpec<2, false>::HType HType;
-virtual const char* type() { return "ujoint"; }
+SimTK_RBNODE_SCALAR_TYPEDEFS(T);
+typedef RigidBodyNode_<T> Base;
+typedef RigidBodyNodeSpec_<T, 2, false> Spec;
+typedef typename Spec::HType HType;
+const char* type() const override { return "ujoint"; }
 
-RBNodeUJoint(const MassProperties& mProps_B,
+RBNodeUJoint_(const MassProperties_<T>& mProps_B,
                 bool                  isReversed,
                 UIndex&               nextUSlot,
                 USquaredIndex&        nextUSqSlot,
                 QIndex&               nextQSlot)
-:   RigidBodyNodeSpec<2, false>(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
-                         RigidBodyNode::QDotIsAlwaysTheSameAsU, RigidBodyNode::QuaternionIsNeverUsed, 
+:   Spec(mProps_B,nextUSlot,nextUSqSlot,nextQSlot,
+                         Base::QDotIsAlwaysTheSameAsU, Base::QuaternionIsNeverUsed, 
                          isReversed)
 {
     this->updateSlots(nextUSlot,nextUSqSlot,nextQSlot);
@@ -118,27 +124,27 @@ int calcQPoolSize(const SBModelVars&) const
 {   return PoolSize; }
 
 // Precalculation of sin/cos costs around 100 flops.
-void performQPrecalculations(const SBStateDigest& sbs,
-                                const Real* q, int nq,
-                                Real* qCache,  int nQCache,
-                                Real* qErr,    int nQErr) const
+void performQPrecalculations(const SBStateDigest_<T>& sbs,
+                                const RealP* q, int nq,
+                                RealP* qCache,  int nQCache,
+                                RealP* qErr,    int nQErr) const
 {
     assert(q && nq==2 && qCache && nQCache==PoolSize && nQErr==0);
-    Vec2::updAs(&qCache[CosQ]) = Vec2(std::cos(q[0]),std::cos(q[1]));
-    Vec2::updAs(&qCache[SinQ]) = Vec2(std::sin(q[0]),std::sin(q[1]));
+    Vec<2,T>::updAs(&qCache[CosQ]) = Vec<2,T>(cos(q[0]),cos(q[1]));
+    Vec<2,T>::updAs(&qCache[SinQ]) = Vec<2,T>(sin(q[0]),sin(q[1]));
 }
 
 // TODO: should use precalculated sin/cos but doesn't.
-void calcX_FM(const SBStateDigest& sbs,
-                const Real* q,      int nq,
-                const Real* qCache, int nQCache,
-                Transform&  X_FM) const
+void calcX_FM(const SBStateDigest_<T>& sbs,
+                const RealP* q,      int nq,
+                const RealP* qCache, int nQCache,
+                TransformP&  X_FM) const
 {
     assert(q && nq==2 && qCache && nQCache==PoolSize);
     // TODO: use qCache
     // We're only updating the orientation here because a U-joint 
     // can't translate. This is a body fixed X-Y sequence.
-    X_FM.updR() = Rotation(BodyRotationSequence, q[0], XAxis, q[1], YAxis);
+    X_FM.updR() = RotationP(BodyRotationSequence, q[0], XAxis, q[1], YAxis);
     X_FM.updP() = 0;
 }
 
@@ -148,18 +154,18 @@ void calcX_FM(const SBStateDigest& sbs,
 // second is a rotation rate about the current My, so we have to transform it 
 // into F to make H_FM uniformly expressed in F.
 void calcAcrossJointVelocityJacobian(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               H_FM) const
 {
     // "upd" because we're realizing positions now
-    const SBTreePositionCache& pc = sbs.updTreePositionCache(); 
-    const Transform  X_F0M0 = this->findX_F0M0(pc);
+    const SBTreePositionCache_<T>& pc = sbs.updTreePositionCache(); 
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
+    const RotationP& R_FM = X_F0M0.R();
 
-    H_FM(0) = SpatialVec(  Vec3(1,0,0) , Vec3(0) );
-    H_FM(1) = SpatialVec(    R_FM.y()  , Vec3(0) );
+    H_FM(0) = SpatialVecP(  Vec3P(1,0,0) , Vec3P(0) );
+    H_FM(1) = SpatialVecP(    R_FM.y()  , Vec3P(0) );
 }
 
 // Since the second row of the Jacobian H_FM above is not constant in F,
@@ -168,24 +174,29 @@ void calcAcrossJointVelocityJacobian(
 // its time derivative in A is the angular velocity of B in A crossed with
 // the vector, i.e., d_A/dt r_B_A = w_AB % r_B_A.
 void calcAcrossJointVelocityJacobianDot(
-    const SBStateDigest& sbs,
+    const SBStateDigest_<T>& sbs,
     HType&               HDot_FM) const
 {
-    const SBTreePositionCache& pc = sbs.getTreePositionCache();
+    const SBTreePositionCache_<T>& pc = sbs.getTreePositionCache();
     // "upd" because we're realizing velocities now
-    const SBTreeVelocityCache& vc = sbs.updTreeVelocityCache(); 
+    const SBTreeVelocityCache_<T>& vc = sbs.updTreeVelocityCache(); 
 
-    const Transform  X_F0M0 = this->findX_F0M0(pc);
+    const TransformP  X_F0M0 = this->findX_F0M0(pc);
 
     // Dropping the 0's here.
-    const Rotation& R_FM = X_F0M0.R();
-    const Vec3      w_FM = this->find_w_F0M0(pc,vc); // angular velocity of M in F
+    const RotationP& R_FM = X_F0M0.R();
+    const Vec3P      w_FM = this->find_w_F0M0(pc,vc); // angular velocity of M in F
 
-    HDot_FM(0) = SpatialVec(     Vec3(0)     , Vec3(0) );
-    HDot_FM(1) = SpatialVec( w_FM % R_FM.y() , Vec3(0) );
+    HDot_FM(0) = SpatialVecP(     Vec3P(0)     , Vec3P(0) );
+    HDot_FM(1) = SpatialVecP( w_FM % R_FM.y() , Vec3P(0) );
 }
 
 };
+
+// The default Real precision version.
+typedef RBNodeUJoint_<Real> RBNodeUJoint;
+
+} // namespace SimTK
 
 
 

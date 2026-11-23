@@ -82,9 +82,13 @@ endforeach()
 file(GLOB CORE_HEADERS     include/*.h                  */include/*.h)
 file(GLOB TOP_HEADERS      include/simbody/*.h          */include/simbody/*.h)
 file(GLOB INTERNAL_HEADERS include/simbody/internal/*.h */include/simbody/internal/*.h)
+# The scalar-templatized multibody tree implementation headers,
+# for evaluating Simbody's tree computations with other scalar types.
+file(GLOB TREE_HEADERS     include/simbody/internal/tree/*.h)
 install(FILES ${CORE_HEADERS} DESTINATION ${SIMBODY_INCLUDE_INSTALL_DIR})
 install(FILES ${TOP_HEADERS} DESTINATION ${SIMBODY_INCLUDE_INSTALL_DIR}/simbody)
 install(FILES ${INTERNAL_HEADERS} DESTINATION ${SIMBODY_INCLUDE_INSTALL_DIR}/simbody/internal)
+install(FILES ${TREE_HEADERS} DESTINATION ${SIMBODY_INCLUDE_INSTALL_DIR}/simbody/internal/tree)
 
 if( INSTALL_DOCS )
     file(GLOB SIMBODY_DOCS doc/*.pdf doc/*.txt doc/*.md)
@@ -97,7 +101,7 @@ set(BUILD_SHARED_LIBS ${SIMBODY_BUILD_SHARED_LIBS})
 
 add_library(SimTKsimbody
     ${SOURCE_FILES} ${SOURCE_INCLUDE_FILES}
-    ${API_ABS_INCLUDE_FILES})
+    ${API_ABS_INCLUDE_FILES} ${TREE_HEADERS})
 
 target_link_libraries(SimTKsimbody PUBLIC
     SimTKmath SimTKcommon ${MATH_LIBS_TO_USE})

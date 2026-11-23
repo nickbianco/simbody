@@ -39,8 +39,12 @@
 #include "SimbodyMatterSubsystemRep.h"
 #include "BodyRep.h"
 #include "MotionImpl.h"
+#include "simbody/internal/tree/RigidBodyNodeSpec_FunctionBased.h" // the kernel
 
-class RigidBodyNode;
+namespace SimTK {
+class RigidBodyNodeFactory;
+struct RigidBodyNodeInfo;
+}
 
 namespace SimTK {
 
@@ -110,6 +114,13 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const = 0;
+
+    // This creates a rigid body node for a scalar type other than Real, by
+    // calling the factory's method for this mobilizer type (a visitor). See
+    // simbody/internal/tree/RigidBodyNodeFactory.h. Called by
+    // SimbodyMatterSubsystem::createRigidBodyNodes().
+    virtual void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                                     const RigidBodyNodeInfo& info) const = 0;
 
     virtual void realizeTopologyVirtual     (State&)        const {}
     virtual void realizeModelVirtual        (State&)        const {}
@@ -556,6 +567,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -579,6 +592,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -601,6 +616,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -623,6 +640,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -645,6 +664,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==2, 
@@ -667,6 +688,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -701,6 +724,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -729,6 +754,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -763,6 +790,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==6, 
@@ -786,6 +815,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -825,6 +856,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -898,6 +931,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3, 
@@ -920,6 +955,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==7||nq==6, 
@@ -949,6 +986,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==4||nq==3, 
@@ -974,6 +1013,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==7||nq==6, 
@@ -1003,6 +1044,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==0, 
@@ -1024,6 +1067,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==0, 
@@ -1052,6 +1097,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==1, 
@@ -1079,6 +1126,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
 
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==3,
@@ -1217,6 +1266,8 @@ public:
         UIndex&        nextUSlot,
         USquaredIndex& nextUSqSlot,
         QIndex&        nextQSlot) const override;
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const override;
     
     void copyOutDefaultQImpl(int nq, Real* q) const override {
         SimTK_ASSERT(nq==getImplementation().getImpl().getNQ() || nq==getImplementation().getImpl().getNQ()-1, 
@@ -1275,8 +1326,8 @@ public:
             assert(functions[i]->getArgumentSize() == coordIndices[i].size());
             assert(functions[i]->getMaxDerivativeOrder() >= 2);
         }
-        Arot = Mat33(1);
-        Atrans = Mat33(1);
+        kernel.Arot = Mat33(1);
+        kernel.Atrans = Mat33(1);
     }
     FunctionBasedImpl(SimbodyMatterSubsystem& matter, int nmobilities, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Array_<Vec3>& axes)
             : Implementation(matter, nmobilities, nmobilities, 0), subsystem(matter.getMySubsystemIndex()), nu(nmobilities), cacheIndex(0), functions(functions), coordIndices(coordIndices), referenceCount(new int[1]) {
@@ -1298,8 +1349,8 @@ public:
         assert((axes[3]%axes[5]).norm() > tol);
         assert((axes[4]%axes[5]).norm() > tol);
 
-        Arot = Mat33(axes[0].normalize(), axes[1].normalize(), axes[2].normalize());
-        Atrans = Mat33(axes[3].normalize(), axes[4].normalize(), axes[5].normalize());
+        kernel.Arot = Mat33(axes[0].normalize(), axes[1].normalize(), axes[2].normalize());
+        kernel.Atrans = Mat33(axes[3].normalize(), axes[4].normalize(), axes[5].normalize());
     }
     
     ~FunctionBasedImpl() {
@@ -1315,40 +1366,13 @@ public:
         return new FunctionBasedImpl(*this);
     }
 
+    // Create the rigid body node for a scalar type other than Real (see
+    // CustomImpl::createRigidBodyNode()).
+    void createRigidBodyNode(RigidBodyNodeFactory&    factory,
+                             const RigidBodyNodeInfo& info) const;
+
     Transform calcMobilizerTransformFromQ(const State& s, int nq, const Real* q) const override {
-        // Initialize the tranformation to be returned
-        Transform X(Vec3(0));
-        Vec6 spatialCoords;
-        
-        // Get the spatial cooridinates as a function of the q's
-        for(int i=0; i < 6; i++){
-            //Coordinates for this function
-            int nc = coordIndices[i].size();
-            Vector fcoords(nc);
-    
-            for(int j=0; j < nc; j++)
-                fcoords(j) = q[coordIndices[i][j]];            
-            
-            //default behavior of constant function should take a Vector of length 0
-            spatialCoords(i) = functions[i]->calcValue(fcoords);
-        }
-
-/*
-        UnitVec3 axis1;
-        axis1.getAs(&Arot(0,0));
-        UnitVec3 axis2;
-        axis2.getAs(&Arot(0,1));
-        UnitVec3 axis3;
-        axis3.getAs(&Arot(0,2));
-*/
-
-        //X.updR().setRotationToBodyFixedXYZ(spatialCoords.getSubVec<3>(0));
-        X.updR().setRotationFromMat33TrustMe(Rotation(spatialCoords(0), UnitVec3::getAs(&Arot(0,0)))*
-            Rotation(spatialCoords(1), UnitVec3::getAs(&Arot(0,1)))*Rotation(spatialCoords(2), UnitVec3::getAs(&Arot(0,2))));
-        X.updP() = spatialCoords(3)*UnitVec3::getAs(&Atrans(0,0))+spatialCoords(4)*UnitVec3::getAs(&Atrans(0,1))
-                    +spatialCoords(5)*UnitVec3::getAs(&Atrans(0,2));
-
-        return X;
+        return kernel.calcX_FM(calcSpatialCoords(q));
     }
 
     SpatialVec multiplyByHMatrix(const State& s, int nu, const Real* u) const override {
@@ -1683,42 +1707,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid  
                 cache.isValidH = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildH(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildH(*this, &q[0]);
                 // H matrix is now valid 
                 cache.isValidH = true;
                 break;
@@ -1733,42 +1757,42 @@ public:
         switch (nu) {
             case 1: {
                 CacheInfo<1>& cache = Value<CacheInfo<1> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 2: {
                 CacheInfo<2>& cache = Value<CacheInfo<2> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 3: {
                 CacheInfo<3>& cache = Value<CacheInfo<3> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid  
                 cache.isValidHdot = true;
                 break;
             }
             case 4: {
                 CacheInfo<4>& cache = Value<CacheInfo<4> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 5: {
                 CacheInfo<5>& cache = Value<CacheInfo<5> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
             }
             case 6: {
                 CacheInfo<6>& cache = Value<CacheInfo<6> >::updDowncast(s.updCacheEntry(subsystem, cacheIndex)).upd();
-                cache.buildHdot(q, u, getMobilizerTransform(s), functions, coordIndices, Arot, Atrans);
+                cache.buildHdot(*this, &q[0], &u[0]);
                 // Hdot matrix is now valid 
                 cache.isValidHdot = true;
                 break;
@@ -1783,134 +1807,81 @@ private:
     const Array_<const Function*> functions;
     const Array_<Array_<int> > coordIndices;
     int* referenceCount;
-    //const Array_<Vec3> axes;
-    Mat33 Arot, Atrans;
+    FunctionBasedMobilizerKernel kernel; // the axes
+
+    // The arguments of Function i, from the mobilizer's q's, in x (reused
+    // for each Function to avoid allocations).
+    void getArguments(int i, const Real* q, Vector& x) const {
+        const int nc = (int)coordIndices[i].size();
+        if (x.size() != nc) x.resize(nc);
+        for (int k=0; k < nc; ++k) x[k] = q[coordIndices[i][k]];
+    }
+    // The spatial coordinates (the Functions' values, including those of
+    // constant Functions of no q's).
+    Vec6 calcSpatialCoords(const Real* q) const {
+        Vec6 spatialCoords;
+        Vector x;
+        for (int i=0; i < 6; ++i) {
+            getArguments(i, q, x);
+            spatialCoords[i] = functions[i]->calcValue(x);
+        }
+        return spatialCoords;
+    }
+    // The spatial coordinates and their partials with respect to the q's,
+    // evaluating each Function once.
+    template <int N>
+    void calcSpatialCoordsAndFq(const Real* q, Vec6& spatialCoords,
+                                Mat<6,N>& Fq) const {
+        Fq = 0;
+        Array_<int> deriv(1);
+        Vector x;
+        for (int i=0; i < 6; ++i) {
+            getArguments(i, q, x);
+            spatialCoords[i] = functions[i]->calcValue(x);
+            for (int j=0; j < x.size(); ++j) {
+                deriv[0] = j;
+                Fq(i, coordIndices[i][j]) += functions[i]->calcDerivative(deriv, x);
+            }
+        }
+    }
+    // The time derivatives of the partials, the second partials times u.
+    template <int N> Mat<6,N> calcFqDot(const Real* q, const Real* u) const {
+        Mat<6,N> FqDot(0);
+        Array_<int> derivs(2);
+        Vector x;
+        for (int i=0; i < 6; ++i) {
+            getArguments(i, q, x);
+            for (int j=0; j < x.size(); ++j) {
+                derivs[0] = j;
+                for (int k=0; k < x.size(); ++k) {
+                    derivs[1] = k;
+                    FqDot(i, coordIndices[i][j]) +=
+                        functions[i]->calcDerivative(derivs, x)
+                        * u[coordIndices[i][k]];
+                }
+            }
+        }
+        return FqDot;
+    }
+
     template <int N> class CacheInfo {
     public:
         CacheInfo() : isValidH(false), isValidHdot(false) { }
-
-        void buildH(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans)
-        {
-            // Build the Fq and Fqq matrices of partials of the spatial functions with respect to the gen coordinates, q    
-            // Cycle through each row (function describing spatial coordinate)
-            Fq = Mat<6,N>(0);
-            Vec6 spatialCoords(0);
-            Array_<int> deriv(1);
-            Vector fcoords(coordIndices[0].size()); 
-
-            for(int i=0; i < 6; i++){
-                // Determine the number of coordinates for this function
-                int nc = coordIndices[i].size();
-                if (fcoords.size() != nc)
-                    fcoords.resize(nc);
-
-                if (nc > 0) {
-                    // Get coordinate values to evaluate the function
-                    for(int k = 0; k < nc; k++)
-                        fcoords(k) = q(coordIndices[i][k]);
-
-                    for (int j = 0; j < nc; j++) {
-                        deriv[0] = j;
-                        Fq(i, coordIndices[i][j]) = functions[i]->calcDerivative(deriv, fcoords);
-                    }
-                    //default behavior of constant function should take a Vector of length 0
-                    spatialCoords(i) = functions[i]->calcValue(fcoords);
-                }
-
-            }
-            // Note rotations are body fixed sequences, and so taking the derivative yields a body-fixed angular velocity
-            // and therefore, must be transformed to the parent frame.
-
-            // omega = [a1, R_F1*a2, R_F2*a3]*{Theta_dot(q)}, where Theta_dot(q) is described by the first three functions
-            //       = [W*[Fq_theta]*qdot
-            // vel = [A]*{X_dot(q)}, where X_dot(q) is described by the last three functions
-            //     = [A]*[Fq_x]*qdot
-            
-            Rotation R_F1 = Rotation(spatialCoords(0), UnitVec3::getAs(&Arot(0,0)));
-            Rotation R_F2 = R_F1*Rotation(spatialCoords(1), UnitVec3::getAs(&Arot(0,1)));
-
-            Mat31 temp;
-            Mat33 W(UnitVec3::getAs(&Arot(0,0)), R_F1*(UnitVec3::getAs(&Arot(0,1))), R_F2*(UnitVec3::getAs(&Arot(0,2))));
-
-            for(int i=0; i < N; i++){
-                temp = W*(Fq.template getSubMat<3,1>(0,i));
-                h(0,i) = Vec3::getAs(&temp(0,0));
-                temp = Atrans*(Fq.template getSubMat<3,1>(3,i));
-                h(1,i) = Vec3::getAs(&temp(0,0));
-            }
+        void buildH(const FunctionBasedImpl& impl, const Real* q) {
+            impl.calcSpatialCoordsAndFq<N>(q, spatialCoords, Fq);
+            impl.kernel.calcH(spatialCoords, Fq, h);
         }
-
-        void buildHdot(Vector& q, Vector& u, const Transform& X_FM, const Array_<const Function*>& functions, const Array_<Array_<int> >& coordIndices, const Mat33 Arot, const Mat33 Atrans)
-        {
-            Mat<6,N> Fqdot(0);
-            Vec6 spatialCoords;
-            Array_<int> derivs(2);
-            Vector fcoords(coordIndices[0].size()); 
-
-            for(int i=0; i < 6; i++){
-                // Determine the number of coordinates for this function
-                int nc = coordIndices[i].size();
-                if (fcoords.size() != nc)
-                    fcoords.resize(nc);
-                
-                if (nc > 0) {
-                    // Get coordinate values to evaluate the function
-                    for(int k = 0; k < nc; k++)
-                        fcoords(k) = q(coordIndices[i][k]);
-
-                    // function is dependent on a mobility if its index is in the list of function coordIndices
-                    // cycle through the mobilities
-                    for (int j = 0; j < nc; j++) {
-                        derivs[0] = j;
-                        for (int k = 0; k < nc; k++) {
-                            derivs[1] = k;
-                            Fqdot(i, coordIndices[i][j]) += functions[i]->calcDerivative(derivs, fcoords)*u[coordIndices[i][k]];
-                        }
-                    }
-                }
-                //default behavior of constant function should take a Vector of length 0
-                spatialCoords(i) = functions[i]->calcValue(fcoords);
-            }
-
-            Rotation R_F1 = Rotation(spatialCoords(0), UnitVec3::getAs(&Arot(0,0)));
-            Rotation R_F2 = R_F1*Rotation(spatialCoords(1), UnitVec3::getAs(&Arot(0,1)));
-
-            Mat33 W(UnitVec3::getAs(&Arot(0,0)), R_F1*(UnitVec3::getAs(&Arot(0,1))), R_F2*(UnitVec3::getAs(&Arot(0,2))));
-
-            // Hdot_theta = [Wdot]*[Fq] + [W][Fqdot]
-            // Hdot_x = [A]*[Fqdot]
-            Real *up = &u[0];
-            Vec<N> uv = Vec<N>::getAs(up);
-            Vec<N> uv1 = uv;
-            Vec<N> uv2 = uv;
-            
-            for(int i=1; i < N; i++){
-                uv1(i) = 0;
-            }
-            if(N > 2)
-                uv2(2) = 0;
-
-            // Spatial velocity
-            SpatialVec V = h*uv;
-            SpatialVec V1 = h*uv1;
-            SpatialVec V2 = h*uv2;
-            // First V[0] is angular velocity, omega
-            //Mat33 Wdot(Vec3(0), Vec3(V[0](0),0,0)%(Vec3::getAs(&W(0,1))), Vec3(V[0](0),V[0](1),0)%(Vec3::getAs(&W(0,2))));
-            Mat33 Wdot(Vec3(0), V1[0]%(Vec3::getAs(&W(0,1))), V2[0]%(Vec3::getAs(&W(0,2))));
-            
-            //Sanity check Omega == V[0]
-            Mat31 Omega = W*(Fq.template getSubMat<3,N>(0,0))*(Mat<N,1>::getAs(up));
-
-            Mat31 temp;
-            for(int i=0; i < N; i++){
-                temp = Wdot*(Fq.template getSubMat<3,1>(0,i))+W*(Fqdot.template getSubMat<3,1>(0,i));
-                hdot(0,i) = Vec3::getAs(&temp(0,0));
-                temp = Atrans*(Fqdot.template getSubMat<3,1>(3,i));
-                hdot(1,i) = Vec3::getAs(&temp(0,0));
-            }
+        // This uses the spatial coordinates and Fq from buildH(), which are
+        // computed at every realization of Stage::Position (the H cache is
+        // invalidated after the RigidBodyNode computes H), so they are
+        // current at Stage::Velocity. It must not revalidate the H cache.
+        void buildHdot(const FunctionBasedImpl& impl, const Real* q,
+                       const Real* u) {
+            impl.kernel.calcHDot(spatialCoords, Fq, impl.calcFqDot<N>(q, u),
+                                 Vec<N>::getAs(u), hdot);
         }
-
         Mat<2,N,Vec3> h, hdot;
+        Vec6 spatialCoords;
         Mat<6,N> Fq;
         bool isValidH;
         bool isValidHdot;

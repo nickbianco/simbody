@@ -31,7 +31,9 @@
 
 #include "MobilizedBodyImpl.h"
 #include "SimbodyMatterSubsystemRep.h"
-class RigidBodyNode;
+#include "simbody/internal/tree/RigidBodyNodeFactory.h"
+#include "simbody/internal/tree/ConstraintEquations.h"
+#include "ConstraintImpl.h"
 
 #include <string>
 #include <iostream>
@@ -55,6 +57,20 @@ SimbodyMatterSubsystem::updDowncast(Subsystem& s) {
     assert(isInstanceOf(s));
     return static_cast<SimbodyMatterSubsystem&>(s);
 }
+
+//==============================================================================
+//                         OTHER SCALAR TYPES
+//==============================================================================
+// See SimbodyMatterSubsystemRep, which has the private data these need.
+bool SimbodyMatterSubsystem::isOwnerOf(const State& state) const
+{   return getRep().isOwnerOf(state); }
+void SimbodyMatterSubsystem::
+createRigidBodyNodes(RigidBodyNodeFactory& factory, const State& state) const
+{   getRep().createRigidBodyNodes(factory, state); }
+void SimbodyMatterSubsystem::
+calcConstraintDescriptions(const State& state,
+                           std::vector<ConstraintDescription>& out) const
+{   getRep().calcConstraintDescriptions(state, out); }
 
 const SimbodyMatterSubsystemRep& 
 SimbodyMatterSubsystem::getRep() const {

@@ -170,11 +170,11 @@ Rotation_& setRotationFromAngleAboutAxis(RealP angle, const CoordinateAxis& axis
 /** Constructor for right-handed rotation by an angle (in radians) about the 
 X-axis. **/
 Rotation_( RealP angle, const CoordinateAxis::XCoordinateAxis )  
-{ setRotationFromAngleAboutX( std::cos(angle), std::sin(angle) ); }
+{ setRotationFromAngleAboutX( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle (in 
 radians) about the X-axis. **/
 Rotation_&  setRotationFromAngleAboutX( RealP angle )  
-{ return setRotationFromAngleAboutX( std::cos(angle), std::sin(angle) ); }
+{ return setRotationFromAngleAboutX( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle about the
 X-axis, where the cosine and sine of the angle are specified. **/
 Rotation_&  setRotationFromAngleAboutX( RealP cosAngle, RealP sinAngle )  
@@ -185,11 +185,11 @@ Rotation_&  setRotationFromAngleAboutX( RealP cosAngle, RealP sinAngle )
 /** Constructor for right-handed rotation by an angle (in radians) about the 
 Y-axis. **/
 Rotation_( RealP angle, const CoordinateAxis::YCoordinateAxis )  
-{ setRotationFromAngleAboutY( std::cos(angle), std::sin(angle) ); }
+{ setRotationFromAngleAboutY( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle (in 
 radians) about the Y-axis. **/
 Rotation_&  setRotationFromAngleAboutY( RealP angle )  
-{ return setRotationFromAngleAboutY( std::cos(angle), std::sin(angle) ); }
+{ return setRotationFromAngleAboutY( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle about the
 Y-axis, where the cosine and sine of the angle are specified. **/
 Rotation_&  setRotationFromAngleAboutY( RealP cosAngle, RealP sinAngle )  
@@ -200,11 +200,11 @@ Rotation_&  setRotationFromAngleAboutY( RealP cosAngle, RealP sinAngle )
 /** Constructor for right-handed rotation by an angle (in radians) about the 
 Z-axis. **/
 Rotation_( RealP angle, const CoordinateAxis::ZCoordinateAxis )  
-{ setRotationFromAngleAboutZ( std::cos(angle), std::sin(angle) ); }
+{ setRotationFromAngleAboutZ( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle (in 
 radians) about the Z-axis. **/
 Rotation_&  setRotationFromAngleAboutZ( RealP angle )  
-{ return setRotationFromAngleAboutZ( std::cos(angle), std::sin(angle) ); }
+{ return setRotationFromAngleAboutZ( cos(angle), sin(angle) ); }
 /** Set this Rotation_ object to a right-handed rotation by an angle about the
 Z-axis, where the cosine and sine of the angle are specified. **/
 Rotation_&  setRotationFromAngleAboutZ( RealP cosAngle, RealP sinAngle )  
@@ -530,8 +530,8 @@ static Mat33P calcNForBodyXYZInBodyFrame(const Vec3P& q) {
     // Note: q[0] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return calcNForBodyXYZInBodyFrame
-        (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-        Vec3P(0, std::sin(q[1]), std::sin(q[2])));
+        (Vec3P(0, cos(q[1]), cos(q[2])),
+        Vec3P(0, sin(q[1]), sin(q[2])));
 }
 
 /** This faster version of calcNForBodyXYZInBodyFrame() assumes you have 
@@ -564,8 +564,8 @@ static Mat33P calcNForBodyXYZInParentFrame(const Vec3P& q) {
     // Note: q[2] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return calcNForBodyXYZInParentFrame
-        (Vec3P(std::cos(q[0]), std::cos(q[1]), 0),
-        Vec3P(std::sin(q[0]), std::sin(q[1]), 0));
+        (Vec3P(cos(q[0]), cos(q[1]), 0),
+        Vec3P(sin(q[0]), sin(q[1]), 0));
 }
 
 /** This faster version of calcNForBodyXYZInParentFrame() assumes you have 
@@ -599,8 +599,8 @@ static Mat33P calcNDotForBodyXYZInBodyFrame
     // Note: q[0] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return calcNDotForBodyXYZInBodyFrame
-        (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-        Vec3P(0, std::sin(q[1]), std::sin(q[2])),
+        (Vec3P(0, cos(q[1]), cos(q[2])),
+        Vec3P(0, sin(q[1]), sin(q[2])),
         qdot);
 }
 
@@ -639,10 +639,10 @@ static Mat33P calcNDotForBodyXYZInParentFrame
    (const Vec3P& q, const Vec3P& qdot) {
     // Note: q[2] is not referenced so we won't waste time calculating
     // its cosine and sine here.
-    const RealP cy = std::cos(q[1]); // cos(y)
+    const RealP cy = cos(q[1]); // cos(y)
     return calcNDotForBodyXYZInParentFrame
-        (Vec2P(std::cos(q[0]), cy), 
-        Vec2P(std::sin(q[0]), std::sin(q[1])),
+        (Vec2P(cos(q[0]), cy), 
+        Vec2P(sin(q[0]), sin(q[1])),
         1/cy, qdot);
 }
 
@@ -676,8 +676,8 @@ static Mat33P calcNInvForBodyXYZInBodyFrame(const Vec3P& q) {
     // Note: q[0] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return calcNInvForBodyXYZInBodyFrame
-       (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-        Vec3P(0, std::sin(q[1]), std::sin(q[2])));
+       (Vec3P(0, cos(q[1]), cos(q[2])),
+        Vec3P(0, sin(q[1]), sin(q[2])));
 }
 
 /** This faster version of calcNInvForBodyXYZInBodyFrame() assumes you have
@@ -705,8 +705,8 @@ static Mat33P calcNInvForBodyXYZInParentFrame(const Vec3P& q) {
     // Note: q[0] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return calcNInvForBodyXYZInParentFrame
-       (Vec3P(std::cos(q[0]), std::cos(q[1]), 0),
-        Vec3P(std::sin(q[0]), std::sin(q[1]), 0));
+       (Vec3P(cos(q[0]), cos(q[1]), 0),
+        Vec3P(sin(q[0]), sin(q[1]), 0));
 }
 
 /** This faster version of calcNInvForBodyXYZInParentFrame() assumes you have 
@@ -867,8 +867,8 @@ angular velocity vector of B in the parent frame, *BUT EXPRESSED IN THE BODY
 FRAME*, return the Euler angle derivatives. You are dead if q[1] gets near 
 90 degrees! See Kane's Spacecraft Dynamics, page 428, body-three: 3-2-1. **/
 static Vec3P convertAngVelToBodyFixed321Dot(const Vec3P& q, const Vec3P& w_PB_B) {
-    const RealP s1 = std::sin(q[1]), c1 = std::cos(q[1]);
-    const RealP s2 = std::sin(q[2]), c2 = std::cos(q[2]);
+    const RealP s1 = sin(q[1]), c1 = cos(q[1]);
+    const RealP s2 = sin(q[2]), c2 = cos(q[2]);
     const RealP ooc1 = RealP(1)/c1;
     const RealP s2oc1 = s2*ooc1, c2oc1 = c2*ooc1;
 
@@ -881,8 +881,8 @@ static Vec3P convertAngVelToBodyFixed321Dot(const Vec3P& q, const Vec3P& w_PB_B)
 /** Inverse of convertAngVelToBodyFixed321Dot. Returned angular velocity is B in
 P, expressed in *B*: w_PB_B. **/
 static Vec3P convertBodyFixed321DotToAngVel(const Vec3P& q, const Vec3P& qd) {
-    const RealP s1 = std::sin(q[1]), c1 = std::cos(q[1]);
-    const RealP s2 = std::sin(q[2]), c2 = std::cos(q[2]);
+    const RealP s1 = sin(q[1]), c1 = cos(q[1]);
+    const RealP s2 = sin(q[2]), c2 = cos(q[2]);
 
     const Mat33P Einv(  -s1  ,  0  ,  1 ,
                         c1*s2 ,  c2 ,  0 ,
@@ -898,8 +898,8 @@ static Vec3P convertBodyFixed321DotToAngVel(const Vec3P& q, const Vec3P& qd) {
 static Vec3P convertAngVelDotToBodyFixed321DotDot
     (const Vec3P& q, const Vec3P& w_PB_B, const Vec3P& wdot_PB_B)
 {
-    const RealP s1 = std::sin(q[1]), c1 = std::cos(q[1]);
-    const RealP s2 = std::sin(q[2]), c2 = std::cos(q[2]);
+    const RealP s1 = sin(q[1]), c1 = cos(q[1]);
+    const RealP s2 = sin(q[2]), c2 = cos(q[2]);
     const RealP ooc1  = 1/c1;
     const RealP s2oc1 = s2*ooc1, c2oc1 = c2*ooc1, s1oc1 = s1*ooc1;
 
@@ -930,8 +930,8 @@ derivatives. You are dead if q[1] gets near 90 degrees!
 static Vec3P convertAngVelInBodyFrameToBodyXYZDot
     (const Vec3P& q, const Vec3P& w_PB_B) {  
     return convertAngVelInBodyFrameToBodyXYZDot
-        (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-        Vec3P(0, std::sin(q[1]), std::sin(q[2])),
+        (Vec3P(0, cos(q[1]), cos(q[2])),
+        Vec3P(0, sin(q[1]), sin(q[2])),
         w_PB_B); 
 }
 
@@ -953,8 +953,8 @@ expressed in *B*: w_PB_B.
 static Vec3P convertBodyXYZDotToAngVelInBodyFrame
    (const Vec3P& q, const Vec3P& qdot) {   
         return convertBodyXYZDotToAngVelInBodyFrame
-                   (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-                    Vec3P(0, std::sin(q[1]), std::sin(q[2])),
+                   (Vec3P(0, cos(q[1]), cos(q[2])),
+                    Vec3P(0, sin(q[1]), sin(q[2])),
                     qdot); 
 }
 
@@ -980,8 +980,8 @@ static Vec3P convertAngVelDotInBodyFrameToBodyXYZDotDot
     // Note: q[0] is not referenced so we won't waste time calculating
     // its cosine and sine here.
     return convertAngVelDotInBodyFrameToBodyXYZDotDot
-               (Vec3P(0, std::cos(q[1]), std::cos(q[2])),
-                Vec3P(0, std::sin(q[1]), std::sin(q[2])),
+               (Vec3P(0, cos(q[1]), cos(q[2])),
+                Vec3P(0, sin(q[1]), sin(q[2])),
                 w_PB_B, wdot_PB_B);
 }
 
@@ -1097,7 +1097,7 @@ elements in "R". **/
 RealP getMaxAbsDifferenceInRotationElements( const Rotation_& R ) const {            
     const Mat33P& A=asMat33(); const Mat33P& B=R.asMat33(); RealP maxDiff=0;  
     for( int i=0;  i<=2; i++ ) for( int j=0; j<=2; j++ ) {
-        const RealP absDiff = std::abs(A[i][j] - B[i][j]);  
+        const RealP absDiff = NTraits<P>::abs(A[i][j] - B[i][j]);
         if( absDiff > maxDiff ) maxDiff = absDiff; 
     }
     return maxDiff; 
@@ -1484,6 +1484,331 @@ operator/( const InverseRotation_<P>& R1, const InverseRotation_<P>& R2 )
 
 
 //------------------------------------------------------------------------------
+// Use sneaky tricks from Featherstone to rotate a symmetric dyadic
+// matrix. Consider the current Rotation matrix to be R_AB. We want
+// to return S_AA=R_AB*S_BB*R_BA. Would be 90 flops for 3x3s, 75
+// since we only need six elements in final result. Here we'll get
+// it done in 57 flops.
+// Consider S=[ a d e ]
+//            [ d b f ]
+//            [ e f c ]
+//
+// First, factor S into S=L+D+vx with v=~[-f e 0] (x means cross 
+// product matrix):
+//        [a-c   d   0]     [c 0 0]       [ 0  0  e]
+//    L = [ d   b-c  0] D = [0 c 0]  vx = [ 0  0  f]
+//        [2e   2f   0]     [0 0 c]       [-e -f  0]
+// (4 flops to calculate L)
+//
+// A cross product matrix identity says R*vx*~R=(R*v)x, so:
+//    S'=R*S*~R = R*L*~R + D + (R*v)x. 
+// Let Y'=R*L, Z=Y'*~R. We only need the lower triangle of Z and a 
+// 2x2 square of Y'.
+//
+// Don't-care's below are marked "-". Reminder: square bracket [i]
+// index of a matrix means "row i", round bracket (j) means "col j".
+//
+//        [  -   -  0 ]
+//   Y' = [ Y00 Y01 0 ]   Y = [ R[1]*L(0)  R[1]*L(1) ]  20 flops
+//        [ Y10 Y11 0 ]       [ R[2]*L(0)  R[2]*L(1) ]
+//
+//   Z = [   Z00           -           -      ]
+//       [ Y[0]*~R[0]  Y[0]*~R[1]      -      ]   15 flops (use only 2
+//       [ Y[1]*~R[0]  Y[1]*~R[1]  Y[1]*~R[2] ]   elements of R's rows)
+//
+//   Z00 = (L00+L11)-(Z11+Z22)  3 flops ( because rotation preserves trace)
+//
+//        [R01*e-R00*f]            [  0       -    -  ]
+//   R*v =[R11*e-R10*f]   (R*v)x = [ Rv[2]    0    -  ]
+//        [R21*e-R20*f]            [-Rv[1]  Rv[0]  0  ]
+// (R*v is 9 flops)
+//
+//        [  Z00 + c          -           -    ]
+//   S' = [ Z10 + Rv[2]   Z11 + c         -    ]
+//        [ Z20 - Rv[1]  Z21 + Rv[0]   Z22 + c ]
+//
+// which takes 6 more flops. Total 6+9Rv+18Z+20Y+4L=57.
+//
+// (I actually looked at the generated code in VC++ 2005 and Intel C++
+//  version 11.1 and counted exactly 57 inline flops.)
+//
+// NOTE: there are two implementations of this routine that have
+// to be kept in sync -- this one and the identical one for 
+// InverseRotation right below.
+//------------------------------------------------------------------------------
+template <class P> inline SymMat<3,P>
+Rotation_<P>::reexpressSymMat33(const SymMat33P& S_BB) const {
+    const RealP a=S_BB(0,0), b=S_BB(1,1), c=S_BB(2,2);
+    const RealP d=S_BB(1,0), e=S_BB(2,0), f=S_BB(2,1);
+    const Mat33P& R   = this->asMat33();
+    const Mat32P& RR  = R.template getSubMat<3,2>(0,0); //first two columns of R
+
+    const Mat32P L( a-c ,  d,
+                     d  , b-c,
+                    2*e , 2*f );
+
+    const Mat22P Y( R[1]*L(0), R[1]*L(1),
+                    R[2]*L(0), R[2]*L(1) );
+
+    const RealP Z10 = Y[0]*~RR[0], Z11 = Y[0]*~RR[1],
+                Z20 = Y[1]*~RR[0], Z21 = Y[1]*~RR[1], Z22= Y[1]*~RR[2];
+    const RealP Z00 = (L(0,0)+L(1,1)) - (Z11+Z22);
+
+    const Vec3P Rv( R(0,1)*e-R(0,0)*f,
+                    R(1,1)*e-R(1,0)*f,
+                    R(2,1)*e-R(2,0)*f );
+
+    return SymMat33P( Z00 + c,
+                      Z10 + Rv[2], Z11 + c,
+                      Z20 - Rv[1], Z21 + Rv[0], Z22 + c );
+}
+
+// See above method for details. This method is identical except that
+// the layout of the matrix used to store the rotation matrix has
+// changed. Note that all the indexing here is identical to the normal
+// case above; but the rotation matrix elements are drawn from different
+// memory locations so that the net effect is to use the transpose of
+// the original rotation from which this was created.
+template <class P> inline SymMat<3,P>
+InverseRotation_<P>::reexpressSymMat33(const SymMat<3,P>& S_BB) const {
+    const P a=S_BB(0,0), b=S_BB(1,1), c=S_BB(2,2);
+    const P d=S_BB(1,0), e=S_BB(2,0), f=S_BB(2,1);
+    // Note reversal of row and column spacing here (normal is 3,1).
+    const Mat<3,3,P,1,3>& R   = this->asMat33();
+    // RR is just the first two columns of R.
+    const Mat<3,2,P,1,3>& RR  = R.template getSubMat<3,2>(0,0);
+
+    const Mat32P L( a-c ,  d,
+                     d  , b-c,
+                    2*e , 2*f );
+
+    const Mat22P Y( R[1]*L(0), R[1]*L(1),
+                    R[2]*L(0), R[2]*L(1) );
+
+    const P Z10 = Y[0]*~RR[0], Z11 = Y[0]*~RR[1],
+            Z20 = Y[1]*~RR[0], Z21 = Y[1]*~RR[1], Z22= Y[1]*~RR[2];
+    const P Z00 = (L(0,0)+L(1,1)) - (Z11+Z22);
+
+    const Vec3P Rv( R(0,1)*e-R(0,0)*f,
+                    R(1,1)*e-R(1,0)*f,
+                    R(2,1)*e-R(2,0)*f );
+
+    return SymMat<3,P>( Z00 + c,
+                      Z10 + Rv[2], Z11 + c,
+                      Z20 - Rv[1], Z21 + Rv[0], Z22 + c );
+}
+
+//------------------------------------------------------------------------------
+// The methods that set a rotation from a sequence of angles, defined here
+// (rather than in Rotation.cpp) so that they are available for any scalar
+// type. Their branches depend only on the axes.
+
+//------------------------------------------------------------------------------
+// Set Rotation for ANY two-angle ij rotation sequence (i,j = X,Y,Z)
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setRotationFromTwoAnglesTwoAxes
+  ( BodyOrSpaceType bodyOrSpace, 
+    RealP angle1, const CoordinateAxis& axis1In, 
+    RealP angle2, const CoordinateAxis& axis2In )  
+{
+    // Non-const CoordinateAxes in case we have to switch axes
+    CoordinateAxis axis1 = axis1In;
+    CoordinateAxis axis2 = axis2In;
+
+    // If axis2 is same as axis1, efficiently calculate with a one-angle, 
+    // one-axis rotation.
+    if( axis1.isSameAxis(axis2) ) 
+    { return setRotationFromAngleAboutAxis( angle1+angle2, axis1 ); }
+
+    // If using a SpaceRotationSequence, switch order of axes and angles.
+    if( bodyOrSpace == SpaceRotationSequence )  
+    { std::swap(angle1,angle2);  std::swap(axis1,axis2); }
+
+    // If using a reverse cyclical, negate the signs of the angles
+    if( axis1.isReverseCyclical(axis2) )  
+    { angle1 = -angle1; angle2 = -angle2; }
+
+    // Calculate the sines and cosines (some hardware can do this more 
+    // efficiently as one Taylor series).
+    const RealP c1 = cos( angle1 ),  s1 = sin( angle1 );
+    const RealP c2 = cos( angle2 ),  s2 = sin( angle2 );
+
+    // All calculations are based on a body-fixed forward-cyclical rotation 
+    // sequence.
+    return setTwoAngleTwoAxesBodyFixedForwardCyclicalRotation( c1,s1,axis1,  
+                                                               c2,s2,axis2 );
+}
+
+//------------------------------------------------------------------------------
+// Set Rotation for ANY three-angle ijk rotation sequence where (i,j,k = X,Y,Z)
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setRotationFromThreeAnglesThreeAxes
+  ( BodyOrSpaceType bodyOrSpace, 
+    RealP angle1, const CoordinateAxis& axis1In, 
+    RealP angle2, const CoordinateAxis& axis2, 
+    RealP angle3, const CoordinateAxis& axis3In ) {
+
+    // Non-const CoordinateAxes in case we have to switch axes.
+    CoordinateAxis axis1 = axis1In;
+    CoordinateAxis axis3 = axis3In;
+
+    // If axis2 is same as axis1 or axis3, efficiently calculate with a 
+    // two-angle, two-axis rotation.
+    if( axis2.isSameAxis(axis1) ) 
+        return setRotationFromTwoAnglesTwoAxes(bodyOrSpace, angle1+angle2, 
+                                               axis1,  angle3,axis3);
+    if( axis2.isSameAxis(axis3) ) 
+        return setRotationFromTwoAnglesTwoAxes(bodyOrSpace, angle1,axis1,  
+                                               angle2+angle3, axis3);
+
+    // If using a SpaceRotationSequence, switch order of the axes and angles.
+    if( bodyOrSpace == SpaceRotationSequence )  
+    { std::swap(angle1,angle3);  std::swap(axis1,axis3); }
+
+    // If using a reverse cyclical, negate the signs of the angles.
+    if( axis1.isReverseCyclical(axis2) )  
+    { angle1 = -angle1;   angle2 = -angle2;   angle3 = -angle3; }
+
+    // Calculate the sines and cosines (some hardware can do this more 
+    // efficiently as one Taylor series).
+    const RealP c1 = cos( angle1 ),  s1 = sin( angle1 );
+    const RealP c2 = cos( angle2 ),  s2 = sin( angle2 );
+    const RealP c3 = cos( angle3 ),  s3 = sin( angle3 );
+
+    // All calculations are based on a body-fixed rotation sequence.
+    // Determine whether this is a BodyXYX or BodyXYZ type of rotation sequence.
+    if( axis1.isSameAxis(axis3) )  
+        setThreeAngleTwoAxesBodyFixedForwardCyclicalRotation
+                                        (c1,s1,axis1, c2,s2,axis2, c3,s3);
+    else                           
+        setThreeAngleThreeAxesBodyFixedForwardCyclicalRotation
+                                        (c1,s1,axis1, c2,s2,axis2, c3,s3,axis3);
+
+    return *this;
+}
+
+//------------------------------------------------------------------------------
+// Set Rotation ONLY for two-angle, two-axes, body-fixed, ij rotation sequence 
+// where i != j.
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setTwoAngleTwoAxesBodyFixedForwardCyclicalRotation
+  ( RealP cosAngle1, RealP sinAngle1, const CoordinateAxis& axis1, 
+    RealP cosAngle2, RealP sinAngle2, const CoordinateAxis& axis2 ) 
+{
+    // Ensure this method has proper arguments
+    assert( axis1.isDifferentAxis( axis2 ) );
+
+    CoordinateAxis axis3 = axis1.getThirdAxis( axis2 );
+    const int i = int( axis1 );
+    const int j = int( axis2 );
+    const int k = int( axis3 );
+
+    Mat33P& R = *this;
+    R[i][i] =  cosAngle2;
+    R[i][j] =  0;
+    R[i][k] =  sinAngle2;
+    R[j][i] =  sinAngle2 * sinAngle1;
+    R[j][j] =  cosAngle1;
+    R[j][k] = -sinAngle1 * cosAngle2;
+    R[k][i] = -sinAngle2 * cosAngle1;
+    R[k][j] =  sinAngle1;
+    R[k][k] =  cosAngle1 * cosAngle2;
+    return *this;
+}
+
+//------------------------------------------------------------------------------
+// Set Rotation ONLY for three-angle, two-axes, body-fixed, iji rotation 
+// sequence where i != j.
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setThreeAngleTwoAxesBodyFixedForwardCyclicalRotation
+  ( RealP cosAngle1, RealP sinAngle1, const CoordinateAxis& axis1, 
+    RealP cosAngle2, RealP sinAngle2, const CoordinateAxis& axis2, 
+    RealP cosAngle3, RealP sinAngle3 )  
+{
+    // Ensure this method has proper arguments
+    assert( axis1.isDifferentAxis( axis2 ) );
+
+    // Repeated calculations (for efficiency)
+    RealP s1c3 = sinAngle1 * cosAngle3;
+    RealP s3c1 = sinAngle3 * cosAngle1;
+    RealP s1s3 = sinAngle1 * sinAngle3;
+    RealP c1c3 = cosAngle1 * cosAngle3;
+
+    CoordinateAxis axis3 = axis1.getThirdAxis( axis2 );
+    const int i = int( axis1 );
+    const int j = int( axis2 );
+    const int k = int( axis3 );
+
+    Mat33P& R =  *this;
+    R[i][i] =  cosAngle2;
+    R[i][j] =  sinAngle2 * sinAngle3;
+    R[i][k] =  sinAngle2 * cosAngle3;
+    R[j][i] =  sinAngle1 * sinAngle2;
+    R[j][j] =  c1c3 - cosAngle2 * s1s3;
+    R[j][k] = -s3c1 - cosAngle2 * s1c3;
+    R[k][i] = -sinAngle2 * cosAngle1;
+    R[k][j] =  s1c3 + cosAngle2 * s3c1;
+    R[k][k] = -s1s3 + cosAngle2 * c1c3;
+    return *this;
+}
+
+//------------------------------------------------------------------------------
+// Set Rotation ONLY for three-angle, three-axes, body-fixed, ijk rotation 
+// sequence where i != j != k.
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setThreeAngleThreeAxesBodyFixedForwardCyclicalRotation
+  ( RealP cosAngle1, RealP sinAngle1, const CoordinateAxis& axis1, 
+    RealP cosAngle2, RealP sinAngle2, const CoordinateAxis& axis2,
+    RealP cosAngle3, RealP sinAngle3, const CoordinateAxis& axis3 ) 
+{
+    // Ensure this method has proper arguments
+    assert( axis1.areAllDifferentAxes(axis2,axis3) );
+
+    // Repeated calculations (for efficiency)
+    RealP s1c3 = sinAngle1 * cosAngle3;
+    RealP s3c1 = sinAngle3 * cosAngle1;
+    RealP s1s3 = sinAngle1 * sinAngle3;
+    RealP c1c3 = cosAngle1 * cosAngle3;
+
+    const int i = int(axis1);
+    const int j = int(axis2);
+    const int k = int(axis3);
+
+    Mat33P& R = *this;
+    R[i][i] =  cosAngle2 * cosAngle3;
+    R[i][j] = -sinAngle3 * cosAngle2;
+    R[i][k] =  sinAngle2;
+    R[j][i] =  s3c1 + sinAngle2 * s1c3;
+    R[j][j] =  c1c3 - sinAngle2 * s1s3;
+    R[j][k] = -sinAngle1 * cosAngle2;
+    R[k][i] =  s1s3 - sinAngle2 * c1c3;
+    R[k][j] =  s1c3 + sinAngle2 * s3c1;
+    R[k][k] =  cosAngle1 * cosAngle2;
+    return *this;
+}
+
+// Defined here so that it is available for any scalar type.
+//------------------------------------------------------------------------------
+// Set this rotation matrix from the associated quaternion. (29 flops)
+//------------------------------------------------------------------------------
+template <class P> inline Rotation_<P>&
+Rotation_<P>::setRotationFromQuaternion( const Quaternion_<P>& q )  {
+    const RealP q00=q[0]*q[0], q11=q[1]*q[1], q22=q[2]*q[2], q33=q[3]*q[3];
+    const RealP q01=q[0]*q[1], q02=q[0]*q[2], q03=q[0]*q[3];
+    const RealP q12=q[1]*q[2], q13=q[1]*q[3], q23=q[2]*q[3];
+    const RealP q00mq11 = q00-q11, q22mq33 = q22-q33;
+
+    Mat33P::operator=(Mat33P(q00+q11-q22-q33,  2*(q12-q03)  ,  2*(q13+q02),
+                               2*(q12+q03)  ,q00mq11+q22mq33,  2*(q23-q01),
+                               2*(q13-q02)  ,  2*(q23+q01)  ,q00mq11-q22mq33));
+    return *this;
+}
+
 }  // End of namespace SimTK
 
 #endif // SimTK_SimTKCOMMON_ROTATION_H_
